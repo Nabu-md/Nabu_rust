@@ -34,15 +34,9 @@ Nemo's desktop client core is entirely open-source. Developers can fully audit h
 
 ## 🚀 Getting Started
 
-1. Download the latest macOS release.
+1. [Download the latest DMG from nemo.app](https://nemo.app).
 2. Run the Setup Wizard to point Nemo to an existing Markdown folder or your project repository.
 3. Drop an interactive HTML snippet into any note and watch your workspace come alive.
-
-### Via Homebrew (recommended for developers)
-
-```bash
-brew install --cask nemo
-```
 
 ### From source
 
