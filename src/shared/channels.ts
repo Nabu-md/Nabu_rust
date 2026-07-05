@@ -25,5 +25,6 @@ export enum IPCChannel {
   TEMPLATES_LIST = 'templates:list',
   SETTINGS_GET = 'settings:get',
   SETTINGS_SET = 'settings:set',
-  INDEX_BUILD = 'index:build'
+  INDEX_BUILD = 'index:build',
+  ASSET_READ = 'asset:read'
 }

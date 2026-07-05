@@ -1,38 +1,47 @@
 /**
  * SandboxedHtml.tsx
  *
- * Renders user-authored HTML content inside a sandboxed iframe.
+ * Renders user-authored HTML content inside a sandboxed iframe with a
+ * postMessage bridge for safe communication with the host app.
  *
  * Security model:
- *   - iframe sandbox="allow-scripts" — scripts run, but the frame is in a
- *     null origin with no DOM access to the parent, no form submission, no
- *     popups, no top-level navigation, no same-origin access.
+ *   - sandbox="allow-scripts" — scripts run, but the frame sits in a null
+ *     origin with no DOM access to the parent, no form submission, no popups,
+ *     no top-level navigation.
  *   - No allow-same-origin — prevents the iframe from escaping the sandbox
  *     via Same-Origin Policy tricks.
  *   - No allow-forms — users can't submit data to arbitrary endpoints.
  *   - No allow-popups / allow-top-navigation — the iframe can't navigate away
  *     or open windows.
- *   - communication via window.postMessage — the iframe can call a safe,
- *     curated set of APIs defined in the parent listener.
+ *   - Communication via window.postMessage — the iframe calls a whitelisted
+ *     set of APIs defined by the parent message handler.
  *
- * Requirements: 12.1 (sandbox isolation), 12.2 (postMessage bridge)
+ * Requirements: 12.1, 12.2
+ *
+ * ponytail: height cap at 400px + internal scroll prevents notes from
+ *           hijacking the viewport. Full-screen button for dense dashboards.
+ *           Asset bridge uses postMessage → IPC → base64 data URI so the
+ *           null-origin iframe can render local images.
  */
 
-import { useRef, useMemo, useEffect, useCallback } from 'react'
+import { useRef, useMemo, useEffect, useCallback, useState } from 'react'
 
 export interface SandboxedHtmlProps {
   /** Raw HTML content to render */
   html: string
-  /** Optional max height before scroll. Defaults to 400px. */
+  /** Max height in px before internal scroll. Default 400. */
   maxHeight?: number
-  /** Optional className for the wrapper */
+  /** Optional class name for the wrapper. */
   className?: string
 }
 
-// Safe API surface exposed to sandboxed iframes via postMessage
+// ── postMessage protocol ────────────────────────────────────────────────────
+
+type NemoApiMethod = 'readNote' | 'search' | 'getTheme' | 'getLocalAsset'
+
 type NemoApiRequest = {
   id: string
-  method: 'readNote' | 'search' | 'getTheme'
+  method: NemoApiMethod
   args?: unknown[]
 }
 
@@ -42,97 +51,167 @@ type NemoApiResponse = {
   error?: string
 }
 
+// ── Bridge script injected into every sandboxed document ────────────────────
+
+const BRIDGE_SCRIPT = `
+<script>
+(function() {
+  if (window.__nemoBridge) return;
+  window.__nemoBridge = true;
+
+  var pending = {};
+  var nextId = 0;
+
+  function call(method) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    var id = ++nextId;
+    return new Promise(function (resolve, reject) {
+      pending[id] = { resolve: resolve, reject: reject };
+      parent.postMessage({ id: id, method: method, args: args }, '*');
+    });
+  }
+
+  window.nemo = {
+    readNote:     function (p) { return call('readNote', p); },
+    search:       function (q) { return call('search', q); },
+    getTheme:     function ()  { return call('getTheme'); },
+    getLocalAsset:function (p) { return call('getLocalAsset', p); },
+  };
+
+  parent.postMessage({ type: 'nemo-ready' }, '*');
+})();
+</script>`
+
+// ── Internal styles injected into every sandboxed document ──────────────────
+
+const INTERNAL_STYLES = `
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html { height: 100%; }
+  body {
+    margin: 0;
+    padding: 8px;
+    overflow-y: auto;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                 Oxygen, Ubuntu, Cantarell, sans-serif;
+    line-height: 1.5;
+    color-scheme: light dark;
+  }
+  img { max-width: 100%; height: auto; }
+  pre { overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+</style>`
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+const BODY_RE = /<body[^>]*>([\s\S]*)<\/body>/i
+const HTML_RE = /<html[\s\S]*<\/html>/i
+
+/** Inject the bridge + styles into an HTML document string. */
+function injectProxies(doc: string): string {
+  let result = doc
+  // Inject before </head>
+  if (/<\/head>/i.test(result)) {
+    result = result.replace(/<\/head>/i, BRIDGE_SCRIPT + '\n' + INTERNAL_STYLES + '\n</head>')
+  } else {
+    // No head tag — prepend both
+    result = BRIDGE_SCRIPT + '\n' + INTERNAL_STYLES + '\n' + result
+  }
+  return result
+}
+
+/** Wrap a content snippet in a minimal document with proxies. */
+function wrapDocument(content: string): string {
+  return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+${BRIDGE_SCRIPT}
+${INTERNAL_STYLES}
+</head>
+<body>${content}</body>
+</html>`
+}
+
+// ── Component ───────────────────────────────────────────────────────────────
+
 export function SandboxedHtml({
   html,
   maxHeight = 400,
   className = '',
 }: SandboxedHtmlProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const [expanded, setExpanded] = useState(false)
 
-  // Build the srcdoc: inject a small bridge script that exposes a safe
-  // `window.nemo` API using postMessage.
+  // Build the srcdoc with bridge + styles injected
   const srcdoc = useMemo(() => {
-    const bridgeScript = `
-<script>
-  // Secure bridge — exposes a controlled API to sandboxed HTML apps
-  window.nemo = {
-    _pending: {},
-    _id: 0,
-    _call(method, ...args) {
-      const id = ++this._id;
-      return new Promise((resolve, reject) => {
-        this._pending[id] = { resolve, reject };
-        parent.postMessage({ id, method, args }, '*');
-      });
-    },
-    readNote(path) { return this._call('readNote', path); },
-    search(query)  { return this._call('search', query); },
-    getTheme()     { return this._call('getTheme'); },
-  };
-  // Signal readiness
-  parent.postMessage({ type: 'nemo-ready' }, '*');
-</script>`
-    // Extract content between <body> tags if present, otherwise wrap the whole
-    // thing in a minimal document so scripts execute properly.
-    const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i)
-    const content = bodyMatch ? bodyMatch[1] : html
-
-    // If the user already provided a full document, inject the bridge before
-    // </head>. Otherwise wrap it in a minimal document.
-    if (/<html[\s\S]*<\/html>/i.test(html)) {
-      return html.replace('</head>', bridgeScript + '\n</head>')
+    if (HTML_RE.test(html)) {
+      return injectProxies(html)
     }
-
-    return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-  body {
-    margin: 0;
-    padding: 8px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  }
-</style>
-${bridgeScript}
-</head>
-<body>${content}</body>
-</html>`
+    const bodyMatch = html.match(BODY_RE)
+    const content = bodyMatch ? bodyMatch[1] : html
+    return wrapDocument(content)
   }, [html])
 
-  // Listen for postMessage from the iframe
+  // ── postMessage handler ─────────────────────────────────────────────────
+
   const handleMessage = useCallback((event: MessageEvent) => {
     const data = event.data as Record<string, unknown>
     if (!data || typeof data !== 'object') return
+    if (data.type === 'nemo-ready') return // just a signal, ignore
 
-    // Handle API calls from the sandboxed iframe
-    if (data.method === 'readNote' || data.method === 'search' || data.method === 'getTheme') {
-      const { id, method, args } = data as unknown as NemoApiRequest
+    if (typeof data.method !== 'string') return
 
-      // Forward to the Electron main process via IPC
-      const respond = (result: unknown, error?: string) => {
-        const response: NemoApiResponse = { id, result, error }
+    const { id, method, args } = data as unknown as NemoApiRequest
+    if (!id) return
+
+    const respond = (result: unknown, error?: string) => {
+      const response: NemoApiResponse = { id, result, error }
+      try {
         if (iframeRef.current?.contentWindow) {
           iframeRef.current.contentWindow.postMessage(response, '*')
         }
+      } catch {
+        // iframe gone — ignore
+      }
+    }
+
+    switch (method) {
+      case 'readNote':
+        respond(null, 'Not yet implemented')
+        break
+
+      case 'search':
+        respond(null, 'Not yet implemented')
+        break
+
+      case 'getTheme':
+        respond(document.documentElement.getAttribute('data-theme') ?? 'system')
+        break
+
+      case 'getLocalAsset': {
+        const assetPath = args?.[0] as string | undefined
+        if (!assetPath) {
+          respond(null, 'No path provided')
+          return
+        }
+        // Read the file via the Electron IPC bridge and return as a data URI
+        window.electron.file
+          .readAsset(assetPath)
+          .then((result: { dataUri?: string; error?: string }) => {
+            if (result.error) {
+              respond(null, result.error)
+            } else {
+              respond(result.dataUri)
+            }
+          })
+          .catch((err: Error) => respond(null, err.message))
+        break
       }
 
-      // Map to Electron IPC calls
-      switch (method) {
-        case 'readNote':
-          // TODO: Implement readNote API when the mini-app ecosystem requires it
-          respond(null, 'Not yet implemented')
-          break
-        case 'search':
-          // TODO: Implement search API
-          respond(null, 'Not yet implemented')
-          break
-        case 'getTheme':
-          // Return whether the app is in dark mode
-          respond(document.documentElement.getAttribute('data-theme') ?? 'system')
-          break
-      }
+      default:
+        // Ignore unknown methods — safety
+        break
     }
   }, [])
 
@@ -141,21 +220,41 @@ ${bridgeScript}
     return () => window.removeEventListener('message', handleMessage)
   }, [handleMessage])
 
-  // Auto-resize iframe to content height (within maxHeight bounds)
+  // ── Iframe auto-resize (capped unless expanded) ─────────────────────────
+
   const handleLoad = useCallback(() => {
     if (!iframeRef.current) return
     try {
-      const height = iframeRef.current.contentDocument?.documentElement?.scrollHeight
-      if (height && height > 0) {
-        iframeRef.current.style.height = `${Math.min(height, maxHeight)}px`
+      const body = iframeRef.current.contentDocument?.body
+      const docEl = iframeRef.current.contentDocument?.documentElement
+      const height = Math.max(
+        body?.scrollHeight ?? 0,
+        docEl?.scrollHeight ?? 0,
+      )
+      if (height > 0) {
+        const cap = expanded ? height : Math.min(height, maxHeight)
+        iframeRef.current.style.height = `${cap}px`
       }
     } catch {
-      // Cross-origin errors are expected if the iframe navigates — ignore
+      // Cross-origin errors expected for sandboxed iframes — ignore
     }
-  }, [maxHeight])
+  }, [maxHeight, expanded])
+
+  // Re-size when expanded changes
+  useEffect(() => {
+    handleLoad()
+  }, [expanded, handleLoad])
+
+  // ── Render ──────────────────────────────────────────────────────────────
+
+  const toggleExpanded = useCallback(() => setExpanded((v) => !v), [])
 
   return (
-    <div className={`nemo-sandbox-html my-3 rounded-lg overflow-hidden border border-white/10 ${className}`}>
+    <div
+      className={
+        `nemo-sandbox-html my-3 rounded-lg overflow-hidden border border-white/10 relative group ${className}`
+      }
+    >
       <iframe
         ref={iframeRef}
         sandbox="allow-scripts"
@@ -164,10 +263,23 @@ ${bridgeScript}
         className="w-full"
         style={{
           border: 'none',
-          height: '200px', // will be resized on load
+          height: `${Math.min(200, maxHeight)}px`,
         }}
         onLoad={handleLoad}
       />
+
+      {/* Expand / collapse button — visible on hover */}
+      <button
+        onClick={toggleExpanded}
+        className={
+          'absolute top-1 right-1 px-2 py-0.5 text-xs rounded ' +
+          'bg-white/10 hover:bg-white/20 text-white/60 hover:text-white/90 ' +
+          'opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer'
+        }
+        title={expanded ? 'Collapse' : 'Expand to full height'}
+      >
+        {expanded ? '▾ Collapse' : '▴ Expand'}
+      </button>
     </div>
   )
 }

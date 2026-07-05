@@ -44,6 +44,7 @@ import {
   NotesLoadedSchema,
   TemplatesListResultSchema,
   IndexBuildSchema,
+  AssetReadSchema,
 } from '../shared/schemas';
 
 import { loadSettings, saveSettings } from './settings';
@@ -230,6 +231,7 @@ export function registerIPCHandlers(
     IPCChannel.NOTE_GET_RAW,
     IPCChannel.NOTE_EXPORT_HTML,
     IPCChannel.TEMPLATES_LIST,
+    IPCChannel.ASSET_READ,
     'vault:get-current' as IPCChannel,
   ];
   for (const ch of channels) {
@@ -847,6 +849,49 @@ export function registerIPCHandlers(
       return { path: filePath, content };
     } catch (err) {
       const msg = `[IPC] note:get-raw handler error for "${filePath}": ${String(err)}`;
+      console.error(msg);
+      emitActivityLog('error', msg);
+      return { path: filePath, error: String(err) };
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // asset:read — read a file as a base64 data URI for sandboxed iframes
+  // -------------------------------------------------------------------------
+  ipcMain.handle(IPCChannel.ASSET_READ, async (_event, rawPayload) => {
+    const validation = AssetReadSchema.safeParse(rawPayload);
+    if (!validation.success) {
+      const reason = formatZodError(validation.error);
+      emitActivityLog('warn', `[IPC] asset:read validation failed: ${reason}`);
+      return { path: '', error: reason };
+    }
+
+    const { path: filePath } = validation.data;
+
+    try {
+      // Read the file as a Buffer so it works for both text and binary
+      const buffer = await fs.readFile(filePath);
+      const ext = path.extname(filePath).toLowerCase();
+      const mimeMap: Record<string, string> = {
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.svg': 'image/svg+xml',
+        '.webp': 'image/webp',
+        '.ico': 'image/x-icon',
+        '.css': 'text/css',
+        '.js': 'application/javascript',
+        '.json': 'application/json',
+        '.woff': 'font/woff',
+        '.woff2': 'font/woff2',
+        '.ttf': 'font/ttf',
+      };
+      const mime = mimeMap[ext] ?? 'application/octet-stream';
+      const dataUri = `data:${mime};base64,${buffer.toString('base64')}`;
+      return { path: filePath, dataUri };
+    } catch (err) {
+      const msg = `[IPC] asset:read handler error for "${filePath}": ${String(err)}`;
       console.error(msg);
       emitActivityLog('error', msg);
       return { path: filePath, error: String(err) };

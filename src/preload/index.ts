@@ -14,6 +14,8 @@ const electronAPI = {
   file: {
     get: (path: string): Promise<unknown> =>
       ipcRenderer.invoke(IPCChannel.FILE_GET, { path }),
+    readAsset: (path: string): Promise<unknown> =>
+      ipcRenderer.invoke(IPCChannel.ASSET_READ, { path }),
   },
   folder: {
     create: (path: string): Promise<unknown> =>

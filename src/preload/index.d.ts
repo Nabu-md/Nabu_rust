@@ -21,6 +21,7 @@ declare global {
       }
       file: {
         get(path: string): Promise<FileAST>
+        readAsset(path: string): Promise<{ path: string; dataUri?: string; error?: string }>
       }
       folder: {
         create(path: string): Promise<{ success: boolean; error?: string }>

@@ -269,3 +269,17 @@ export type SettingsGetResult = z.infer<typeof SettingsGetResultSchema>;
 export type SettingsSetPayload = z.infer<typeof SettingsSetSchema>;
 export type SettingsSetResult = z.infer<typeof SettingsSetResultSchema>;
 export type IndexBuild = z.infer<typeof IndexBuildSchema>;
+
+// asset:read (Sandboxed HTML → Main) — read a local file as base64 for the sandboxed iframe
+export const AssetReadSchema = z.object({
+  path: z.string()
+});
+
+export const AssetReadResultSchema = z.object({
+  path: z.string(),
+  dataUri: z.string().optional(),
+  error: z.string().optional()
+});
+
+export type AssetReadPayload = z.infer<typeof AssetReadSchema>;
+export type AssetReadResult = z.infer<typeof AssetReadResultSchema>;
