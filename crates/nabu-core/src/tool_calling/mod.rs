@@ -62,7 +62,7 @@
 //! // registry.register(Arc::new(MyTool)).await;
 //!
 //! // Discover available tools
-//! let specs = registry.specs().await;
+//! // let specs = registry.specs().await;
 //!
 //! // Call a tool
 //! // let result = registry.call(ToolCall::without_args("nabu:ping")).await;

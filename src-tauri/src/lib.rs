@@ -464,20 +464,20 @@ pub fn run() {
 
             // Start native messaging socket server. The tokio listener requires a
             // running reactor, so the server is started inside the Tauri async
-            // runtime rather than on the setup (main) thread.
+            // runtime. We block_on the startup so the handle is available before
+            // the setup closure returns, then register it as Tauri managed state
+            // so the Exit handler can shut it down gracefully.
             let socket_state = Arc::new(crate::native_messaging_socket::SocketServerState {
                 engine: engine.clone(),
             });
-            tauri::async_runtime::spawn(async move {
-                match crate::native_messaging_socket::start_socket_server(socket_state) {
-                    Ok(_handle) => {
-                        tracing::info!("Native messaging socket server started");
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "Failed to start native messaging socket server");
-                    }
-                }
-            });
+            let socket_handle: crate::native_messaging_socket::SocketServerHandleState = {
+                let state_clone = socket_state.clone();
+                tauri::async_runtime::block_on(async move {
+                    crate::native_messaging_socket::start_socket_server(state_clone)
+                        .map(|handle| crate::native_messaging_socket::SocketServerHandleState(Some(handle)))
+                })
+            };
+            app.manage(socket_handle);
 
             // Safety net: the main window starts hidden (visible: false) and is
             // shown by on_page_load once the webview finishes painting. If the
