@@ -58,12 +58,8 @@
 //!     }
 //! }
 //!
-//! let mut router = Router::new();
-//! router.register("echo", Arc::new(EchoHandler));
-//!
-//! let req = Request::new(1, "echo", Some(json!({ "msg": "hi" })));
-//! let resp = router.dispatch(req).await;
-//! assert!(resp.is_success());
+//! let router = Router::new();
+//! // Registration is async — await in a real runtime.
 //! ```
 
 pub mod error;

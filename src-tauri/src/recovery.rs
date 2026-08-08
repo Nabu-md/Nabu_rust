@@ -462,6 +462,10 @@ pub fn versions_get(
 
 /// Restores a snapshot over the live note. The current content is snapshotted
 /// first (so it is never lost) and an undoable history entry is pushed.
+///
+/// The restored content is written through the canonical [`StorageManager`]
+/// so that `ITEM_STORED` events propagate to the Indexer and VaultGraph,
+/// keeping search and graph indices consistent with the restored version.
 #[tauri::command]
 pub fn versions_restore(
     path: String,
@@ -480,15 +484,19 @@ pub fn versions_restore(
 
     let abs = resolve_in_vault(&vault, &path)?;
     let previous = std::fs::read_to_string(&abs).unwrap_or_default();
-    if let Some(parent) = abs.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-    }
-    std::fs::write(&abs, &version_content).map_err(|e| e.to_string())?;
 
-    let undo_abs = abs.clone();
-    let redo_abs = abs.clone();
+    // Route through the canonical StorageManager so ITEM_STORED events fire,
+    // keeping the Indexer and VaultGraph in sync with the restored content.
+    let manager = ctx
+        .storage_manager()
+        .ok_or_else(|| "StorageManager is not registered in the application context".to_string())?;
+
+    let _ = manager.save_note_content(&path, &version_content)?;
+
+    let undo_manager = manager.clone();
+    let redo_manager = manager.clone();
+    let undo_path = path.clone();
+    let redo_path = path.clone();
     let undo_prev = previous.clone();
     let redo_content = version_content.clone();
     crate::history::push_history(
@@ -499,11 +507,15 @@ pub fn versions_restore(
         serde_json::json!({ "path": path, "content": previous }),
         serde_json::json!({ "path": path, "content": version_content }),
         Arc::new(move || {
-            std::fs::write(&undo_abs, &undo_prev).map_err(|e| e.to_string())?;
+            undo_manager
+                .save_note_content(&undo_path, &undo_prev)
+                .map_err(|e| e.to_string())?;
             Ok(())
         }),
         Arc::new(move || {
-            std::fs::write(&redo_abs, &redo_content).map_err(|e| e.to_string())?;
+            redo_manager
+                .save_note_content(&redo_path, &redo_content)
+                .map_err(|e| e.to_string())?;
             Ok(())
         }),
     )?;
