@@ -7,8 +7,7 @@
 > `src/shared/`).  **There is no Electron IPC layer in the current
 > repository.**
 >
-> In the current Pure-Rust architecture (Migration Option B, see
-> `MIGRATION_OPTION_B.md`) the equivalent boundaries are:
+> In the current Pure-Rust architecture the equivalent boundaries are:
 >
 > - **Shared contracts**: `crates/nabu-core/src/models/` — the
 >   `KnowledgeObject` and related domain types, shared across all layers.

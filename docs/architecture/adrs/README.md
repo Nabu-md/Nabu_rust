@@ -10,9 +10,9 @@
 >
 > **None of those TypeScript source paths exist in the current repository.**
 > The codebase has been migrated to the **Pure-Rust Architecture** (Migration
-> Option B — see [`../../MIGRATION_OPTION_B.md`](../../MIGRATION_OPTION_B.md)):
-> Tauri v2 desktop shell, a Rust core library (`crates/nabu-core/`), and a
-> Leptos WASM frontend (`crates/nabu-ui/`).
+> Option B):
+> Tauri v2 desktop shell, a Rust core library (`crates/nabu-core/`), and the
+> Dioxus WASM frontend (`crates/nabu-ui/`).
 >
 > The *decisions* captured in these ADRs — folder-layer separation, service
 > extraction, typed IPC contracts, typed event bus, and layer ownership rules
@@ -27,7 +27,10 @@
 
 This directory holds the Architecture Decision Records (ADRs) that capture the
 major architectural decisions made during **Phase 1** of the Nabu Recovery
-Program.
+Program and the subsequent **codebase audits** (ADR-001 through ADR-005
+document the Phase 1 migration from the legacy architecture; ADR-006 through
+ADR-011 consolidate the decisions distilled from the AUDIT_0.1–0.7 audit series
+and the Capability Platform roadmap).
 
 Each ADR follows a consistent format:
 
@@ -50,6 +53,12 @@ Each ADR follows a consistent format:
 | ADR-003 | Shared Contracts & Typed IPC Registry | [adr-003-shared-contracts-ipc.md](adr-003-shared-contracts-ipc.md) |
 | ADR-004 | Typed Event Bus | [adr-004-typed-event-bus.md](adr-004-typed-event-bus.md) |
 | ADR-005 | Layer Ownership Rules | [adr-005-layer-ownership-rules.md](adr-005-layer-ownership-rules.md) |
+| ADR-006 | Crate Dependency Boundary | [adr-006-crate-dependency-boundary.md](adr-006-crate-dependency-boundary.md) |
+| ADR-007 | Composition Root & Service Wiring | [adr-007-composition-root.md](adr-007-composition-root.md) |
+| ADR-008 | Live Event Flow to the Frontend | [adr-008-event-flow-frontend.md](adr-008-event-flow-frontend.md) |
+| ADR-009 | Persistence & Concurrency Model | [adr-009-persistence-concurrency.md](adr-009-persistence-concurrency.md) |
+| ADR-010 | Capability Platform | [adr-010-capability-platform.md](adr-010-capability-platform.md) |
+| ADR-011 | UI Component Governance | [adr-011-ui-component-governance.md](adr-011-ui-component-governance.md) |
 
 ---
 

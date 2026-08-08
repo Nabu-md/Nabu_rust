@@ -8,7 +8,7 @@
 > the current repository.
 >
 > The repository has been migrated to **Migration Option B — Pure Rust
-> Architecture** (see `MIGRATION_OPTION_B.md`).  The current layout is:
+> Architecture**.  The current layout is:
 >
 > ```text
 > /
