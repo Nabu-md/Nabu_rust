@@ -52,7 +52,7 @@ Download a prebuilt DMG from the [GitHub Releases](https://github.com/Nabu/Nabu/
 - **Screenshot ingestion** — capture and embed images directly
 - **File drop** — drag-and-drop files into the editor
 - **Folder watch** — monitor directories for new content
-- **Browser/Safari extension** — web clipping via native messaging host
+- **Browser extension** — web clipping via native messaging host (Chrome/Chromium/Firefox)
 - **Dictation pill** — floating scratchpad for voice input via Whisper.cpp
 
 ### Version Control & Recovery
