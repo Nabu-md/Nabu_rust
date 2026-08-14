@@ -6,6 +6,8 @@ use crate::graph::version::{BuildSource, GraphVersion};
 use crate::graph::wikilink::{ResolutionIndex, content_as_str, parse_block_references, parse_wiki_links};
 use crate::models::{ObjectContent, ObjectMetadata, ProcessingState};
 use crate::models::KnowledgeObject;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 /// The graph recovery coordinator.
 ///
@@ -339,7 +341,7 @@ pub fn build_graph_from_vault(
         let obj_type = match sidecar.object_type.as_str() {
             "note" => ObjectType::Note,
             "template" => ObjectType::Template,
-            "folder" => ObjectType::Folder,
+            "folder" => ObjectType::Collection,
             _ => ObjectType::Note,
         };
 
