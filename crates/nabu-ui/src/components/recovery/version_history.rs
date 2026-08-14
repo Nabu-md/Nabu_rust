@@ -379,7 +379,7 @@ pub fn VersionHistory() -> Element {
                     }
                 }
             }
-        }}
+        }}}
 
             // ── Middle: version timeline ──
             div {
@@ -514,7 +514,7 @@ pub fn VersionHistory() -> Element {
                     }
                 }
             }
-        }}
+        }}}
 
             // ── Right: preview + diff ──
             div { class: "flex-1 overflow-y-auto p-4 min-w-0" }
@@ -583,11 +583,9 @@ pub fn VersionHistory() -> Element {
                         title: "Select a note and a version".to_string(),
                         description: "Preview the content, compare revisions, restore, or duplicate it.".to_string(),
                     }
-}
-            }}
+                }
             }
-        }}
-}}}
+        }
 
             // ── Dialogs ──
             ConfirmDialog {

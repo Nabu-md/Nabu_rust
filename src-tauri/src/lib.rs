@@ -212,7 +212,7 @@ fn build_application_context(
 
     // ---- 9. One VaultGraph (canonical graph engine, persisted) ----
     let vault_graph = Arc::new(RwLock::new(
-        VaultGraph::with_persistence(Some((*event_bus).clone()), vault_path)
+        VaultGraph::with_persistence(Some((*event_bus).clone()), vault_path.clone())
             .unwrap_or_else(|e| panic!("Failed to initialize VaultGraph: {}", e)),
     ));
     ctx.register("vault_graph", vault_graph.clone());
@@ -612,6 +612,7 @@ pub fn run() {
                     crate::native_messaging_socket::start_socket_server(state_clone)
                         .map(|handle| crate::native_messaging_socket::SocketServerHandleState(Some(handle)))
                 })
+                .unwrap_or(crate::native_messaging_socket::SocketServerHandleState(None))
             };
             app.manage(socket_handle);
 

@@ -444,7 +444,8 @@ pub fn note_rename(
     // Route tracked objects through the canonical StorageManager so the rename
     // propagates to the index/graph via the ITEM_STORED pipeline. Untracked
     // files and folders fall back to a direct filesystem rename.
-    let moved_through_manager = if let Some(manager) = ctx.storage_manager() {
+    let manager = ctx.storage_manager();
+    let moved_through_manager = if let Some(manager) = &manager {
         if let Some(obj) = manager.find_by_path(&from) {
             manager.move_object(obj.id, &to).map_err(|e| e.to_string())?;
             true
@@ -471,8 +472,8 @@ pub fn note_rename(
     let undo_to = to_path.clone();
     let redo_from = from_path;
     let redo_to = to_path;
-    let undo_vault = vault_path.clone();
-    let redo_vault = vault_path;
+    let undo_manager = manager.clone();
+    let redo_manager = manager;
 
     push_history(
         &ctx,
@@ -485,7 +486,7 @@ pub fn note_rename(
         // relocated back through it so index/graph stay consistent.
         Arc::new(move || {
             if moved_through_manager {
-                if let Some(manager) = ctx.storage_manager() {
+                if let Some(manager) = &undo_manager {
                     if let Some(obj) = manager.find_by_path(&undo_to.to_string_lossy()) {
                         manager.move_object(obj.id, &undo_from.to_string_lossy())?;
                         return Ok(());
@@ -498,7 +499,7 @@ pub fn note_rename(
         // Redo: rename forward again.
         Arc::new(move || {
             if moved_through_manager {
-                if let Some(manager) = ctx.storage_manager() {
+                if let Some(manager) = &redo_manager {
                     if let Some(obj) = manager.find_by_path(&redo_from.to_string_lossy()) {
                         manager.move_object(obj.id, &redo_to.to_string_lossy())?;
                         return Ok(());

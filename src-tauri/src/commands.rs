@@ -1041,8 +1041,14 @@ pub fn inbox_get_queue(ctx: State<'_, ApplicationContext>) -> Result<Vec<InboxIt
 
 #[tauri::command]
 pub fn inbox_approve(ctx: State<'_, ApplicationContext>, id: String) -> Result<(), String> {
-    let manager = get_storage_manager(&ctx)?;
-    let object_id = uuid::Uuid::parse_str(&id).map_err(|e| format!("Invalid object id: {}", e))?;
+    inbox_approve_impl(&ctx, &id)
+}
+
+/// Approves a single inbox item (extracted from the Tauri command so it can be
+/// unit-tested against a real `&ApplicationContext`).
+fn inbox_approve_impl(ctx: &ApplicationContext, id: &str) -> Result<(), String> {
+    let manager = get_storage_manager(ctx)?;
+    let object_id = uuid::Uuid::parse_str(id).map_err(|e| format!("Invalid object id: {}", e))?;
     let mut obj = manager
         .load(object_id)
         .ok_or_else(|| format!("Inbox item not found: {}", id))?;
@@ -1063,10 +1069,10 @@ pub fn inbox_approve(ctx: State<'_, ApplicationContext>, id: String) -> Result<(
     let manager_undo = manager.clone();
     let manager_redo = manager.clone();
     crate::history::push_history(
-        &ctx,
+        ctx,
         nabu_core::history::HistoryOp::Metadata,
         "Approve Inbox Item".to_string(),
-        vec![id.clone()],
+        vec![id.to_string()],
         serde_json::json!({ "inbox_status": previous }),
         serde_json::json!({ "inbox_status": "approved" }),
         std::sync::Arc::new(move || {
@@ -1164,10 +1170,14 @@ pub fn inbox_batch_approve(
     ctx: State<'_, ApplicationContext>,
     ids: Vec<String>,
 ) -> Result<(), String> {
+    inbox_batch_approve_impl(&ctx, &ids)
+}
+
+/// Approves every item, propagating the first real error instead of silently
+/// swallowing it (extracted for unit-testing against `&ApplicationContext`).
+fn inbox_batch_approve_impl(ctx: &ApplicationContext, ids: &[String]) -> Result<(), String> {
     for id in ids {
-        if let Err(e) = inbox_approve(ctx.clone(), id) {
-            eprintln!("Failed to approve inbox item: {}", e);
-        }
+        inbox_approve_impl(ctx, id)?;
     }
     Ok(())
 }
@@ -1179,9 +1189,7 @@ pub fn inbox_batch_reject(
     reason: String,
 ) -> Result<(), String> {
     for id in ids {
-        if let Err(e) = inbox_reject(ctx.clone(), id, reason.clone()) {
-            eprintln!("Failed to reject inbox item: {}", e);
-        }
+        inbox_reject(ctx.clone(), id, reason.clone())?;
     }
     Ok(())
 }
@@ -1192,9 +1200,7 @@ pub fn inbox_batch_delete(
     ids: Vec<String>,
 ) -> Result<(), String> {
     for id in ids {
-        if let Err(e) = inbox_delete(ctx.clone(), id) {
-            eprintln!("Failed to delete inbox item: {}", e);
-        }
+        inbox_delete(ctx.clone(), id)?;
     }
     Ok(())
 }
@@ -1205,9 +1211,7 @@ pub fn inbox_batch_retry(
     ids: Vec<String>,
 ) -> Result<(), String> {
     for id in ids {
-        if let Err(e) = inbox_retry(ctx.clone(), id) {
-            eprintln!("Failed to retry inbox item: {}", e);
-        }
+        inbox_retry(ctx.clone(), id)?;
     }
     Ok(())
 }
@@ -1457,74 +1461,69 @@ pub struct NoteIndexEntry {
     pub pinned: bool,
 }
 
-/// Scans the vault and returns every note as a flat, sorted index.
-///
-/// The index is used by the dashboard's "Recently Modified" section, the
-/// Quick Switcher's note list and the Search page's folder filter. Hidden
-/// entries (leading `.`) are skipped, matching `tree_list`.
-#[tauri::command]
-pub fn notes_index(store: State<'_, SettingsStore>) -> Result<Vec<NoteIndexEntry>, String> {
-    let settings = store.get();
-    let vault_path = PathBuf::from(settings.last_vault_path.trim());
-    if vault_path.as_os_str().is_empty() || !vault_path.is_dir() {
-        return Ok(Vec::new());
+/// Returns the parent folder of a vault-relative path ("" for the root).
+fn note_folder_of(path: &str) -> String {
+    match path.rfind('/') {
+        Some(i) => path[..i].to_string(),
+        None => String::new(),
     }
+}
 
-    fn walk(dir: &Path, prefix: &str, out: &mut Vec<NoteIndexEntry>) {
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with('.') {
-                continue;
-            }
-            // Archived content stays searchable but is hidden from navigation.
-            if prefix.is_empty() && name == ARCHIVE_FOLDER {
-                continue;
-            }
-            let path = if prefix.is_empty() {
-                name.clone()
-            } else {
-                format!("{prefix}/{name}")
-            };
-            let full = entry.path();
-            if full.is_dir() {
-                walk(&full, &path, out);
-            } else if name.ends_with(".md") {
-                let modified = std::fs::metadata(&full)
-                    .and_then(|m| m.modified())
-                    .ok()
-                    .map(|t| {
-                        // RFC 3339 via SystemTime → seconds since epoch.
-                        let secs = t
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs())
-                            .unwrap_or(0);
-                        chrono::DateTime::from_timestamp(secs as i64, 0)
-                            .map(|dt| dt.to_rfc3339())
-                            .unwrap_or_default()
-                    })
-                    .unwrap_or_default();
-                let title = name.trim_end_matches(".md").to_string();
-                let folder = match path.rfind('/') {
-                    Some(i) => path[..i].to_string(),
-                    None => String::new(),
-                };
-                out.push(NoteIndexEntry {
-                    path,
-                    title,
-                    folder,
-                    modified_at: modified,
-                    pinned: false,
-                });
-            }
-        }
-    }
+/// Returns the file name without its `.md` extension.
+fn file_stem(path: &str) -> String {
+    path.rsplit('/')
+        .next()
+        .unwrap_or(path)
+        .trim_end_matches(".md")
+        .to_string()
+}
+
+/// Builds the flat note index from the canonical StorageManager.
+///
+/// This is the real indexing path: every note is a persisted
+/// `KnowledgeObject` enumerated through the single storage owner (which is
+/// kept in sync with the real `Indexer` via the `ITEM_STORED` pipeline). No
+/// ad-hoc filesystem walk, no second index implementation.
+fn notes_index_impl(ctx: &ApplicationContext) -> Result<Vec<NoteIndexEntry>, String> {
+    let manager = get_storage_manager(ctx)?;
+    let objects = manager
+        .list_objects("", None, 100_000)
+        .map_err(|e| e.to_string())?;
 
     let mut notes = Vec::new();
-    walk(&vault_path, "", &mut notes);
+    for obj in objects {
+        if obj.object_type != nabu_core::models::ObjectType::Note {
+            continue;
+        }
+        let Some(path) = obj.metadata.vault_path.clone() else { continue };
+        if !path.ends_with(".md") {
+            continue;
+        }
+        let title = obj
+            .metadata
+            .title
+            .clone()
+            .unwrap_or_else(|| file_stem(&path));
+        notes.push(NoteIndexEntry {
+            path: path.clone(),
+            title,
+            folder: note_folder_of(&path),
+            modified_at: obj.updated_at.to_rfc3339(),
+            pinned: false,
+        });
+    }
     // Most recently modified first.
     notes.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
     Ok(notes)
+}
+
+/// Returns every note as a flat, sorted index, sourced from the real storage.
+///
+/// The index is used by the dashboard's "Recently Modified" section, the
+/// Quick Switcher's note list and the Search page's folder filter.
+#[tauri::command]
+pub fn notes_index(ctx: State<'_, ApplicationContext>) -> Result<Vec<NoteIndexEntry>, String> {
+    notes_index_impl(&ctx)
 }
 
 /// One full-text search hit.
@@ -1575,112 +1574,72 @@ fn make_snippet(content: &str, byte_idx: usize, match_len: usize) -> (String, us
     (snippet, char_idx - start, char_idx - start + match_chars)
 }
 
-/// Full-text search across note contents.
+/// Full-text search across note contents, backed by the real persistent
+/// `Indexer`.
 ///
-/// Returns up to `limit` hits (default 50) with a snippet and match offsets
-/// so the frontend can highlight the matched text. Case-insensitive substring
-/// matching, files read on demand — no index to maintain.
+/// The set of matching object IDs comes from the canonical Indexer (the same
+/// inverted index used for persistence and the `ITEM_STORED` pipeline). The
+/// returned `SearchHit`s are hydrated from the StorageManager to recover the
+/// vault path / title / snippet for the frontend.
 #[tauri::command]
 pub fn notes_search(
     query: String,
-    store: State<'_, SettingsStore>,
+    ctx: State<'_, ApplicationContext>,
 ) -> Result<Vec<SearchHit>, String> {
+    notes_search_impl(&ctx, &query)
+}
+
+fn notes_search_impl(ctx: &ApplicationContext, query: &str) -> Result<Vec<SearchHit>, String> {
     let q = query.trim();
     if q.is_empty() {
         return Ok(Vec::new());
     }
-    let settings = store.get();
-    let vault_path = PathBuf::from(settings.last_vault_path.trim());
-    if vault_path.as_os_str().is_empty() || !vault_path.is_dir() {
-        return Ok(Vec::new());
-    }
+    let manager = get_storage_manager(ctx)?;
+    let indexer = ctx
+        .indexer()
+        .ok_or_else(|| "Indexer is not registered in the application context".to_string())?;
+
+    // Query the real Indexer. The Indexer is the single search index — no
+    // ad-hoc scan, no metadata-only search, no second implementation.
+    let ids = {
+        let idx = indexer
+            .lock()
+            .map_err(|_| "Indexer lock poisoned".to_string())?;
+        idx.search(q)
+    };
 
     let mut hits = Vec::new();
+    for id_str in ids {
+        let Ok(id) = uuid::Uuid::parse_str(&id_str) else { continue };
+        let Some(obj) = manager.load(id) else { continue };
+        let Some(path) = obj.metadata.vault_path.clone() else { continue };
+        let title = obj
+            .metadata
+            .title
+            .clone()
+            .unwrap_or_else(|| file_stem(&path));
+        let folder = note_folder_of(&path);
+        let content = nabu_core::graph::content_as_str(&obj.content).to_string();
 
-    fn walk(
-        dir: &Path,
-        prefix: &str,
-        q: &str,
-        out: &mut Vec<SearchHit>,
-        limit: usize,
-    ) {
-        if out.len() >= limit {
-            return;
-        }
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
-        for entry in entries.flatten() {
-            if out.len() >= limit {
-                return;
-            }
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with('.') {
-                continue;
-            }
-            let path = if prefix.is_empty() {
-                name.clone()
-            } else {
-                format!("{prefix}/{name}")
-            };
-            let full = entry.path();
-            if full.is_dir() {
-                walk(&full, &path, q, out, limit);
-            } else if name.ends_with(".md") {
-                let Ok(content) = std::fs::read_to_string(&full) else {
-                    continue;
-                };
-                let title = name.trim_end_matches(".md").to_string();
-                let folder = match path.rfind('/') {
-                    Some(i) => path[..i].to_string(),
-                    None => String::new(),
-                };
-                let modified = std::fs::metadata(&full)
-                    .and_then(|m| m.modified())
-                    .ok()
-                    .and_then(|t| {
-                        t.duration_since(std::time::UNIX_EPOCH)
-                            .ok()
-                            .map(|d| d.as_secs() as i64)
-                    })
-                    .and_then(|secs| {
-                        chrono::DateTime::from_timestamp(secs, 0).map(|dt| dt.to_rfc3339())
-                    })
-                    .unwrap_or_default();
+        // Snippet around the first match (title or body), matching the old
+        // presentation conventions. The search *decision* is the Indexer's;
+        // snippet generation is presentation only.
+        let (snippet, s, e) = match find_ci(&content, q) {
+            Some(idx) => make_snippet(&content, idx, q.len()),
+            None => make_snippet(&content, 0, 0),
+        };
 
-                // Title match (no snippet needed — highlight the title).
-                if let Some(idx) = find_ci(&title, q) {
-                    let _ = idx;
-                    let (snippet, s, e) = make_snippet(&content, 0, 0);
-                    let _ = (s, e);
-                    out.push(SearchHit {
-                        path: path.clone(),
-                        title: title.clone(),
-                        folder: folder.clone(),
-                        snippet,
-                        match_start: 0,
-                        match_end: 0,
-                        modified_at: modified.clone(),
-                    });
-                    continue;
-                }
-
-                if let Some(idx) = find_ci(&content, q) {
-                    let (snippet, s, e) = make_snippet(&content, idx, q.len());
-                    out.push(SearchHit {
-                        path,
-                        title,
-                        folder,
-                        snippet,
-                        match_start: s,
-                        match_end: e,
-                        modified_at: modified,
-                    });
-                }
-            }
-        }
+        hits.push(SearchHit {
+            path,
+            title,
+            folder,
+            snippet,
+            match_start: s,
+            match_end: e,
+            modified_at: obj.updated_at.to_rfc3339(),
+        });
     }
 
-    let limit = 50;
-    walk(&vault_path, "", q, &mut hits, limit);
     Ok(hits)
 }
 
@@ -1926,84 +1885,88 @@ pub struct GraphData {
     pub cluster_count: usize,
 }
 
-/// Returns the full knowledge graph: every note as a node plus every resolved
-/// wikilink as an edge, with degree counts and cluster statistics.
+/// Returns the full knowledge graph from the real `VaultGraph`.
+///
+/// Nodes and edges come from the canonical VaultGraph (the single relationship
+/// graph, kept in sync via the `ITEM_STORED` / `GRAPH_UPDATED` pipeline). No
+/// graph relationships are reconstructed here — this command only reads the
+/// shared graph and shapes it into the frontend DTO.
 #[tauri::command]
-pub fn graph_data(store: State<'_, SettingsStore>) -> Result<GraphData, String> {
-    let settings = store.get();
-    let vault_path = PathBuf::from(settings.last_vault_path.trim());
-    if vault_path.as_os_str().is_empty() || !vault_path.is_dir() {
-        return Ok(GraphData {
-            nodes: Vec::new(),
-            edges: Vec::new(),
-            orphan_count: 0,
-            cluster_count: 0,
-        });
-    }
+pub fn graph_data(ctx: State<'_, ApplicationContext>) -> Result<GraphData, String> {
+    graph_data_impl(&ctx)
+}
 
-    let notes = collect_notes(&vault_path);
-    let index = build_title_index(&notes);
+fn graph_data_impl(ctx: &ApplicationContext) -> Result<GraphData, String> {
+    let graph = ctx
+        .vault_graph()
+        .ok_or_else(|| "VaultGraph is not registered in the application context".to_string())?;
+    let g = graph
+        .read()
+        .map_err(|_| "VaultGraph lock poisoned".to_string())?;
 
-    let mut nodes: Vec<GraphNode> = notes
-        .iter()
-        .map(|n| GraphNode {
-            path: n.path.clone(),
-            title: n.title.clone(),
-            folder: n.folder.clone(),
-            modified_at: n.modified_at.clone(),
-            tags: extract_tags(&n.content),
+    let node_objs = g.all_nodes();
+    let edges = g.edges();
+
+    // Map object id → vault-relative path so edges can be expressed as paths.
+    let mut id_to_path: std::collections::HashMap<uuid::Uuid, String> =
+        std::collections::HashMap::new();
+    let mut nodes: Vec<GraphNode> = Vec::new();
+    for obj in &node_objs {
+        let Some(path) = obj.metadata.vault_path.clone() else { continue };
+        id_to_path.insert(obj.id, path.clone());
+        nodes.push(GraphNode {
+            path: path.clone(),
+            title: obj
+                .metadata
+                .title
+                .clone()
+                .unwrap_or_else(|| file_stem(&path)),
+            folder: note_folder_of(&path),
+            modified_at: obj.updated_at.to_rfc3339(),
+            tags: obj.tags.clone(),
             backlink_count: 0,
             outgoing_count: 0,
             degree: 0,
-        })
-        .collect();
-
-    let mut edges = Vec::new();
-    for note in &notes {
-        for target in extract_wikilinks(&note.content) {
-            match resolve_note(&index, &target) {
-                Some(tpath) => {
-                    if tpath != note.path {
-                        edges.push(GraphEdgeData {
-                            source: note.path.clone(),
-                            target: tpath,
-                            broken: false,
-                        });
-                    }
-                }
-                None => {
-                    edges.push(GraphEdgeData {
-                        source: note.path.clone(),
-                        target: target.clone(),
-                        broken: true,
-                    });
-                }
-            }
-        }
+        });
     }
 
-    // Degree / backlink counts (O(nodes + edges) via a path → index map with
-    // owned String keys so `nodes` isn't held borrowed while mutated).
+    // Translate graph edges (content-derived wiki-links + explicit relations)
+    // into path-based edge DTOs. Every edge here comes from the real graph.
+    let mut edges_data: Vec<GraphEdgeData> = Vec::new();
+    for edge in &edges {
+        let (Some(source), Some(target)) = (
+            id_to_path.get(&edge.source),
+            id_to_path.get(&edge.target),
+        ) else {
+            continue;
+        };
+        edges_data.push(GraphEdgeData {
+            source: source.clone(),
+            target: target.clone(),
+            broken: false,
+        });
+    }
+
+    // Degree / backlink counts.
     let mut node_index: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
     for (i, n) in nodes.iter().enumerate() {
         node_index.insert(n.path.clone(), i);
     }
-    for edge in &edges {
+    for edge in &edges_data {
         if let Some(&si) = node_index.get(&edge.source) {
             nodes[si].outgoing_count += 1;
             nodes[si].degree += 1;
         }
-        if !edge.broken {
-            if let Some(&di) = node_index.get(&edge.target) {
-                nodes[di].backlink_count += 1;
-                nodes[di].degree += 1;
-            }
+        if let Some(&di) = node_index.get(&edge.target) {
+            nodes[di].backlink_count += 1;
+            nodes[di].degree += 1;
         }
     }
 
-    // Cluster count via union-find over the resolved edges. Owned String keys
-    // keep the borrows short so `nodes`/`edges` can be moved into the result.
+    let orphan_count = nodes.iter().filter(|n| n.degree == 0).count();
+
+    // Cluster count via union-find over the resolved edges.
     let mut parent: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
     fn find(parent: &mut std::collections::HashMap<String, String>, x: &str) -> String {
@@ -2016,10 +1979,7 @@ pub fn graph_data(store: State<'_, SettingsStore>) -> Result<GraphData, String> 
             px
         }
     }
-    for edge in &edges {
-        if edge.broken {
-            continue;
-        }
+    for edge in &edges_data {
         let a = find(&mut parent, &edge.source);
         let b = find(&mut parent, &edge.target);
         if a != b {
@@ -2030,11 +1990,10 @@ pub fn graph_data(store: State<'_, SettingsStore>) -> Result<GraphData, String> 
     for n in &nodes {
         roots.insert(find(&mut parent, &n.path));
     }
-    let orphan_count = nodes.iter().filter(|n| n.degree == 0).count();
 
     Ok(GraphData {
         nodes,
-        edges,
+        edges: edges_data,
         orphan_count,
         cluster_count: roots.len(),
     })
@@ -3397,7 +3356,7 @@ fn vault_growth(vault_path: &Path) -> Vec<GrowthPoint> {
 #[tauri::command]
 pub fn statistics_get(
     store: State<'_, SettingsStore>,
-    _ctx: State<'_, ApplicationContext>,
+    ctx: State<'_, ApplicationContext>,
 ) -> Result<VaultStatistics, String> {
     let settings = store.get();
     let vault_path = PathBuf::from(settings.last_vault_path.trim());
@@ -3439,8 +3398,9 @@ pub fn statistics_get(
     let total_tags: usize = tags.iter().map(|t| t.count).sum();
     let tag_count = tags.len();
 
-    // Graph data (reuse the graph_data command logic via the context).
-    let graph = graph_data_inner(&vault_path);
+    // Graph data from the real VaultGraph (via the shared context), not a
+    // reconstructed filesystem scan.
+    let graph = graph_data_impl(&ctx)?;
 
     // Recently modified (top 10).
     let mut recent: Vec<RecentNoteStat> = notes
@@ -3691,93 +3651,6 @@ pub fn pool_health(
     Ok(health)
 }
 
-/// Internal helper that computes GraphData without going through Tauri state
-/// (used by `statistics_get` which already holds the vault path).
-fn graph_data_inner(vault_path: &Path) -> GraphData {
-    let notes = collect_notes(vault_path);
-    let index = build_title_index(&notes);
-
-    let mut nodes: Vec<GraphNode> = notes
-        .iter()
-        .map(|n| GraphNode {
-            path: n.path.clone(),
-            title: n.title.clone(),
-            folder: n.folder.clone(),
-            modified_at: n.modified_at.clone(),
-            tags: extract_tags(&n.content),
-            backlink_count: 0,
-            outgoing_count: 0,
-            degree: 0,
-        })
-        .collect();
-
-    let mut edges = Vec::new();
-    for note in &notes {
-        for target in extract_wikilinks(&note.content) {
-            match resolve_note(&index, &target) {
-                Some(tpath) => {
-                    if tpath != note.path {
-                        edges.push(GraphEdgeData {
-                            source: note.path.clone(),
-                            target: tpath,
-                            broken: false,
-                        });
-                    }
-                }
-                None => {
-                    edges.push(GraphEdgeData {
-                        source: note.path.clone(),
-                        target: target,
-                        broken: true,
-                    });
-                }
-            }
-        }
-    }
-
-    // Degree counts.
-    for edge in &edges {
-        if let Some(node) = nodes.iter_mut().find(|n| n.path == edge.source) {
-            node.outgoing_count += 1;
-            node.degree += 1;
-        }
-        if !edge.broken {
-            if let Some(node) = nodes.iter_mut().find(|n| n.path == edge.target) {
-                node.backlink_count += 1;
-                node.degree += 1;
-            }
-        }
-    }
-
-    let orphan_count = nodes.iter().filter(|n| n.degree == 0).count();
-
-    // Cluster count via union-find.
-    let mut uf = UnionFind::new(nodes.len());
-    let path_index: std::collections::HashMap<String, usize> = nodes
-        .iter()
-        .enumerate()
-        .map(|(i, n)| (n.path.clone(), i))
-        .collect();
-    for edge in &edges {
-        if edge.broken {
-            continue;
-        }
-        if let (Some(&a), Some(&b)) =
-            (path_index.get(&edge.source), path_index.get(&edge.target))
-        {
-            uf.union(a, b);
-        }
-    }
-    let cluster_count = uf.count();
-
-    GraphData {
-        nodes,
-        edges,
-        orphan_count,
-        cluster_count,
-    }
-}
-
 /// ── Diagnostic IPC ──────────────────────────────────────────────
 
 /// Request payload for the `diagnostic_requested` IPC command.
@@ -3925,49 +3798,6 @@ pub async fn diagnostic_requested(
     );
 
     Ok(DiagnosticResponse { batch, style_map })
-}
-
-/// Simple union-find for cluster counting.
-struct UnionFind {
-    parent: Vec<usize>,
-    rank: Vec<usize>,
-}
-
-impl UnionFind {
-    fn new(n: usize) -> Self {
-        Self {
-            parent: (0..n).collect(),
-            rank: vec![0; n],
-        }
-    }
-    fn find(&mut self, x: usize) -> usize {
-        if self.parent[x] != x {
-            self.parent[x] = self.find(self.parent[x]);
-        }
-        self.parent[x]
-    }
-    fn union(&mut self, a: usize, b: usize) {
-        let ra = self.find(a);
-        let rb = self.find(b);
-        if ra == rb {
-            return;
-        }
-        if self.rank[ra] < self.rank[rb] {
-            self.parent[ra] = rb;
-        } else if self.rank[ra] > self.rank[rb] {
-            self.parent[rb] = ra;
-        } else {
-            self.parent[rb] = ra;
-            self.rank[ra] += 1;
-        }
-    }
-    fn count(&mut self) -> usize {
-        let mut roots = std::collections::HashSet::new();
-        for i in 0..self.parent.len() {
-            roots.insert(self.find(i));
-        }
-        roots.len()
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4127,6 +3957,8 @@ mod tests {
         Diagnostic, DiagnosticBatch, DiagnosticPlatformError, DiagnosticSeverity, TextPosition,
         TextRange,
     };
+    use nabu_core::graph::VaultGraph;
+    use nabu_core::indexer::Indexer;
 
     #[test]
     fn diagnostic_request_serializes_with_explicit_origin() {
@@ -4206,6 +4038,211 @@ mod tests {
             origin: None,
         };
         assert_eq!(req.origin, None);
+    }
+
+    // ── Phase 1B-1 smoke tests: real Indexer / VaultGraph / StorageManager ──
+
+    /// Creates a unique throwaway vault directory.
+    fn temp_vault() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "nabu-smoke-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Builds a minimal real ApplicationContext (EventBus + StorageManager +
+    /// Indexer + VaultGraph) with the production ITEM_STORED / INDEX_UPDATED
+    /// subscribers wired, mirroring `build_application_context` in lib.rs.
+    fn test_context(vault: &Path) -> ApplicationContext {
+        let event_bus: Arc<nabu_core::event_bus::EventBus<
+            nabu_core::event_bus::PipelineEvent,
+        >> = Arc::new(nabu_core::event_bus::EventBus::new());
+        let ctx = ApplicationContext::builder()
+            .with_event_bus(event_bus.clone())
+            .build();
+
+        let storage = Arc::new(StorageManager::with_event_bus(
+            vault.to_path_buf(),
+            (*event_bus).clone(),
+        ));
+        ctx.register("storage_manager", storage.clone());
+
+        let indexer = Arc::new(std::sync::Mutex::new(Indexer::with_event_bus(
+            (*event_bus).clone(),
+        )));
+        ctx.register("indexer", indexer.clone());
+
+        let graph = Arc::new(std::sync::RwLock::new(
+            VaultGraph::with_persistence(Some((*event_bus).clone()), vault.to_path_buf())
+                .unwrap(),
+        ));
+        ctx.register("vault_graph", graph.clone());
+
+        // ITEM_STORED → index + graph (mirrors the production subscriber).
+        {
+            let s = storage.clone();
+            let i = indexer.clone();
+            let g = graph.clone();
+            event_bus.subscribe(
+                nabu_core::event_bus::kinds::ITEM_STORED,
+                move |event: &nabu_core::event_bus::PipelineEvent| {
+                    if let nabu_core::event_bus::PipelineEvent::ItemStored(stored) = event {
+                        if let Some(obj) = s.load(stored.object_id) {
+                            if let Ok(idx) = i.lock() {
+                                let _ = idx.index_object(&obj);
+                            }
+                            if let Ok(gr) = g.write() {
+                                let _ = gr.update_node(&obj);
+                            }
+                        }
+                    }
+                },
+            );
+        }
+        // INDEX_UPDATED(Removed) → remove from index + graph.
+        {
+            let i = indexer.clone();
+            let g = graph.clone();
+            event_bus.subscribe(
+                nabu_core::event_bus::kinds::INDEX_UPDATED,
+                move |event: &nabu_core::event_bus::PipelineEvent| {
+                    if let nabu_core::event_bus::PipelineEvent::IndexUpdated(updated) = event {
+                        if matches!(
+                            updated.operation,
+                            nabu_core::event_bus::IndexOperation::Removed
+                        ) {
+                            if let Ok(idx) = i.lock() {
+                                let _ = idx.remove_object(updated.object_id);
+                            }
+                            if let Ok(gr) = g.write() {
+                                let _ = gr.remove_node(updated.object_id);
+                            }
+                        }
+                    }
+                },
+            );
+        }
+
+        ctx
+    }
+
+    #[test]
+    fn notes_search_finds_body_only_term_via_real_indexer() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let manager = ctx.storage_manager().unwrap();
+
+        manager
+            .save_note_content("alpha.md", "hello distinctive body")
+            .unwrap();
+
+        // A body-only, non-title term must be found through the real Indexer.
+        let hits = notes_search_impl(&ctx, "distinctive").unwrap();
+        assert!(
+            hits.iter().any(|h| h.path == "alpha.md"),
+            "expected hit for alpha.md, got {:?}",
+            hits.iter().map(|h| &h.path).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn graph_data_includes_wikilink_edge() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let manager = ctx.storage_manager().unwrap();
+
+        manager.save_note_content("B.md", "note b").unwrap();
+        manager.save_note_content("A.md", "link to [[B]]").unwrap();
+
+        // The A→B content-derived edge must surface from the real VaultGraph.
+        let data = graph_data_impl(&ctx).unwrap();
+        assert!(
+            data.edges
+                .iter()
+                .any(|e| e.source == "A.md" && e.target == "B.md"),
+            "expected A.md→B.md edge, got {:?}",
+            data.edges
+                .iter()
+                .map(|e| (e.source.clone(), e.target.clone()))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn storage_move_and_delete_keep_index_and_graph_consistent() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let manager = ctx.storage_manager().unwrap();
+
+        manager
+            .save_note_content("x.md", "rename-me marker")
+            .unwrap();
+        let id = manager.find_by_path("x.md").unwrap().id;
+
+        // Move through the canonical StorageManager; index/graph follow via
+        // ITEM_STORED so the content term resolves under the new path.
+        manager.move_object(id, "y.md").unwrap();
+        assert!(manager.find_by_path("y.md").is_some());
+        assert!(manager.find_by_path("x.md").is_none());
+        let hits = notes_search_impl(&ctx, "marker").unwrap();
+        assert!(hits.iter().any(|h| h.path == "y.md"));
+
+        // Delete through the canonical StorageManager; INDEX_UPDATED(Removed)
+        // removes it from both the search index and the graph.
+        manager.delete(id).unwrap();
+        let hits = notes_search_impl(&ctx, "marker").unwrap();
+        assert!(!hits.iter().any(|h| h.path == "y.md"));
+        let data = graph_data_impl(&ctx).unwrap();
+        assert!(!data.nodes.iter().any(|n| n.path == "y.md"));
+    }
+
+    #[test]
+    fn inbox_approve_files_capture_to_real_markdown() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let manager = ctx.storage_manager().unwrap();
+
+        // A freshly captured inbox item (pending status).
+        let obj = nabu_core::inbox::model::build_inbox_object(
+            nabu_core::models::ObjectContent::Markdown("captured body".to_string()),
+            Some("capture"),
+        );
+        manager.save(&obj).unwrap();
+        let id = obj.id;
+
+        // FilingService is exactly what `inbox_approve` delegates to.
+        let service = nabu_core::inbox::FilingService::new(manager.clone());
+        service.approve(id).unwrap();
+
+        // Approving files the capture into a real `.md` artifact on disk.
+        let filed = manager.load(id).unwrap();
+        let path = filed.metadata.vault_path.as_deref().expect("vault path");
+        assert!(path.ends_with(".md"), "expected a .md artifact, got {}", path);
+        assert!(dir.join(path).exists(), "filed markdown missing on disk");
+    }
+
+    #[test]
+    fn batch_approve_propagates_first_real_error() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let manager = ctx.storage_manager().unwrap();
+
+        // A genuinely valid item.
+        let obj = nabu_core::inbox::model::build_inbox_object(
+            nabu_core::models::ObjectContent::Markdown("ok".to_string()),
+            Some("ok"),
+        );
+        manager.save(&obj).unwrap();
+
+        // A bogus id that does not exist → the batch must propagate the error
+        // instead of silently swallowing it and reporting success.
+        let bogus = uuid::Uuid::new_v4().to_string();
+        let ids = vec![obj.id.to_string(), bogus];
+        let result = inbox_batch_approve_impl(&ctx, &ids);
+        assert!(result.is_err(), "batch should surface the failing item");
     }
 }
 
