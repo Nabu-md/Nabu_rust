@@ -36,6 +36,7 @@ pub mod history;
 pub mod io_stream;
 pub mod ipc_socket;
 pub mod indexer;
+pub mod inbox;
 pub mod jobs;
 pub mod models;
 pub mod native;
