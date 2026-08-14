@@ -15,7 +15,9 @@
 use crate::components::contexts::{use_save_status, use_workspace, SaveStatusType};
 use crate::components::editor::slash_menu::SlashMenu;
 use crate::components::note_view::NoteView;
-use crate::components::ui::feedback::{set_timeout, use_toast, SkeletonList};
+use crate::components::ui::feedback::{
+    set_timeout, use_toast, Alert, ErrorPanel, SkeletonList, ToastKind,
+};
 use dioxus::prelude::*;
 use dioxus::web::WebEventExt;
 use std::rc::Rc;
@@ -36,6 +38,51 @@ fn is_image(name: &str) -> bool {
         .any(|ext| lower.ends_with(ext))
 }
 
+/// Loads a note's content from the backend, driving the editor's loading /
+/// missing / error states. A `note_read` that returns an empty string means
+/// the note does not exist yet (treated as a new / missing note, not an error).
+fn load_note(
+    path: String,
+    content: Signal<String>,
+    loaded: Signal<bool>,
+    load_error: Signal<Option<String>>,
+    note_missing: Signal<bool>,
+) {
+    spawn_local(async move {
+        *loaded.write_unchecked() = false;
+        *load_error.write_unchecked() = None;
+        *note_missing.write_unchecked() = false;
+        // Clear stale content from a previously opened note.
+        *content.write_unchecked() = String::new();
+
+        let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "path": path })).unwrap();
+        match crate::ipc::tauri_invoke_safe("note_read", args).await {
+            Ok(Some(val)) => match serde_wasm_bindgen::from_value::<String>(val) {
+                Ok(saved) => {
+                    if !saved.is_empty() {
+                        *content.write_unchecked() = saved;
+                    } else {
+                        // Empty content → the note does not exist yet.
+                        *note_missing.write_unchecked() = true;
+                    }
+                }
+                Err(e) => {
+                    *load_error.write_unchecked() =
+                        Some(format!("Note content could not be parsed: {e}"));
+                }
+            },
+            Ok(None) => {
+                *load_error.write_unchecked() =
+                    Some("note_read returned no data.".to_string());
+            }
+            Err(e) => {
+                *load_error.write_unchecked() = Some(e.message());
+            }
+        }
+        *loaded.write_unchecked() = true;
+    });
+}
+
 /// The note editor.
 #[component]
 pub fn NoteEditor() -> Element {
@@ -48,6 +95,8 @@ pub fn NoteEditor() -> Element {
     let dirty = use_signal(|| 0u32);
     let has_unsaved = use_signal(|| false);
     let note_loaded = use_signal(|| false);
+    let load_error = use_signal(|| None::<String>);
+    let note_missing = use_signal(|| false);
     let show_menu = use_signal(|| false);
 
     // ── Load note content on mount / path change ──
@@ -55,26 +104,21 @@ pub fn NoteEditor() -> Element {
     let loaded_for_load = note_loaded;
     let has_unsaved_guard = has_unsaved;
     let ws_for_load = ws;
+    let load_error_for_load = load_error;
+    let note_missing_for_load = note_missing;
     use_effect(move || {
         let path = ws_for_load.active_path.peek().clone().unwrap_or_default();
         if path.is_empty() {
             return;
         }
         if !*has_unsaved_guard.peek() {
-            *loaded_for_load.write_unchecked() = false;
-            let content_c = content_for_load;
-            let loaded_c = loaded_for_load;
-            spawn_local(async move {
-                let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "path": path }))
-                    .unwrap();
-                let result = crate::ipc::tauri_invoke("note_read", args).await;
-                if let Ok(saved) = serde_wasm_bindgen::from_value::<String>(result) {
-                    if !saved.is_empty() {
-                        *content_c.write_unchecked() = saved;
-                    }
-                }
-                *loaded_c.write_unchecked() = true;
-            });
+            load_note(
+                path,
+                content_for_load,
+                loaded_for_load,
+                load_error_for_load,
+                note_missing_for_load,
+            );
         }
     });
 
@@ -134,6 +178,13 @@ pub fn NoteEditor() -> Element {
     let textarea_ref: Rc<std::cell::RefCell<Option<web_sys::HtmlTextAreaElement>>> =
         use_hook(|| Rc::new(std::cell::RefCell::new(None)));
 
+    // ── Retry loading the note after a failure ──
+    let on_retry_load = move |_: ()| {
+        if let Some(path) = ws.active_path.peek().clone() {
+            load_note(path, content, note_loaded, load_error, note_missing);
+        }
+    };
+
     // ── Slash menu callback ──
     let on_slash: EventHandler<String> = Callback::new(move |item: String| {
         *show_menu.write_unchecked() = false;
@@ -162,11 +213,48 @@ pub fn NoteEditor() -> Element {
                         div { class: "flex-1 flex items-center justify-center" }
                         SkeletonList { rows: 6 }
                     }
+                } else if let Some(err) = load_error.read().clone() {
+                    rsx! {
+                        div { class: "flex-1 flex items-center justify-center p-6" }
+                        div { class: "w-full max-w-md" }
+                        ErrorPanel {
+                            title: "Couldn't open note".to_string(),
+                            message: "The note content could not be loaded.".to_string(),
+                            details: err,
+                            recovery: "Make sure the note is accessible and the backend is running, then retry.".to_string(),
+                            on_retry: on_retry_load,
+                        }
+                    }
                 } else {
                     rsx! {
                         div {
                             class: "relative flex-1 flex flex-col",
-                            textarea {
+
+                        {
+                            if *note_missing.read() {
+                                rsx! {
+                                    Alert {
+                                        kind: ToastKind::Info,
+                                        title: Some("New note".to_string()),
+                                        message: "This note doesn't exist yet. Start typing and it will be created on save.".to_string(),
+                                    }
+                                }
+                            } else { rsx!{} }
+                        }
+
+                        {
+                            if *save_status.status.read() == SaveStatusType::Error {
+                                rsx! {
+                                    Alert {
+                                        kind: ToastKind::Error,
+                                        title: Some("Save failed".to_string()),
+                                        message: "Your latest changes were not saved. Editing continues locally and will retry automatically.".to_string(),
+                                    }
+                                }
+                            } else { rsx!{} }
+                        }
+
+                        textarea {
                                 class: "editor-textarea flex-1 resize-none",
                                 onmounted: move |ev: MountedEvent| {
                                     let web = ev.data().as_web_event();

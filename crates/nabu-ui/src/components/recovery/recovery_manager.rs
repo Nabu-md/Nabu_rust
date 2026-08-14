@@ -17,9 +17,10 @@
 //! - `move || { … }` reactive blocks → compute during render
 
 use crate::components::recovery::version_history::{absolute_time, NoteSummary, VersionMeta};
+use crate::components::recovery::LoadState;
 use crate::components::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::components::ui::dialog::ConfirmDialog;
-use crate::components::ui::feedback::use_toast;
+use crate::components::ui::feedback::{use_toast, ErrorPanel, LoadingBlock, SpinnerSize};
 use crate::components::ui::icons::Icon;
 use crate::components::ui::info::EmptyState;
 use dioxus::prelude::*;
@@ -36,15 +37,39 @@ struct ManagerState {
     /// Dialog: restore confirmation.
     confirm_restore: bool,
     selected_version: Option<String>,
+    /// Load lifecycle of the recoverable-notes list.
+    notes_state: LoadState,
+    /// Error detail for the notes list load failure.
+    notes_error: String,
 }
 
 /// Fetches the list of notes that have snapshots.
 fn fetch_notes(mut state: Signal<ManagerState>) {
     spawn_local(async move {
+        state.with_mut(|s| {
+            s.notes_state = LoadState::Loading;
+            s.notes_error = String::new();
+        });
         let empty_args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-        let result = crate::ipc::tauri_invoke("versions_all", empty_args).await;
-        if let Ok(notes) = serde_wasm_bindgen::from_value::<Vec<NoteSummary>>(result) {
-            state.with_mut(|s| s.notes = notes);
+        match crate::ipc::tauri_invoke_safe("versions_all", empty_args).await {
+            Ok(Some(val)) => match serde_wasm_bindgen::from_value::<Vec<NoteSummary>>(val) {
+                Ok(notes) => state.with_mut(|s| {
+                    s.notes = notes;
+                    s.notes_state = LoadState::Loaded;
+                }),
+                Err(e) => state.with_mut(|s| {
+                    s.notes_state = LoadState::Failed;
+                    s.notes_error = format!("Recoverable notes could not be parsed: {e}");
+                }),
+            },
+            Ok(None) => state.with_mut(|s| {
+                s.notes_state = LoadState::Failed;
+                s.notes_error = "versions_all returned no data.".to_string();
+            }),
+            Err(e) => state.with_mut(|s| {
+                s.notes_state = LoadState::Failed;
+                s.notes_error = e.message();
+            }),
         }
     });
 }
@@ -83,7 +108,16 @@ pub fn RecoveryManager() -> Element {
         restore_open.set(state.read().confirm_restore);
     });
 
-    fetch_notes(state);
+    let mut loaded_once = use_signal(|| false);
+    if !*loaded_once.read() {
+        loaded_once.set(true);
+        fetch_notes(state);
+    }
+
+    let on_retry = move |_: ()| fetch_notes(state);
+
+    let notes_state = state.read().notes_state;
+    let notes_error = state.read().notes_error.clone();
 
     rsx! {
         div { class: "recovery-manager flex h-full bg-gray-950 text-gray-100 overflow-hidden" }
@@ -105,45 +139,50 @@ pub fn RecoveryManager() -> Element {
             },
         }
 
-        {if {
-            let s = state.read();
-            let q = s.search.to_lowercase();
-            if q.is_empty() {
-                s.notes.clone()
-            } else {
-                s.notes
-                    .iter()
-                    .filter(|n| n.path.to_lowercase().contains(&q))
-                    .cloned()
-                    .collect()
-            }
-        }
-        .is_empty() {
-            rsx! {
-                EmptyState {
-                    icon: Icon::LifeBuoy,
-                    title: "Nothing to recover yet".to_string(),
-                    description: "Notes appear here once they have been saved at least once.".to_string(),
+        {match notes_state {
+            LoadState::Loading | LoadState::Idle => rsx! {
+                div { class: "py-8 flex items-center justify-center" }
+                LoadingBlock {
+                    label: "Scanning for recoverable snapshots…",
+                    size: SpinnerSize::Lg,
                 }
-            }
-        } else {
-            // ── Note list ──
-            let filtered: Vec<NoteSummary> = {
-                let s = state.read();
-                let q = s.search.to_lowercase();
-                if q.is_empty() {
-                    s.notes.clone()
+            },
+            LoadState::Failed => rsx! {
+                ErrorPanel {
+                    title: "Couldn't load recovery data".to_string(),
+                    message: "Failed to scan for notes with snapshots.".to_string(),
+                    details: notes_error,
+                    recovery: "Make sure your vault is accessible and the backend is running.".to_string(),
+                    on_retry: on_retry,
+                }
+            },
+            LoadState::Loaded => {
+                // ── Note list (filtered by search) ──
+                let filtered: Vec<NoteSummary> = {
+                    let s = state.read();
+                    let q = s.search.to_lowercase();
+                    if q.is_empty() {
+                        s.notes.clone()
+                    } else {
+                        s.notes
+                            .iter()
+                            .filter(|n| n.path.to_lowercase().contains(&q))
+                            .cloned()
+                            .collect()
+                    }
+                };
+                if filtered.is_empty() {
+                    rsx! {
+                        EmptyState {
+                            icon: Icon::LifeBuoy,
+                            title: "Nothing to recover yet".to_string(),
+                            description: "Notes appear here once they have been saved at least once.".to_string(),
+                        }
+                    }
                 } else {
-                    s.notes
-                        .iter()
-                        .filter(|n| n.path.to_lowercase().contains(&q))
-                        .cloned()
-                        .collect()
-                }
-            };
-            rsx! {
-                div { class: "divide-y divide-gray-800 rounded-lg border border-gray-800" }
-                for note in &filtered {
+                    rsx! {
+                        div { class: "divide-y divide-gray-800 rounded-lg border border-gray-800" }
+                        for note in &filtered {
                     {
                         let path = note.path.clone();
                         let path_check = path.clone();
@@ -271,7 +310,8 @@ pub fn RecoveryManager() -> Element {
                     }
                 }
             }
-        }}
+        }
+    }}}
 
         ConfirmDialog {
             open: restore_open,

@@ -1433,9 +1433,7 @@ pub fn queue_batch_set_status(
     status: String,
 ) -> Result<(), String> {
     for id in ids {
-        if let Err(e) = queue_set_status(ctx.clone(), id, status.clone()) {
-            eprintln!("Failed to set queue status: {}", e);
-        }
+        queue_set_status(ctx.clone(), id, status.clone())?;
     }
     Ok(())
 }

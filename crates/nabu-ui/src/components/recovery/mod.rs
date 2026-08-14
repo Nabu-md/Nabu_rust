@@ -16,6 +16,24 @@ pub mod save_status;
 pub mod session;
 pub mod version_history;
 
+/// Asynchronous load lifecycle for recovery views.
+///
+/// Distinguishes "still loading", "loaded successfully" (which may be empty),
+/// and "failed to load" so a blank panel is never confused with an empty one
+/// or an error.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum LoadState {
+    /// Initial / not yet attempted.
+    #[default]
+    Idle,
+    /// IPC request is in flight.
+    Loading,
+    /// IPC succeeded — the underlying data may be empty.
+    Loaded,
+    /// IPC failed or deserialization errored.
+    Failed,
+}
+
 pub use recovery_banner::RecoveryBanner;
 pub use recovery_manager::RecoveryManager;
 pub use save_status::{SaveStatus, SaveStatusContext, SaveStatusIndicator};

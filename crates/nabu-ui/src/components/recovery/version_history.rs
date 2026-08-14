@@ -20,9 +20,10 @@
 //! - `move || { … view!{} … }` reactive blocks → compute during render
 
 use crate::components::recovery::diff_view::{DiffRow, DiffView};
+use crate::components::recovery::LoadState;
 use crate::components::ui::button::{Button, ButtonSize, ButtonVariant};
 use crate::components::ui::dialog::{ConfirmDialog, PromptDialog};
-use crate::components::ui::feedback::use_toast;
+use crate::components::ui::feedback::{use_toast, ErrorPanel, LoadingBlock, SpinnerSize};
 use crate::components::ui::icons::{render_icon_view, Icon};
 use crate::components::ui::info::EmptyState;
 use dioxus::prelude::*;
@@ -93,20 +94,38 @@ fn human_size(bytes: usize) -> String {
 /// Fetches the list of notes that have snapshots.
 fn fetch_all_notes(mut state: Signal<VersionState>) {
     spawn_local(async move {
+        state.with_mut(|s| {
+            s.notes_state = LoadState::Loading;
+            s.notes_error = String::new();
+        });
         let empty_args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-        let result = crate::ipc::tauri_invoke("versions_all", empty_args).await;
-        if let Ok(summaries) = serde_wasm_bindgen::from_value::<Vec<NoteSummary>>(result) {
-            state.with_mut(|s| {
-                s.notes = summaries;
-                if let Some(sel) = &s.selected_note {
-                    if !s.notes.iter().any(|n| n.path == *sel) {
-                        s.selected_note = None;
-                        s.versions.clear();
-                        s.preview_content = None;
-                        s.selected_version = None;
+        match crate::ipc::tauri_invoke_safe("versions_all", empty_args).await {
+            Ok(Some(val)) => match serde_wasm_bindgen::from_value::<Vec<NoteSummary>>(val) {
+                Ok(summaries) => state.with_mut(|s| {
+                    s.notes = summaries;
+                    s.notes_state = LoadState::Loaded;
+                    if let Some(sel) = &s.selected_note {
+                        if !s.notes.iter().any(|n| n.path == *sel) {
+                            s.selected_note = None;
+                            s.versions.clear();
+                            s.preview_content = None;
+                            s.selected_version = None;
+                        }
                     }
-                }
-            });
+                }),
+                Err(e) => state.with_mut(|s| {
+                    s.notes_state = LoadState::Failed;
+                    s.notes_error = format!("Version list could not be parsed: {e}");
+                }),
+            },
+            Ok(None) => state.with_mut(|s| {
+                s.notes_state = LoadState::Failed;
+                s.notes_error = "versions_all returned no data.".to_string();
+            }),
+            Err(e) => state.with_mut(|s| {
+                s.notes_state = LoadState::Failed;
+                s.notes_error = e.message();
+            }),
         }
     });
 }
@@ -114,25 +133,41 @@ fn fetch_all_notes(mut state: Signal<VersionState>) {
 /// Loads the version list for the selected note and auto-picks the newest.
 fn load_versions(path: String, mut state: Signal<VersionState>) {
     spawn_local(async move {
+        state.with_mut(|s| {
+            s.versions_state = LoadState::Loading;
+            s.versions_error = String::new();
+            s.versions.clear();
+            s.preview_content = None;
+            s.diff = None;
+        });
         let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "path": path.clone() }))
             .unwrap();
-        let result = crate::ipc::tauri_invoke("versions_list", args).await;
-        match serde_wasm_bindgen::from_value::<Vec<VersionMeta>>(result) {
-            Ok(versions) => {
-                let newest = versions.last().map(|v| v.id.clone());
-                state.with_mut(|s| {
-                    s.versions = versions;
-                    s.selected_version = newest.clone();
-                    s.diff = None;
-                });
-                if let Some(id) = newest {
-                    preview_version(path, id, state);
+        match crate::ipc::tauri_invoke_safe("versions_list", args).await {
+            Ok(Some(val)) => match serde_wasm_bindgen::from_value::<Vec<VersionMeta>>(val) {
+                Ok(versions) => {
+                    let newest = versions.last().map(|v| v.id.clone());
+                    state.with_mut(|s| {
+                        s.versions = versions;
+                        s.selected_version = newest.clone();
+                        s.diff = None;
+                        s.versions_state = LoadState::Loaded;
+                    });
+                    if let Some(id) = newest {
+                        preview_version(path, id, state);
+                    }
                 }
-            }
-            Err(_) => state.with_mut(|s| {
-                s.versions.clear();
-                s.preview_content = None;
-                s.diff = None;
+                Err(e) => state.with_mut(|s| {
+                    s.versions_state = LoadState::Failed;
+                    s.versions_error = format!("Version timeline could not be parsed: {e}");
+                }),
+            },
+            Ok(None) => state.with_mut(|s| {
+                s.versions_state = LoadState::Failed;
+                s.versions_error = "versions_list returned no data.".to_string();
+            }),
+            Err(e) => state.with_mut(|s| {
+                s.versions_state = LoadState::Failed;
+                s.versions_error = e.message();
             }),
         }
     });
@@ -192,6 +227,14 @@ struct VersionState {
     confirm_restore: bool,
     /// Dialog state: duplicate prompt.
     duplicate_open: bool,
+    /// Load lifecycle of the notes (snapshot browser) list.
+    notes_state: LoadState,
+    /// Error detail for the notes list load failure.
+    notes_error: String,
+    /// Load lifecycle of the selected note's version timeline.
+    versions_state: LoadState,
+    /// Error detail for the version timeline load failure.
+    versions_error: String,
 }
 
 /// The Version History screen (ViewMode::History).
@@ -208,10 +251,24 @@ pub fn VersionHistory() -> Element {
         duplicate_open.set(state.read().duplicate_open);
     });
 
-    fetch_all_notes(state);
+    // Initial load — only once (and again on manual retry).
+    let mut loaded_once = use_signal(|| false);
+    if !*loaded_once.read() {
+        loaded_once.set(true);
+        fetch_all_notes(state);
+    }
+
+    let on_retry_notes = move |_: ()| fetch_all_notes(state);
+    let on_retry_versions = move |_: ()| {
+        if let Some(path) = state.read().selected_note.clone() {
+            load_versions(path, state);
+        }
+    };
 
     // ── Read state for rendering ───────────────────────────────────────────
     let notes = state.read().notes.clone();
+    let notes_state = state.read().notes_state;
+    let notes_error = state.read().notes_error.clone();
     let selected_note_name = state
         .read()
         .selected_note
@@ -219,6 +276,9 @@ pub fn VersionHistory() -> Element {
         .and_then(|p| Path::new(p).file_name())
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "Select a note".to_string());
+    let no_note_selected = state.read().selected_note.is_none();
+    let versions_state = state.read().versions_state;
+    let versions_error = state.read().versions_error.clone();
     let versions: Vec<VersionMeta> = if state.read().versions.is_empty() {
         Vec::new()
     } else {
@@ -240,18 +300,37 @@ pub fn VersionHistory() -> Element {
             p { class: "text-xs text-gray-500", {format!("{} notes with snapshots", notes.len())} }
 
             div { class: "flex-1 overflow-y-auto" }
-            {if notes.is_empty() {
-                rsx! {
-                    EmptyState {
-                        icon: Icon::History,
-                        title: "No snapshots yet".to_string(),
-                        description: "Save a note and it will appear here with version history.".to_string(),
+            {match notes_state {
+                LoadState::Loading | LoadState::Idle => rsx! {
+                    div { class: "p-6 flex items-center justify-center" }
+                    LoadingBlock {
+                        label: "Loading snapshot browser…",
+                        size: SpinnerSize::Md,
                     }
-                }
-            } else {
-                rsx! {
-                    div { class: "divide-y divide-gray-800" }
-                    for note in &notes {
+                },
+                LoadState::Failed => rsx! {
+                    div { class: "p-4" }
+                    ErrorPanel {
+                        title: "Couldn't load version history".to_string(),
+                        message: "Failed to load the list of notes with snapshots.".to_string(),
+                        details: notes_error,
+                        recovery: "Make sure your vault is accessible and the backend is running.".to_string(),
+                        on_retry: on_retry_notes,
+                    }
+                },
+                LoadState::Loaded => {
+                    if notes.is_empty() {
+                        rsx! {
+                            EmptyState {
+                                icon: Icon::History,
+                                title: "No snapshots yet".to_string(),
+                                description: "Save a note and it will appear here with version history.".to_string(),
+                            }
+                        }
+                    } else {
+                        rsx! {
+                            div { class: "divide-y divide-gray-800" }
+                            for note in &notes {
                         {
                             let path = note.path.clone();
                             let name = Path::new(&path)
@@ -299,7 +378,8 @@ pub fn VersionHistory() -> Element {
                         }
                     }
                 }
-            }}
+            }
+        }}
 
             // ── Middle: version timeline ──
             div {
@@ -346,17 +426,39 @@ pub fn VersionHistory() -> Element {
             }
 
             div { class: "flex-1 overflow-y-auto" }
-            {if versions.is_empty() {
-                rsx! {
-                    div {
-                        class: "px-4 py-3 text-xs text-gray-500",
-                        "No versions recorded yet.",
+            {match versions_state {
+                LoadState::Loading | LoadState::Idle => rsx! {
+                    div { class: "p-6 flex items-center justify-center" }
+                    LoadingBlock {
+                        label: "Loading versions…",
+                        size: SpinnerSize::Md,
                     }
-                }
-            } else {
-                rsx! {
-                    div { class: "divide-y divide-gray-800" }
-                    for version in versions.iter().rev() {
+                },
+                LoadState::Failed => rsx! {
+                    div { class: "p-4" }
+                    ErrorPanel {
+                        title: "Couldn't load versions".to_string(),
+                        message: "Failed to load the version timeline for this note.".to_string(),
+                        details: versions_error,
+                        on_retry: on_retry_versions,
+                    }
+                },
+                LoadState::Loaded => {
+                    if no_note_selected {
+                        rsx! {
+                            div { class: "px-4 py-3 text-xs text-gray-500", "Select a note to see its version timeline." }
+                        }
+                    } else if versions.is_empty() {
+                        rsx! {
+                            div {
+                                class: "px-4 py-3 text-xs text-gray-500",
+                                "No versions recorded yet.",
+                            }
+                        }
+                    } else {
+                        rsx! {
+                            div { class: "divide-y divide-gray-800" }
+                            for version in versions.iter().rev() {
                         {
                             let id = version.id.clone();
                             let s = state;
@@ -411,7 +513,8 @@ pub fn VersionHistory() -> Element {
                         }
                     }
                 }
-            }}
+            }
+        }}
 
             // ── Right: preview + diff ──
             div { class: "flex-1 overflow-y-auto p-4 min-w-0" }
@@ -480,8 +583,11 @@ pub fn VersionHistory() -> Element {
                         title: "Select a note and a version".to_string(),
                         description: "Preview the content, compare revisions, restore, or duplicate it.".to_string(),
                     }
-                }
+}
             }}
+            }
+        }}
+}}}
 
             // ── Dialogs ──
             ConfirmDialog {
