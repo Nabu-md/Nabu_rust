@@ -1,6 +1,9 @@
-use crate::event_bus::kinds::ITEM_STORED;
-use crate::event_bus::{EventBus, ItemStoredEvent, PipelineEvent};
-use crate::models::{CustomPropertyValue, KnowledgeObject, ObjectContent, ObjectMetadata, ObjectType, ProcessingState};
+use crate::event_bus::kinds::{INDEX_UPDATED, ITEM_STORED};
+use crate::event_bus::{EventBus, IndexOperation, IndexUpdatedEvent, ItemStoredEvent, PipelineEvent};
+use crate::models::{
+    CustomPropertyValue, KnowledgeObject, ObjectContent, ObjectMetadata, ObjectRelation, ObjectType,
+    ProcessingState,
+};
 use crate::registry::lifecycle::{Lifecycle, LifecycleManager, LifecycleStage};
 use crate::registry::metrics::{CounterMetric, GaugeMetric, MetricsAggregator, ServiceMetrics};
 use sha2::{Digest, Sha256};
@@ -240,6 +243,16 @@ impl StorageManager {
     /// content file location even when the object itself did not carry an
     /// explicit `vault_path` in its metadata.
     fn serialize_sidecar(object: &KnowledgeObject, resolved_vault_path: &str) -> Result<String, String> {
+        // For binary objects the MIME type and filename live on the content
+        // variant; surface them through the sidecar's existing `mime_type` /
+        // `original_filename` fields so the object can be rebuilt losslessly.
+        let (content_mime, content_filename) = match &object.content {
+            ObjectContent::Binary { mime_type, filename, .. } => {
+                (Some(mime_type.clone()), filename.clone())
+            }
+            _ => (None, None),
+        };
+
         let sidecar = Sidecar {
             id: object.id,
             object_type: object.object_type.clone(),
@@ -252,14 +265,17 @@ impl StorageManager {
             site_name: object.metadata.site_name.clone(),
             language: object.metadata.language.clone(),
             file_size: object.metadata.file_size,
-            mime_type: object.metadata.mime_type.clone(),
-            original_filename: object.metadata.original_filename.clone(),
+            mime_type: object.metadata.mime_type.clone().or(content_mime),
+            original_filename: object.metadata.original_filename.clone().or(content_filename),
             vault_path: Some(resolved_vault_path.to_string()),
             created_at: object.created_at,
             updated_at: object.updated_at,
             content_ext: content_extension_for(&object.content).to_string(),
             word_count: object.metadata.word_count.or_else(|| Some(object.count_words())),
             custom_properties: object.custom_properties.clone(),
+            relations: object.relations.clone(),
+            content_hash: object.content_hash.clone(),
+            processing_state: object.processing_state.clone(),
         };
         serde_json::to_string_pretty(&sidecar).map_err(|e| e.to_string())
     }
@@ -289,14 +305,11 @@ impl StorageManager {
             | ObjectContent::Uri(s) => {
                 std::fs::write(&content_path, s).map_err(|e| e.to_string())?;
             }
-            ObjectContent::Binary {
-                data, mime_type, ..
-            } => {
-                // Binary data goes into a `.bin` sidecar; content file is empty
-                // placeholder so the vault-rel path still resolves.
-                let bin_path = self.sidecar_path(object.id).with_extension("bin");
-                std::fs::write(&bin_path, data).map_err(|e| e.to_string())?;
-                let _ = mime_type;
+            ObjectContent::Binary { data, .. } => {
+                // Binary blobs are written to the resolved vault path and read
+                // back as raw bytes in `sidecar_to_object`, so the round-trip
+                // survives a restart without falling through to Markdown.
+                std::fs::write(&content_path, data).map_err(|e| e.to_string())?;
             }
         }
 
@@ -304,10 +317,17 @@ impl StorageManager {
         let sidecar = Self::serialize_sidecar(object, &vault_rel)?;
         std::fs::write(self.sidecar_path(object.id), sidecar).map_err(|e| e.to_string())?;
 
-        // Update in-memory cache.
+        // Update in-memory cache. Normalize the cached object's `vault_path`
+        // to the resolved path so that cache reads (and downstream callers
+        // such as rename/move) reflect the same location persisted to the
+        // sidecar.
         {
             let mut store = self.store.write().map_err(|e| e.to_string())?;
-            store.insert(object.id, object.clone());
+            let mut cached = object.clone();
+            if cached.metadata.vault_path.is_none() {
+                cached.metadata.vault_path = Some(vault_rel.clone());
+            }
+            store.insert(object.id, cached);
         }
 
         // Publish stored event.
@@ -396,11 +416,39 @@ impl StorageManager {
     fn sidecar_to_object(sidecar: &Sidecar, vault_root: &Path) -> Option<KnowledgeObject> {
         let content = if let Some(rel) = &sidecar.vault_path {
             let abs = vault_root.join(rel);
-            let raw = std::fs::read_to_string(&abs).ok()?;
             match sidecar.content_ext.as_str() {
-                "html" => ObjectContent::RichHtml(raw),
-                "txt" => ObjectContent::PlainText(raw),
+                // Binary blobs are stored as raw bytes (read with
+                // `std::fs::read`, not `read_to_string`) and must not silently
+                // fall through to Markdown. Missing/corrupt binary data
+                // surfaces as a failed load (`None`) via the existing error
+                // model rather than a plausible empty object.
+                "bin" => {
+                    let data = std::fs::read(&abs).ok()?;
+                    let mime_type = sidecar
+                        .mime_type
+                        .clone()
+                        .unwrap_or_else(|| "application/octet-stream".to_string());
+                    let filename = sidecar.original_filename.clone();
+                    ObjectContent::Binary {
+                        mime_type,
+                        data,
+                        filename,
+                    }
+                }
+                "html" => {
+                    let raw = std::fs::read_to_string(&abs).ok()?;
+                    ObjectContent::RichHtml(raw)
+                }
+                "txt" => {
+                    let raw = std::fs::read_to_string(&abs).ok()?;
+                    ObjectContent::PlainText(raw)
+                }
+                "uri" => {
+                    let raw = std::fs::read_to_string(&abs).ok()?;
+                    ObjectContent::Uri(raw)
+                }
                 "json" => {
+                    let raw = std::fs::read_to_string(&abs).ok()?;
                     let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
                     ObjectContent::Binary {
                         mime_type: "application/json".to_string(),
@@ -408,7 +456,10 @@ impl StorageManager {
                         filename: None,
                     }
                 }
-                _ => ObjectContent::Markdown(raw),
+                _ => {
+                    let raw = std::fs::read_to_string(&abs).ok()?;
+                    ObjectContent::Markdown(raw)
+                }
             }
         } else {
             ObjectContent::Markdown(String::new())
@@ -437,9 +488,9 @@ impl StorageManager {
             metadata,
             custom_properties: sidecar.custom_properties.clone(),
             tags: sidecar.tags.clone(),
-            relations: vec![],
-            processing_state: ProcessingState::Completed,
-            content_hash: None,
+            relations: sidecar.relations.clone(),
+            processing_state: sidecar.processing_state.clone(),
+            content_hash: sidecar.content_hash.clone(),
             created_at: sidecar.created_at,
             updated_at: sidecar.updated_at,
         })
@@ -447,26 +498,175 @@ impl StorageManager {
 
     /// Delete a KnowledgeObject by ID.
     ///
-    /// Removes the object from the in-memory cache and deletes its
-    /// persisted sidecar and content file from disk.
+    /// Removes the object from the in-memory cache and deletes its persisted
+    /// content file and JSON sidecar from disk.  When an event bus is attached,
+    /// an `INDEX_UPDATED` event with [`IndexOperation::Removed`] is published so
+    /// downstream subscribers (indexer, graph, recovery) can react.
     pub fn delete(&self, id: Uuid) -> Result<(), String> {
-        // Remove sidecar.
+        // Resolve the content path from the in-memory cache, falling back to
+        // the on-disk sidecar for objects not currently resident in memory.
+        let content_rel = {
+            let store = self.store.read().map_err(|e| e.to_string())?;
+            store
+                .get(&id)
+                .and_then(|o| o.metadata.vault_path.clone())
+        }
+        .or_else(|| {
+            let sidecar_str = std::fs::read_to_string(self.sidecar_path(id)).ok()?;
+            let sidecar: Sidecar = serde_json::from_str(&sidecar_str).ok()?;
+            sidecar.vault_path
+        });
+
+        // Remove the content file (if any).
+        if let Some(ref rel) = content_rel {
+            let _ = std::fs::remove_file(self.content_path(rel));
+        }
+        // Best-effort cleanup of any legacy UUID-keyed binary blob that a
+        // previous writer may have placed under `.nabu/<id>.bin`.
+        let legacy_bin = self
+            .vault_path
+            .join(INDEX_DIR_NAME)
+            .join(format!("{}.bin", id));
+        let _ = std::fs::remove_file(legacy_bin);
+
+        // Remove the JSON sidecar.
         let _ = std::fs::remove_file(self.sidecar_path(id));
 
-        // Remove from cache and track content path for file deletion.
-        let content_rel;
+        // Remove from cache.
         {
             let mut store = self.store.write().map_err(|e| e.to_string())?;
-            let removed = store.remove(&id);
-            content_rel = removed.and_then(|o| o.metadata.vault_path);
+            store.remove(&id);
         }
 
-        // Remove content file if it exists.
-        if let Some(rel) = content_rel {
-            let _ = std::fs::remove_file(self.content_path(&rel));
+        // Publish removal event through the existing storage convention.
+        if let Some(ref bus) = self.event_bus {
+            bus.publish(
+                INDEX_UPDATED,
+                &PipelineEvent::IndexUpdated(IndexUpdatedEvent {
+                    object_id: id,
+                    operation: IndexOperation::Removed,
+                    timestamp: chrono::Utc::now(),
+                }),
+            );
         }
 
         Ok(())
+    }
+
+    /// Rename a stored KnowledgeObject, changing only its filename while
+    /// preserving its directory, content extension, and object identity.
+    ///
+    /// The content file is relocated on disk, the `.nabu` sidecar is rewritten
+    /// with the new path, the in-memory cache is updated, and an `ITEM_STORED`
+    /// event is published.  After this call the old content path no longer
+    /// exists and the object is loadable at the new path, even after a
+    /// StorageManager restart.
+    pub fn rename(&self, id: Uuid, new_name: &str) -> Result<String, String> {
+        let object = self.load(id).ok_or_else(|| format!("object {} not found", id))?;
+        let old_rel = object
+            .metadata
+            .vault_path
+            .clone()
+            .ok_or_else(|| format!("object {} has no vault_path to rename", id))?;
+
+        let old_path = std::path::Path::new(&old_rel);
+        let dir = old_path.parent().and_then(|p| {
+            let s = p.to_string_lossy();
+            if s.is_empty() { None } else { Some(s.to_string()) }
+        });
+        let ext = old_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| format!(".{}", e))
+            .unwrap_or_default();
+        let new_basename = if std::path::Path::new(new_name).extension().is_some() {
+            new_name.to_string()
+        } else {
+            format!("{}{}", new_name, ext)
+        };
+        let new_rel = match dir {
+            Some(d) => format!("{}/{}", d, new_basename),
+            None => new_basename,
+        };
+        self.update_vault_path(id, object.object_type.clone(), Some(&old_rel), new_rel)
+    }
+
+    /// Move a stored KnowledgeObject to a new vault-relative path.
+    ///
+    /// Unlike [`rename`](Self::rename) (which only changes the filename), this
+    /// relocates the content file to an arbitrary new vault path (typically a
+    /// different directory) while preserving the object's identity, sidecar,
+    /// and metadata.  An `ITEM_STORED` event is published for the new location.
+    pub fn move_object(&self, id: Uuid, new_vault_path: &str) -> Result<String, String> {
+        let object = self.load(id).ok_or_else(|| format!("object {} not found", id))?;
+        if object.metadata.vault_path.as_deref() == Some(new_vault_path) {
+            return Ok(new_vault_path.to_string());
+        }
+        let old_rel = object.metadata.vault_path.clone();
+        self.update_vault_path(
+            id,
+            object.object_type.clone(),
+            old_rel.as_deref(),
+            new_vault_path.to_string(),
+        )
+    }
+
+    /// Shared implementation for [`rename`](Self::rename) and
+    /// [`move_object`](Self::move_object): relocate the on-disk content file
+    /// to `new_vault_rel`, rewrite the sidecar with the new path, update the
+    /// in-memory cache, and publish an `ITEM_STORED` event.
+    fn update_vault_path(
+        &self,
+        id: Uuid,
+        object_type: ObjectType,
+        old_rel: Option<&str>,
+        new_vault_rel: String,
+    ) -> Result<String, String> {
+        // Relocate the content file.  For objects without a prior path (only
+        // possible for unsaved objects) there is nothing to move.
+        if let Some(old) = old_rel {
+            let src = self.content_path(old);
+            let dst = self.content_path(&new_vault_rel);
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            if src.exists() && src != dst {
+                std::fs::rename(&src, &dst).map_err(|e| e.to_string())?;
+            }
+        }
+
+        // Reload the full object, point it at the new path, and rewrite its
+        // sidecar so the new location survives a restart.
+        let mut updated = match self.load(id) {
+            Some(o) => o,
+            None => return Err(format!("object {} not found", id)),
+        };
+        updated.metadata.vault_path = Some(new_vault_rel.clone());
+        updated.updated_at = chrono::Utc::now();
+        let sidecar = Self::serialize_sidecar(&updated, &new_vault_rel)?;
+        std::fs::write(self.sidecar_path(id), sidecar).map_err(|e| e.to_string())?;
+
+        // Update in-memory cache.
+        {
+            let mut store = self.store.write().map_err(|e| e.to_string())?;
+            store.insert(id, updated);
+        }
+
+        // Re-publish the stored notification so indexers/graph subscribers
+        // react to the new location.
+        if let Some(ref bus) = self.event_bus {
+            bus.publish(
+                ITEM_STORED,
+                &PipelineEvent::ItemStored(ItemStoredEvent {
+                    object_id: id,
+                    vault_path: new_vault_rel.clone(),
+                    object_type: object_type.clone(),
+                    timestamp: chrono::Utc::now(),
+                }),
+            );
+        }
+
+        Ok(new_vault_rel)
     }
 
     /// Count of stored objects (in-memory cache size).
@@ -696,6 +896,20 @@ struct Sidecar {
     /// before this field existed, so older vaults keep loading.
     #[serde(default)]
     custom_properties: HashMap<String, CustomPropertyValue>,
+    /// Relationships to other KnowledgeObjects, persisted so relations survive
+    /// a restart and re-load without re-parsing content.  Defaults to empty
+    /// for sidecars written before this field existed.
+    #[serde(default)]
+    relations: Vec<ObjectRelation>,
+    /// Content hash for deduplication, preserved exactly across restart
+    /// (not recomputed on load).
+    #[serde(default)]
+    content_hash: Option<String>,
+    /// Processing lifecycle state, preserved so partially-processed objects
+    /// do not revert to a default after restart.  Defaults to `Pending` for
+    /// sidecars written before this field existed.
+    #[serde(default = "default_processing_state")]
+    processing_state: ProcessingState,
 }
 
 /// Compute a content hash for change detection.
@@ -706,9 +920,17 @@ fn content_hash(content: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
+/// Default processing state for sidecars written before `processing_state`
+/// was persisted (older vaults keep loading as `Pending`).
+fn default_processing_state() -> ProcessingState {
+    ProcessingState::Pending
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::RelationType;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn test_save_and_load() {
@@ -838,5 +1060,328 @@ mod tests {
             let bookmarks = mgr.load_by_type(ObjectType::Bookmark);
             assert_eq!(bookmarks.len(), 1);
         }
+    }
+
+    #[test]
+    fn test_rename_restart_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let obj = KnowledgeObject::new(
+            ObjectType::Note,
+            ObjectContent::Markdown("Rename me".to_string()),
+        )
+        .with_metadata(ObjectMetadata {
+            title: Some("Rename Me".to_string()),
+            ..Default::default()
+        });
+
+        {
+            let mgr = StorageManager::new(dir.path());
+            mgr.save(&obj).unwrap();
+
+            // Old path exists before rename.
+            assert!(dir.path().join("Inbox/rename-me.md").exists());
+
+            let new_rel = mgr.rename(obj.id, "renamed").unwrap();
+            assert_eq!(new_rel, "Inbox/renamed.md");
+
+            // Old content path gone, new content path present.
+            assert!(!dir.path().join("Inbox/rename-me.md").exists());
+            assert!(dir.path().join("Inbox/renamed.md").exists());
+            // Sidecar is UUID-keyed and still present.
+            assert!(dir.path().join(".nabu").join(format!("{}.json", obj.id)).exists());
+        }
+
+        // Restart: a fresh StorageManager must reload at the new path.
+        {
+            let mgr = StorageManager::new(dir.path());
+            assert!(mgr.exists(obj.id));
+            let loaded = mgr.load(obj.id).unwrap();
+            assert_eq!(loaded.id, obj.id);
+            assert_eq!(
+                loaded.metadata.vault_path,
+                Some("Inbox/renamed.md".to_string())
+            );
+            assert_eq!(loaded.metadata.title, Some("Rename Me".to_string()));
+            assert_eq!(
+                loaded.content,
+                ObjectContent::Markdown("Rename me".to_string())
+            );
+            assert!(!dir.path().join("Inbox/rename-me.md").exists());
+        }
+    }
+
+    #[test]
+    fn test_move_restart_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let obj = KnowledgeObject::new(
+            ObjectType::Note,
+            ObjectContent::Markdown("Move me".to_string()),
+        )
+        .with_metadata(ObjectMetadata {
+            title: Some("Move Me".to_string()),
+            ..Default::default()
+        });
+
+        {
+            let mgr = StorageManager::new(dir.path());
+            mgr.save(&obj).unwrap();
+            let new_rel = mgr.move_object(obj.id, "Archive/move-me.md").unwrap();
+            assert_eq!(new_rel, "Archive/move-me.md");
+
+            // Content relocated; old location gone.
+            assert!(!dir.path().join("Inbox/move-me.md").exists());
+            assert!(dir.path().join("Archive/move-me.md").exists());
+            // Sidecar follows the object (UUID-keyed, unchanged path).
+            assert!(dir.path().join(".nabu").join(format!("{}.json", obj.id)).exists());
+        }
+
+        {
+            let mgr = StorageManager::new(dir.path());
+            assert!(mgr.exists(obj.id));
+            let loaded = mgr.load(obj.id).unwrap();
+            assert_eq!(
+                loaded.metadata.vault_path,
+                Some("Archive/move-me.md".to_string())
+            );
+            assert_eq!(
+                loaded.content,
+                ObjectContent::Markdown("Move me".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn test_binary_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes: Vec<u8> = vec![0, 1, 2, 3, 200, 250, 255, 0, 42, 128];
+        let obj = KnowledgeObject::new(
+            ObjectType::Screenshot,
+            ObjectContent::Binary {
+                mime_type: "image/png".to_string(),
+                data: bytes.clone(),
+                filename: Some("shot.png".to_string()),
+            },
+        )
+        .with_metadata(ObjectMetadata {
+            title: Some("Screenshot".to_string()),
+            mime_type: Some("image/png".to_string()),
+            original_filename: Some("shot.png".to_string()),
+            ..Default::default()
+        });
+
+        {
+            let mgr = StorageManager::new(dir.path());
+            mgr.save(&obj).unwrap();
+            // The content file should exist at the vault path (raw bytes).
+            assert!(dir.path().join("Inbox/screenshot.bin").exists());
+        }
+
+        // Restart with a fresh manager and reload.
+        let mgr = StorageManager::new(dir.path());
+        let loaded = mgr
+            .load(obj.id)
+            .expect("binary object must reload after restart");
+        match loaded.content {
+            ObjectContent::Binary {
+                data,
+                mime_type,
+                filename,
+            } => {
+                assert_eq!(data, bytes, "binary bytes must round-trip exactly");
+                assert_eq!(mime_type, "image/png");
+                assert_eq!(filename, Some("shot.png".to_string()));
+            }
+            other => panic!("expected Binary content, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_binary_missing_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let obj = KnowledgeObject::new(
+            ObjectType::Screenshot,
+            ObjectContent::Binary {
+                mime_type: "image/png".to_string(),
+                data: vec![1, 2, 3],
+                filename: None,
+            },
+        )
+        .with_metadata(ObjectMetadata {
+            title: Some("Broken Binary".to_string()),
+            ..Default::default()
+        });
+
+        {
+            let mgr = StorageManager::new(dir.path());
+            mgr.save(&obj).unwrap();
+        }
+
+        // Corrupt: delete the content file but keep the sidecar.
+        let content_path = dir.path().join("Inbox/broken-binary.bin");
+        assert!(content_path.exists());
+        std::fs::remove_file(&content_path).unwrap();
+
+        let mgr = StorageManager::new(dir.path());
+        // Missing/corrupt binary data must surface as a failed load (`None`)
+        // rather than a plausible empty object.
+        assert!(mgr.load(obj.id).is_none());
+    }
+
+    #[test]
+    fn test_relations_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let target_a = Uuid::new_v4();
+        let target_b = Uuid::new_v4();
+        let mut obj = KnowledgeObject::new(
+            ObjectType::Note,
+            ObjectContent::Markdown("relations".to_string()),
+        )
+        .with_metadata(ObjectMetadata {
+            title: Some("Relations".to_string()),
+            ..Default::default()
+        });
+        obj.relations = vec![
+            ObjectRelation {
+                target_id: target_a,
+                relation_type: RelationType::References,
+                label: Some("ref".to_string()),
+            },
+            ObjectRelation {
+                target_id: target_b,
+                relation_type: RelationType::Custom("cites".to_string()),
+                label: None,
+            },
+        ];
+
+        {
+            let mgr = StorageManager::new(dir.path());
+            mgr.save(&obj).unwrap();
+        }
+
+        let mgr = StorageManager::new(dir.path());
+        let loaded = mgr.load(obj.id).unwrap();
+
+        // Compare via the canonical JSON representation (ObjectRelation and
+        // RelationType do not implement PartialEq in the model layer).
+        let orig_json = serde_json::to_string(&obj.relations).unwrap();
+        let loaded_json = serde_json::to_string(&loaded.relations).unwrap();
+        assert_eq!(
+            loaded_json, orig_json,
+            "relations must survive restart"
+        );
+        assert_eq!(loaded.relations.len(), 2);
+        assert_eq!(loaded.relations[0].target_id, target_a);
+    }
+
+    #[test]
+    fn test_content_hash_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut obj = KnowledgeObject::new(
+            ObjectType::Note,
+            ObjectContent::Markdown("hash me".to_string()),
+        )
+        .with_metadata(ObjectMetadata {
+            title: Some("Hash Test".to_string()),
+            ..Default::default()
+        });
+        obj.content_hash = Some("abc123hashvalue".to_string());
+
+        {
+            let mgr = StorageManager::new(dir.path());
+            mgr.save(&obj).unwrap();
+        }
+
+        let mgr = StorageManager::new(dir.path());
+        let loaded = mgr.load(obj.id).unwrap();
+        assert_eq!(
+            loaded.content_hash,
+            Some("abc123hashvalue".to_string()),
+            "content_hash must survive restart unchanged"
+        );
+
+        // A content_hash of None must also round-trip (not be recomputed on load).
+        obj.content_hash = None;
+        mgr.save(&obj).unwrap();
+        let loaded = mgr.load(obj.id).unwrap();
+        assert_eq!(loaded.content_hash, None);
+    }
+
+    #[test]
+    fn test_processing_state_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut obj = KnowledgeObject::new(
+            ObjectType::Note,
+            ObjectContent::Markdown("state".to_string()),
+        )
+        .with_metadata(ObjectMetadata {
+            title: Some("State Test".to_string()),
+            ..Default::default()
+        });
+        obj.processing_state = ProcessingState::Failed("bad data".to_string());
+
+        {
+            let mgr = StorageManager::new(dir.path());
+            mgr.save(&obj).unwrap();
+        }
+
+        let mgr = StorageManager::new(dir.path());
+        let loaded = mgr.load(obj.id).unwrap();
+        assert_eq!(
+            loaded.processing_state,
+            ProcessingState::Failed("bad data".to_string()),
+            "processing_state must survive restart unchanged"
+        );
+    }
+
+    #[test]
+    fn test_delete_removes_content_and_sidecar_and_emits_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let bus = EventBus::<PipelineEvent>::new();
+        let mgr = StorageManager::with_event_bus(dir.path(), bus.clone());
+
+        let obj = KnowledgeObject::new(
+            ObjectType::Note,
+            ObjectContent::Markdown("delete me".to_string()),
+        )
+        .with_metadata(ObjectMetadata {
+            title: Some("Delete Me".to_string()),
+            ..Default::default()
+        });
+        mgr.save(&obj).unwrap();
+
+        let content_path = dir
+            .path()
+            .join(format!("Inbox/{}.md", slugify("Delete Me")));
+        let sidecar_path = dir
+            .path()
+            .join(".nabu")
+            .join(format!("{}.json", obj.id));
+        assert!(content_path.exists());
+        assert!(sidecar_path.exists());
+        assert!(mgr.exists(obj.id));
+
+        // Subscribe to the deletion event BEFORE deleting.
+        let received = Arc::new(Mutex::new(Vec::<IndexOperation>::new()));
+        let received_clone = received.clone();
+        let _sub = bus.subscribe(INDEX_UPDATED, move |ev: &PipelineEvent| {
+            if let PipelineEvent::IndexUpdated(e) = ev {
+                received_clone.lock().unwrap().push(e.operation.clone());
+            }
+        });
+
+        mgr.delete(obj.id).unwrap();
+
+        // Content + sidecar gone, object no longer loadable.
+        assert!(!content_path.exists());
+        assert!(!sidecar_path.exists());
+        assert!(!mgr.exists(obj.id));
+        assert!(mgr.load(obj.id).is_none());
+
+        let ops = received.lock().unwrap();
+        assert!(
+            ops.iter().any(|op| matches!(op, IndexOperation::Removed)),
+            "expected INDEX_UPDATED/Removed event, got {:?}",
+            &*ops
+        );
     }
 }
