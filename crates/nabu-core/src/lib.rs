@@ -41,6 +41,8 @@ pub mod models;
 pub mod native;
 pub mod pipeline_migration;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod watcher;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod agent;
 pub mod plugin;
 pub mod processing;
@@ -101,5 +103,8 @@ pub use storage::*;
 pub use streaming::*;
 #[allow(ambiguous_glob_reexports)]
 pub use sync::*;
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(ambiguous_glob_reexports)]
+pub use watcher::*;
     #[allow(ambiguous_glob_reexports)]
     pub use tool_calling::*;

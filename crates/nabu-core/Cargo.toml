@@ -26,6 +26,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # have no local filesystem, and tracing-appender does not compile there.
 tracing-appender = "0.2"
 
+# Filesystem watcher for the vault. `notify` only compiles on native targets
+# (it wraps platform-specific kernel notification APIs); the watcher module
+# is gated to `cfg(not(target_arch = "wasm32"))` accordingly.
+notify = "8"
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # uuid's `v4` feature needs an explicit randomness source on wasm32-unknown-unknown.
 # The `js` feature (Web Crypto via wasm-bindgen) is enabled only for wasm builds;
