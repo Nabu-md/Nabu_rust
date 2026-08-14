@@ -1,8 +1,8 @@
-use crate::event_bus::kinds::{GRAPH_UPDATED, ITEM_STORED};
+use crate::event_bus::kinds::ITEM_STORED;
 use crate::event_bus::{EventBus, ItemStoredEvent, PipelineEvent};
 use crate::graph::incremental::engine::IncrementalUpdateEngine;
 use crate::graph::serializer::{GraphSnapshot, SerializedNode};
-use crate::graph::{GraphOperation, GraphUpdatedEvent, VaultGraph};
+use crate::graph::VaultGraph;
 use crate::models::KnowledgeObject;
 
 use std::sync::{Arc, Mutex};
@@ -74,7 +74,7 @@ impl GraphEventBridge {
                         );
                         obj.id = object_id;
 
-                        graph.add_node(&obj).unwrap();
+                        graph.update_node(&obj).unwrap();
 
                         // Add to snapshot
                         let node = SerializedNode::new(
