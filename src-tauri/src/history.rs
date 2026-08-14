@@ -441,17 +441,38 @@ pub fn note_rename(
     // Phase 11.3: snapshot the note before it is renamed so its history is
     // preserved under the pre-rename content.
     let _ = crate::recovery::snapshot_note(&vault_path, &from);
-    if let Some(parent) = to_path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    // Route tracked objects through the canonical StorageManager so the rename
+    // propagates to the index/graph via the ITEM_STORED pipeline. Untracked
+    // files and folders fall back to a direct filesystem rename.
+    let moved_through_manager = if let Some(manager) = ctx.storage_manager() {
+        if let Some(obj) = manager.find_by_path(&from) {
+            manager.move_object(obj.id, &to).map_err(|e| e.to_string())?;
+            true
+        } else {
+            if let Some(parent) = to_path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+            }
+            std::fs::rename(&from_path, &to_path).map_err(|e| e.to_string())?;
+            false
         }
-    }
-    std::fs::rename(&from_path, &to_path).map_err(|e| e.to_string())?;
+    } else {
+        if let Some(parent) = to_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+        }
+        std::fs::rename(&from_path, &to_path).map_err(|e| e.to_string())?;
+        false
+    };
 
     let undo_from = from_path.clone();
     let undo_to = to_path.clone();
     let redo_from = from_path;
     let redo_to = to_path;
+    let undo_vault = vault_path.clone();
+    let redo_vault = vault_path;
 
     push_history(
         &ctx,
@@ -460,13 +481,30 @@ pub fn note_rename(
         vec![from.clone(), to.clone()],
         serde_json::json!({ "from": from }),
         serde_json::json!({ "to": to }),
-        // Undo: rename back.
+        // Undo: rename back. Objects routed through the StorageManager are
+        // relocated back through it so index/graph stay consistent.
         Arc::new(move || {
+            if moved_through_manager {
+                if let Some(manager) = ctx.storage_manager() {
+                    if let Some(obj) = manager.find_by_path(&undo_to.to_string_lossy()) {
+                        manager.move_object(obj.id, &undo_from.to_string_lossy())?;
+                        return Ok(());
+                    }
+                }
+            }
             std::fs::rename(&undo_to, &undo_from).map_err(|e| e.to_string())?;
             Ok(())
         }),
         // Redo: rename forward again.
         Arc::new(move || {
+            if moved_through_manager {
+                if let Some(manager) = ctx.storage_manager() {
+                    if let Some(obj) = manager.find_by_path(&redo_from.to_string_lossy()) {
+                        manager.move_object(obj.id, &redo_to.to_string_lossy())?;
+                        return Ok(());
+                    }
+                }
+            }
             std::fs::rename(&redo_from, &redo_to).map_err(|e| e.to_string())?;
             Ok(())
         }),
@@ -872,6 +910,22 @@ pub fn items_move(
         if let Some(parent) = to_abs.parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+        }
+        // Route tracked object files through the canonical StorageManager so
+        // the move propagates to index/graph via ITEM_STORED. Folders and
+        // untracked files fall back to a direct filesystem rename.
+        if let Some(manager) = ctx.storage_manager() {
+            if let Some(obj) = manager.find_by_path(item) {
+                let rel_dest = to_abs
+                    .strip_prefix(&vault_path)
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| name.clone());
+                manager
+                    .move_object(obj.id, &rel_dest)
+                    .map_err(|e| e.to_string())?;
+                moved.push((from_abs, to_abs));
+                continue;
             }
         }
         std::fs::rename(&from_abs, &to_abs).map_err(|e| e.to_string())?;

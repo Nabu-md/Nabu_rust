@@ -227,7 +227,8 @@ fn build_application_context(
     // ---- 11. Canonical event flow: ITEM_STORED → Indexer + VaultGraph ----
     // StorageManager.save() publishes ITEM_STORED after persistence. These
     // subscribers are the ONLY consumers of that event: they index the stored
-    // object and add it to the graph. No side paths, no skipped stages.
+    // object and upsert it into the graph (deriving content-derived wiki-link
+    // edges). No side paths, no skipped stages.
     let storage_for_events = storage.clone();
     let indexer_for_events = indexer.clone();
     let graph_for_events = vault_graph.clone();
@@ -240,13 +241,87 @@ fn build_application_context(
                     }
                 }
                 if let Ok(graph) = graph_for_events.write() {
-                    if let Err(e) = graph.add_node(&object) {
-                        tracing::error!(event.id = %stored.object_id, error = %e, "VaultGraph failed to add node");
+                    // update_node (not add_node) so wiki-link edges are derived
+                    // and the graph stays consistent across content edits.
+                    if let Err(e) = graph.update_node(&object) {
+                        tracing::error!(event.id = %stored.object_id, error = %e, "VaultGraph failed to update node");
                     }
                 }
             }
         }
     });
+
+    // ---- 12. Canonical removal flow: INDEX_UPDATED(Removed) → Indexer + Graph
+    // StorageManager.delete() publishes INDEX_UPDATED with operation Removed.
+    // This subscriber is the ONLY removal path into the search index and the
+    // graph, so deletes through the storage owner stay consistent everywhere.
+    let indexer_for_removal = indexer.clone();
+    let graph_for_removal = vault_graph.clone();
+    event_bus.subscribe(kinds::INDEX_UPDATED, move |event: &PipelineEvent| {
+        if let PipelineEvent::IndexUpdated(updated) = event {
+            if !matches!(updated.operation, nabu_core::event_bus::IndexOperation::Removed) {
+                return;
+            }
+            if let Ok(indexer) = indexer_for_removal.lock() {
+                if let Err(e) = indexer.remove_object(updated.object_id) {
+                    tracing::error!(event.id = %updated.object_id, error = %e, "Indexer failed to remove document");
+                }
+            }
+            if let Ok(graph) = graph_for_removal.write() {
+                if let Err(e) = graph.remove_node(updated.object_id) {
+                    tracing::error!(event.id = %updated.object_id, error = %e, "VaultGraph failed to remove node");
+                }
+            }
+        }
+    });
+
+    // ---- 12.5. Rebuild index + graph from the current vault contents ----
+    // On launch the persistent index/graph are reconstructed from the canonical
+    // storage enumeration so search and graph are consistent with disk before
+    // any new events arrive (and independent of whatever was persisted last run).
+    if let Ok(objects) = storage.list_objects("", None, 100_000) {
+        if let Ok(indexer) = indexer.lock() {
+            if let Err(e) = indexer.reindex(&objects) {
+                tracing::error!(error = %e, "Indexer failed to rebuild index on startup");
+            }
+        }
+        if let Ok(graph) = vault_graph.write() {
+            if let Err(e) = graph.rebuild_from_objects(&objects) {
+                tracing::error!(error = %e, "VaultGraph failed to rebuild graph on startup");
+            }
+        }
+    }
+
+    // ---- 13. One VaultWatcher (external file-change → index/graph sync) ----
+    // The watcher is a pure event source; this composition root owns the only
+    // consumer that folds external Created/Modified/Deleted/Renamed events into
+    // the canonical Indexer/VaultGraph. Internal mutations are suppressed via
+    // `expect_self_operation`, so these events never double-apply.
+    let mut watcher = nabu_core::watcher::VaultWatcher::new(vault_path.clone());
+    let watcher_rx = watcher.start();
+    let watcher = Arc::new(watcher);
+    if let Ok(receiver) = watcher_rx {
+        let storage_for_watcher = storage.clone();
+        let indexer_for_watcher = indexer.clone();
+        let graph_for_watcher = vault_graph.clone();
+        std::thread::Builder::new()
+            .name("nabu-watcher-consumer".into())
+            .spawn(move || {
+                let mut rx = receiver;
+                while let Some(ev) = rx.blocking_recv() {
+                    sync_index_and_graph_for_event(
+                        &storage_for_watcher,
+                        &indexer_for_watcher,
+                        &graph_for_watcher,
+                        ev,
+                    );
+                }
+            })
+            .expect("failed to spawn watcher consumer thread");
+    } else {
+        tracing::warn!("VaultWatcher could not start; external file changes won't auto-sync");
+    }
+    ctx.register("vault_watcher", watcher.clone());
 
     crate::event_bridge::register_event_bridge(&ctx, app_handle);
 
@@ -276,6 +351,66 @@ fn build_application_context(
     tracing::info!("ApplicationContext ready");
 
     Ok(ctx)
+}
+
+/// Applies an external [`VaultEvent`](nabu_core::watcher::VaultEvent) to the
+/// canonical Indexer/VaultGraph.
+///
+/// The watcher itself never mutates state; this is the single consumer that
+/// folds external filesystem changes into the index and graph. Only
+/// storage-tracked objects are handled — a brand-new external file is picked up
+/// on the next startup rebuild or when it is saved through the app.
+fn sync_index_and_graph_for_event(
+    storage: &Arc<StorageManager>,
+    indexer: &Arc<Mutex<Indexer>>,
+    graph: &Arc<RwLock<VaultGraph>>,
+    event: nabu_core::watcher::VaultEvent,
+) {
+    use nabu_core::watcher::WatcherChangeKind;
+
+    match event.kind {
+        WatcherChangeKind::Created | WatcherChangeKind::Modified => {
+            if let Some(obj) = storage.find_by_path(&event.path) {
+                if let Ok(idx) = indexer.lock() {
+                    let _ = idx.index_object(&obj);
+                }
+                if let Ok(g) = graph.write() {
+                    let _ = g.update_node(&obj);
+                }
+            }
+        }
+        WatcherChangeKind::Deleted => {
+            if let Some(obj) = storage.find_by_path(&event.path) {
+                if let Ok(idx) = indexer.lock() {
+                    let _ = idx.remove_object(obj.id);
+                }
+                if let Ok(g) = graph.write() {
+                    let _ = g.remove_node(obj.id);
+                }
+            }
+        }
+        WatcherChangeKind::Renamed => {
+            // Drop the old location, then (re)index the new one.
+            if let Some(old) = &event.old_path {
+                if let Some(obj) = storage.find_by_path(old) {
+                    if let Ok(idx) = indexer.lock() {
+                        let _ = idx.remove_object(obj.id);
+                    }
+                    if let Ok(g) = graph.write() {
+                        let _ = g.remove_node(obj.id);
+                    }
+                }
+            }
+            if let Some(obj) = storage.find_by_path(&event.path) {
+                if let Ok(idx) = indexer.lock() {
+                    let _ = idx.index_object(&obj);
+                }
+                if let Ok(g) = graph.write() {
+                    let _ = g.update_node(&obj);
+                }
+            }
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -414,6 +549,7 @@ pub fn run() {
             crate::commands::capability_list_with_state,
             // Phase 1.5.1 — Health reporting diagnostics.
             crate::commands::health_check,
+            crate::commands::pool_health,
             // Phase P7.2.2 — Metrics IPC.
             crate::commands::metrics,
             // Phase 6.3.1 — Plugin-to-Host IPC invocation bridge.
