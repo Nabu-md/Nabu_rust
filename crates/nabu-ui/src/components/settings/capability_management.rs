@@ -363,14 +363,14 @@ fn handle_toggle(
         toggle_disabled.set(false);
 
         match result {
-            Some(_) => {
+            Ok(Some(_)) => {
                 toggle_enabled.set(enable);
                 toasts.success(
                     "Capability enabled".to_string(),
                     success_msg.to_string(),
                 );
             }
-            None => {
+            Ok(None) | Err(_) => {
                 // Rollback the toggle
                 toggle_enabled.set(!enable);
                 toggle_error.set(Some(format!("{verb} operation failed")));
@@ -402,7 +402,7 @@ fn load_capabilities(
         let result = crate::ipc::tauri_invoke_safe("capability_list_with_state", args).await;
 
         match result {
-            Some(val) => {
+            Ok(Some(val)) => {
                 match serde_wasm_bindgen::from_value::<Vec<CapabilitySummary>>(val) {
                     Ok(list) => {
                         caps.set(list);
@@ -414,7 +414,7 @@ fn load_capabilities(
                     }
                 }
             }
-            None => {
+            Ok(None) | Err(_) => {
                 error.set(Some(
                     "Could not contact the Tauri backend. Ensure Nabu is running.".to_string(),
                 ));

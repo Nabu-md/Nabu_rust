@@ -8,7 +8,7 @@
 //! registered, backend error, vault not configured) becomes a graceful error
 //! state instead of a renderer panic.
 
-use crate::components::contexts::{record_recent_search, use_nav};
+use crate::components::contexts::{open_tab, record_recent_search, use_nav, use_workspace, NavContext};
 use crate::components::ui::feedback::{use_toast, ErrorPanel, LoadingBlock, SpinnerSize};
 use crate::components::ui::icons::{render_icon_view, Icon};
 use crate::components::ui::info::EmptyState;
@@ -43,108 +43,122 @@ enum SearchState {
     Failed,
 }
 
+/// Runs a search IPC call and updates the state signals.
+fn run_search(
+    query: String,
+    hits: Signal<Vec<SearchHit>>,
+    state: Signal<SearchState>,
+    error_msg: Signal<String>,
+    nav: NavContext,
+    toasts: crate::components::ui::feedback::ToastContext,
+) {
+    let mut hits = hits;
+    let mut state = state;
+    let mut error_msg = error_msg;
+    let q = query.trim().to_string();
+    if q.is_empty() {
+        hits.set(Vec::new());
+        state.set(SearchState::Loaded);
+        error_msg.set(String::new());
+        return;
+    }
+
+    state.set(SearchState::Loading);
+    error_msg.set(String::new());
+
+    spawn_local(async move {
+        let args = serde_wasm_bindgen::to_value(&serde_json::json!({
+            "query": q,
+        }))
+        .unwrap();
+
+        match crate::ipc::tauri_invoke_safe("notes_search", args).await {
+            Ok(Some(val)) => {
+                match serde_wasm_bindgen::from_value::<Vec<SearchHit>>(val) {
+                    Ok(results) => {
+                        hits.set(results);
+                        state.set(SearchState::Loaded);
+                        error_msg.set(String::new());
+                        // Record the query in recent searches.
+                        record_recent_search(nav, &q);
+                    }
+                    Err(e) => {
+                        let msg = format!("Search results could not be parsed: {e}");
+                        error_msg.set(msg);
+                        state.set(SearchState::Failed);
+                        toasts.error("Search failed", "The search results were invalid.");
+                    }
+                }
+            }
+            Ok(None) => {
+                // Command resolved but returned no value.
+                let msg = "Search returned no data from the backend.".to_string();
+                error_msg.set(msg);
+                state.set(SearchState::Failed);
+                toasts.error("Search failed", "The search returned an unexpected response.");
+            }
+            Err(e) => {
+                // IPC rejected — command not registered, backend error, etc.
+                let msg = e.message();
+                error_msg.set(msg);
+                state.set(SearchState::Failed);
+                toasts.error("Search failed", "Could not complete the search request.");
+            }
+        }
+    });
+}
+
 /// The search page component.
 #[component]
 pub fn SearchPage() -> Element {
     let nav = use_nav();
+    let ws = use_workspace();
     let toasts = use_toast();
 
-    let query = use_signal(|| nav.search_query.read().clone());
-    let hits = use_signal(Vec::<SearchHit>::new);
-    let state = use_signal(|| SearchState::Idle);
-    let error_msg = use_signal(String::new);
+    let mut query = use_signal(|| nav.search_query.read().clone());
+    let mut hits = use_signal(Vec::<SearchHit>::new);
+    let mut state = use_signal(|| SearchState::Idle);
+    let mut error_msg = use_signal(String::new);
 
-    // ── Search worker ───────────────────────────────────────────────────
-    let do_search = {
-        let query = query.clone();
-        let hits = hits.clone();
-        let state = state.clone();
-        let error_msg = error_msg.clone();
-        move |q: String| {
-            let q_trimmed = q.trim().to_string();
-            if q_trimmed.is_empty() {
-                hits.set(Vec::new());
-                state.set(SearchState::Loaded);
-                error_msg.set(String::new());
-                return;
-            }
-
-            state.set(SearchState::Loading);
-            error_msg.set(String::new());
-
-            let hits_c = hits.clone();
-            let state_c = state.clone();
-            let error_c = error_msg.clone();
-            let toasts_c = toasts;
-
-            spawn_local(async move {
-                let args = serde_wasm_bindgen::to_value(&serde_json::json!({
-                    "query": q_trimmed,
-                }))
-                .unwrap();
-
-                match crate::ipc::tauri_invoke_safe("notes_search", args).await {
-                    None => {
-                        // IPC rejected — command not registered, backend error, etc.
-                        let msg = "Search request failed — the backend may be unavailable.".to_string();
-                        error_c.set(msg.clone());
-                        state_c.set(SearchState::Failed);
-                        toasts_c.error("Search failed", "Could not complete the search request.");
-                    }
-                    Some(val) => {
-                        match serde_wasm_bindgen::from_value::<Vec<SearchHit>>(val) {
-                            Ok(results) => {
-                                hits_c.set(results);
-                                state_c.set(SearchState::Loaded);
-                                error_c.set(String::new());
-                                // Record the query in recent searches.
-                                record_recent_search(nav, &q_trimmed);
-                            }
-                            Err(e) => {
-                                let msg = format!("Search results could not be parsed: {e}");
-                                error_c.set(msg);
-                                state_c.set(SearchState::Failed);
-                                toasts_c.error("Search failed", "The search results were invalid.");
-                            }
-                        }
-                    }
-                }
-            });
-        }
-    };
-
-    // ── React to external query changes (from command palette / nav) ──
-    let external_query = nav.search_query.read().clone();
-    {
-        let mut checked = use_signal(|| false);
-        if !*checked.read() && !external_query.is_empty() {
-            checked.set(true);
-            let do_search = do_search.clone();
-            let q = external_query.clone();
-            do_search(q);
+    // One-time initial load from the external query (if any).
+    let mut initialized = use_signal(|| false);
+    if !*initialized.read() {
+        initialized.set(true);
+        let initial = query.read().clone();
+        if !initial.trim().is_empty() {
+            run_search(initial, hits, state, error_msg, nav, toasts);
         }
     }
 
-    // ── Input handler: run search on Enter ──
+    // ── Input handler ──
     let on_input_change = move |ev: FormEvent| {
         query.set(ev.value());
     };
 
-    let on_key_down = move |ev: KeyboardEvent| {
-        let ev_web = ev.data().as_web_event();
-        let web = ev_web.unchecked_ref::<web_sys::KeyboardEvent>();
-        if web.key() == "Enter" {
-            let q = query.read().clone();
-            do_search(q);
+    let on_key_down = {
+        let hits = hits.clone();
+        let state = state.clone();
+        let error_msg = error_msg.clone();
+        move |ev: KeyboardEvent| {
+            if ev.key() == Key::Enter {
+                ev.prevent_default();
+                let q = query.read().clone();
+                run_search(q, hits, state, error_msg, nav, toasts);
+            }
         }
     };
 
-    let on_retry = move |_: MouseEvent| {
-        let q = query.read().clone();
-        do_search(q);
+    let on_retry = {
+        let hits = hits.clone();
+        let state = state.clone();
+        let error_msg = error_msg.clone();
+        move |_| {
+            let q = query.read().clone();
+            run_search(q, hits, state, error_msg, nav, toasts);
+        }
     };
 
-    // ── Rendering ───────────────────────────────────────────────────────
+    // ── Rendering ──
     let current_state = *state.read();
     let current_query = query.read().clone();
     let current_hits = hits.read().clone();
@@ -159,14 +173,18 @@ pub fn SearchPage() -> Element {
         input {
             r#type: "text",
             placeholder: "Search your vault… (press Enter)",
-            class: "w-full bg-gray-800 text-gray-100 rounded-lg px-4 py-2.5 text-sm border border-gray-700 focus:border-blue-500 focus:outline-none",
+            class: "w-full bg-gray-800 text-gray-100 rounded-lg px-4 py-2.5 text-sm border border-gray-700 focus:border-blue-500 focus:outline-none pr-10",
             value: "{current_query}",
             oninput: on_input_change,
             onkeydown: on_key_down,
             autocomplete: "off",
             spellcheck: "false",
         }
-        {render_icon_view(Icon::Search)}
+        span {
+            class: "absolute right-3 top-1/2 -translate-y-1/2 text-gray-500",
+            "aria-hidden": "true",
+            {render_icon_view(Icon::Search)}
+        }
 
         // ── Results area ──
         div { class: "flex-1 overflow-y-auto p-4" }
@@ -196,7 +214,7 @@ pub fn SearchPage() -> Element {
                 }
             },
             SearchState::Loaded => {
-                if current_hits.is_empty() && current_query.trim().is_empty() {
+                if current_query.trim().is_empty() {
                     rsx! {
                         EmptyState {
                             icon: Some(Icon::Search),
@@ -221,14 +239,12 @@ pub fn SearchPage() -> Element {
                                 let title = hit.title.clone();
                                 let folder = hit.folder.clone();
                                 let snippet = hit.snippet.clone();
-                                let ms = hit.match_start;
-                                let me = hit.match_end;
                                 let modified = hit.modified_at.clone();
                                 rsx! {
                                     div {
                                         class: "group flex items-start gap-3 px-3 py-3 rounded-lg hover:bg-gray-800/50 transition-colors border border-transparent hover:border-gray-700 cursor-pointer",
                                         onclick: move |_: MouseEvent| {
-                                            crate::components::contexts::open_tab(nav, &path);
+                                            open_tab(ws, &path);
                                         },
                                     }
                                     div { class: "flex-1 min-w-0" }
@@ -242,8 +258,8 @@ pub fn SearchPage() -> Element {
                                             div { class: "mt-1 text-[10px] text-gray-600", "{modified}" }
                                         }
                                     } else { rsx!{} }}
-                                    div { class: "text-xs text-gray-600" }
-                                    {render_icon_view(Icon::ArrowUpRight)}
+                                    div { class: "text-xs text-gray-600 mt-1 flex items-center gap-1" }
+                                    {render_icon_view(Icon::ExternalLink)}
                                 }
                             }
                         }

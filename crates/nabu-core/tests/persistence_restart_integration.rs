@@ -292,13 +292,21 @@ fn graph_edges_survive_restart() {
         storage.save(&wiki).expect("save wiki target");
         storage.save(&linker).expect("save linker");
 
-        // Derive content-derived edges (wiki-links) from canonical Markdown
-        // and persist the resulting graph snapshot.
-        let g = graph.write().unwrap();
-        g.rebuild_from_vault(vault.as_path())
-            .expect("rebuild graph from vault");
-        assert_eq!(g.edge_count(), 1, "wiki-link edge materialised at build time");
-
+        // `add_node` only stores the node; it does NOT derive content edges.
+        // `update_node` is the production graph-update path that parses a
+        // note's Markdown body and materialises `[[wiki-link]]` edges against
+        // the in-memory resolution index (preserving the object's real UUID),
+        // then auto-persists via the PersistenceHandle.
+        {
+            let g = graph.write().unwrap();
+            g.update_node(&linker)
+                .expect("update_node must derive wiki-link edges");
+            assert_eq!(g.edge_count(), 1, "wiki-link edge materialised at build time");
+            assert!(
+                g.has_edge(linker.id, wiki.id, "references"),
+                "wiki-link edge should exist immediately after update_node",
+            );
+        } // release the graph write lock before flushing derived state
         persist_derived(&_indexer, &graph);
         (wiki.id, linker.id)
     }; // close session 1
@@ -842,25 +850,27 @@ fn delete_propagates_to_derived_indexes() {
         assert!(idx.initialize().is_ok(), "indexer reload");
 
         let hits = idx.search(unique_token);
-        assert!(
-            !hits.contains(&obj_id.to_string()),
-            "DELETE→INDEX defect — persisted search index still returns the deleted object \
-             after restart (id {} found in index results {:?}). The canonical pipeline subscribes \
-             only to ITEM_STORED; INDEX_UPDATED/Removed is published on delete but has no \
-             subscriber invoking Indexer::remove_object, so stale tokens survive in \
-             .nabu/search_index.json. Responsible: Phase 1B (wire INDEX_UPDATED subscriber).",
-            obj_id,
-            hits
-        );
+        let index_still_has = hits.contains(&obj_id.to_string());
 
         let g = graph.write().unwrap();
         assert!(
-            !g.all_nodes().iter().any(|n| n.id == obj_id),
-            "DELETE→GRAPH defect — persisted graph still contains the deleted node after restart \
-             (id {}). The canonical pipeline has no removal path on delete. \
-             Responsible: Phase 1B (wire delete→graph.remove_node, e.g. via an \
-             INDEX_UPDATED/Removed subscriber or a dedicated GRAPH_UPDATED/NodeRemoved event).",
-            obj_id
+            g.loaded_from_disk(),
+            "DELETE→GRAPH defect — graph not loaded from disk on reopen"
+        );
+        let graph_still_has = g.all_nodes().iter().any(|n| n.id == obj_id);
+
+        // Report BOTH derived stores in a single assertion so neither gap is
+        // masked by the other's panic.
+        assert!(
+            !index_still_has && !graph_still_has,
+            "DELETE→DERIVED defect — deleted object resurrects from persisted derived state \
+             after restart (id {}):\n  search_index retained = {}\n  graph_node retained  = {}\n\
+             Root cause: the canonical pipeline (src-tauri/src/lib.rs §11) subscribes ONLY to \
+             ITEM_STORED; `StorageManager::delete` publishes INDEX_UPDATED/Removed, but no \
+             subscriber calls Indexer::remove_object or VaultGraph::remove_node, so stale \
+             state survives in `.nabu/search_index.json` and `.nabu/graph/graph.json`. \
+             Responsible: Phase 1B (wire the INDEX_UPDATED/Removed subscriber).",
+            obj_id, index_still_has, graph_still_has
         );
     }
 }

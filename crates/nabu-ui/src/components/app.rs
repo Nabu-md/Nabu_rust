@@ -77,7 +77,7 @@ pub fn AppRouter() -> Element {
         spawn_local(async move {
             let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
             match crate::ipc::tauri_invoke_safe("check_vault_exists", args).await {
-                Some(result) => {
+                Ok(Some(result)) => {
                     match serde_wasm_bindgen::from_value::<Option<String>>(result) {
                         Ok(Some(path)) if !path.is_empty() => {
                             vault_state.set(VaultCheckState::MainDashboard);
@@ -99,7 +99,7 @@ pub fn AppRouter() -> Element {
                         }
                     }
                 }
-                None => {
+                Ok(None) | Err(_) => {
                     vault_state.set(VaultCheckState::Error);
                     vault_error
                         .set("Failed to contact Tauri backend (check_vault_exists)".into());
@@ -171,11 +171,8 @@ pub fn ViewContent() -> Element {
             }
         }
         ViewMode::Graph => rsx! {
-            div { class: "w-full h-full flex items-center justify-center",
-                div { class: "text-sm text-gray-400",
-                    {render_icon(Icon::Network, Some("w-4 h-4 inline mr-1"))}
-                    "Graph view placeholder — migrated in a later phase."
-                }
+            div { class: "max-w-7xl mx-auto h-full",
+                crate::components::graph_view::GraphView {}
             }
         },
         ViewMode::Search => rsx! { SearchPage {} },

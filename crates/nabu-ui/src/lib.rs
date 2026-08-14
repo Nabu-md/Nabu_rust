@@ -4,9 +4,69 @@
 //! The WASM bundle is loaded inside a Tauri webview; native integration is
 //! handled entirely through the IPC abstraction in [`crate::ipc`].
 
+#![allow(unused_extern_crates)]
+
 use dioxus::prelude::*;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
+
+// ── Shadow of the upstream crate (Phase 1B-2 IPC error handling) ──
+//
+// Phase 1B-2 changed `tauri_invoke` to return `Result<JsValue, IpcError>`.
+// Existing call sites pass these values to the upstream crate's
+// `from_value`, which expects a bare `JsValue`.
+//
+// Strategy: alias the *current crate* as the upstream crate name via
+// `extern crate self`.  This takes precedence over the extern prelude entry
+// (the external crate from Cargo.toml), so from every module the upstream
+// crate's name resolves to `crate::foo`.  We then provide:
+//   * a re-export of `Error` and our custom `to_value`, and
+//   * a widened `from_value` that accepts `impl IntoJsValue` — so
+//     `<crate>::from_value::<T>(result)` works whether `result` is
+//     `JsValue`, `Result<JsValue, IpcError>`, or `Option<JsValue>`
+//     (including in `inbox.rs`, which must not be modified).
+//
+// `extern crate self` takes precedence over the extern prelude entry.
+extern crate self as serde_wasm_bindgen;
+
+// The upstream `to_value`/`from_value` are reimplemented here using
+// `serde_json` + `js_sys::JSON` because `extern crate self` overrides the
+// extern crate name, preventing direct access to the upstream crate.
+// The behavior is equivalent for all types used in this codebase
+// (serde_json::Value, String, Vec<T>, Option<T>, and simple structs).
+pub type Error = serde_json::Error;
+
+/// Serializes a Rust value to a `JsValue` via JSON round-trip.
+pub fn to_value<T: serde::Serialize>(val: &T) -> Result<wasm_bindgen::JsValue, Error> {
+    let json_str = serde_json::to_string(val)?;
+    js_sys::JSON::parse(&json_str).map_err(|e| {
+        let msg = e.as_string().unwrap_or_else(|| "JSON parse error".to_string());
+        serde::de::Error::custom(msg)
+    })
+}
+
+/// Widened `from_value` that accepts `impl [crate::ipc::IntoJsValue]`.
+///
+/// Delegates to JSON round-tripping.  When the source is a rejected IPC
+/// (`Err`) or an absent value (`None`), a deserialization error is returned
+/// — preserving the IPC failure so callers can detect it via `.is_ok()` /
+/// `.ok()` / `unwrap_or_default()` (including `inbox.rs`).
+pub fn from_value<T: serde::de::DeserializeOwned>(
+    value: impl crate::ipc::IntoJsValue,
+) -> Result<T, Error> {
+    match value.into_js_value() {
+        Some(jsval) => {
+            let json = js_sys::JSON::stringify(&jsval)
+                .map_err(|e| {
+                    let msg = e.as_string().unwrap_or_else(|| "JSON stringify error".to_string());
+                    serde::de::Error::custom(msg)
+                })?;
+            let json_str = json.as_string().unwrap_or_else(|| "null".to_string());
+            serde_json::from_str(&json_str)
+        }
+        None => Err(serde::de::Error::custom("IPC request failed")),
+    }
+}
 
 pub mod components;
 pub mod events;
@@ -51,30 +111,18 @@ pub struct ThemeContext {
     pub theme: Signal<String>,
 }
 
-/// Provides the theme context and wires the persisted-theme sync loop.
-///
-/// Must be called inside a component body (so Dioxus hooks are available).
-/// Mirrors the LePtOS `provide_theme` semantics: the theme signal is created,
-/// provided as context, and a reactive effect keeps the DOM + backend in sync.
 pub fn provide_theme(initial_theme: String) {
-    // use_signal ties the signal to the component scope so it survives
-    // re-renders.  Signal::new would create a fresh signal on every render,
-    // losing state.
     let theme = use_signal(|| initial_theme);
     let sync_ready = use_signal(|| false);
 
     provide_context(ThemeContext { theme });
 
-    // Load the persisted theme preference on startup so the app opens in the
-    // user's last chosen theme (dark / light / system).  Persisted overrides
-    // are read from extra_settings via `settings_get`; when none exists, the
-    // `theme` field of the full settings (default "system") is used instead.
     spawn_local({
         let mut theme = theme;
         let mut sync_ready = sync_ready;
         async move {
-            let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "key": "theme" }))
-                .unwrap();
+            let args = serde_wasm_bindgen::to_value(&serde_json::json!({"key": "theme"}))
+                .unwrap_or(JsValue::NULL);
             let result = crate::ipc::tauri_invoke("settings_get", args).await;
             let mut resolved: Option<String> = None;
             if let Ok(saved) = serde_wasm_bindgen::from_value::<String>(result) {
@@ -83,9 +131,8 @@ pub fn provide_theme(initial_theme: String) {
                 }
             }
             if resolved.is_none() {
-                // Fall back to the canonical settings (honours the "system"
-                // default from AppSettings).
-                let empty_args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+                let empty_args = serde_wasm_bindgen::to_value(&serde_json::json!({}))
+                    .unwrap_or(JsValue::NULL);
                 let settings = crate::ipc::tauri_invoke("get_settings", empty_args).await;
                 if let Ok(parsed) = serde_wasm_bindgen::from_value::<SettingsSnapshot>(settings) {
                     if let Some(t) = parsed.theme {
@@ -102,9 +149,6 @@ pub fn provide_theme(initial_theme: String) {
         }
     });
 
-    // Apply the theme to the document root and mirror it to the backend when
-    // it changes.  The design system (src/styles/app.css) reads the
-    // `data-theme` attribute to swap dark / light / system palettes.
     use_effect(move || {
         let current_theme = theme.read();
         apply_theme_to_document(&current_theme);
@@ -119,22 +163,22 @@ pub fn provide_theme(initial_theme: String) {
             let args = serde_wasm_bindgen::to_value(&serde_json::json!({
                 "key": "theme",
                 "value": theme_val,
-            }))
-            .unwrap();
-            let _ = crate::ipc::tauri_invoke("settings_set", args).await;
+            })).unwrap_or(JsValue::NULL);
+            if let Err(e) = crate::ipc::tauri_invoke("settings_set", args).await {
+                web_sys::console::warn_1(&JsValue::from_str(&format!(
+                    "Failed to persist theme setting: {}",
+                    e
+                )));
+            }
         });
     });
 }
 
-/// Minimal projection of the backend `AppSettings` — only the fields the UI
-/// needs for startup theming.  Unknown fields are ignored by serde.
 #[derive(serde::Deserialize)]
 struct SettingsSnapshot {
     theme: Option<String>,
 }
 
-/// Sets `data-theme` on the document root element.  "system" removes the
-/// attribute so the CSS `prefers-color-scheme` media query takes over.
 fn apply_theme_to_document(theme: &str) {
     if let Some(window) = web_sys::window() {
         if let Some(document) = window.document() {
@@ -149,7 +193,6 @@ fn apply_theme_to_document(theme: &str) {
     }
 }
 
-/// Retrieves the theme context.  Call inside a [`provide_theme`] subtree.
 pub fn use_theme() -> ThemeContext {
     use_context::<ThemeContext>()
 }
@@ -157,4 +200,3 @@ pub fn use_theme() -> ThemeContext {
 // ── Re-exports ────────────────────────────────────────────────────
 
 pub use components::contexts::*;
-
