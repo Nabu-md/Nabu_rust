@@ -186,7 +186,7 @@ pub async fn cancel_stream(stream_id: StreamId, reason: impl Into<String>) {
     }))
     .unwrap();
     let result = crate::ipc::tauri_invoke_safe("stream_cancel", args).await;
-    if let Some(result) = result {
+    if let Ok(Some(result)) = result {
         if let Ok(false) = serde_wasm_bindgen::from_value::<bool>(result) {
             tracing::warn!(stream_id = %stream_id, "stream_cancel returned false");
         }

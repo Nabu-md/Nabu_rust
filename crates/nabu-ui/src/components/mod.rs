@@ -33,6 +33,7 @@ pub mod contexts;
 pub mod dictation_pill;
 pub mod editor;
 pub mod file_tree;
+pub mod graph_view;
 pub mod inbox;
 pub mod layout;
 pub mod navigation;

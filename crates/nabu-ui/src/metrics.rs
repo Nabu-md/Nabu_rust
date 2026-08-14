@@ -119,7 +119,7 @@ pub fn reload_metrics(mut ctx: MetricsContext) {
             serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap_or(JsValue::UNDEFINED);
         let result = crate::ipc::tauri_invoke_safe("metrics", empty).await;
         match result {
-            Some(val) => match serde_wasm_bindgen::from_value::<RuntimeMetrics>(val) {
+            Ok(Some(val)) => match serde_wasm_bindgen::from_value::<RuntimeMetrics>(val) {
                 Ok(snap) => {
                     metrics.set(snap);
                     error.set(None);
@@ -128,7 +128,7 @@ pub fn reload_metrics(mut ctx: MetricsContext) {
                     error.set(Some(format!("metrics deserialization failed: {e}")));
                 }
             },
-            None => {
+            Ok(None) | Err(_) => {
                 error.set(Some(
                     "metrics IPC command unavailable — backend may not be running".to_string(),
                 ));

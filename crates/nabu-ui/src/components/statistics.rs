@@ -13,6 +13,7 @@
 use crate::components::contexts::{open_tab, use_nav, use_workspace};
 use crate::components::ui::feedback::{ErrorPanel, Skeleton};
 use crate::components::ui::icons::{render_icon_view, Icon};
+use crate::components::ui::info::EmptyState;
 use crate::metrics::MetricsContext;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -113,10 +114,13 @@ fn reload_stats(
     error.set(None);
     spawn_local(async move {
         let empty = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-        let result = crate::ipc::tauri_invoke("statistics_get", empty).await;
-        match serde_wasm_bindgen::from_value::<VaultStatistics>(result) {
-            Ok(s) => stats.set(s),
-            Err(e) => error.set(Some(e.to_string())),
+        match crate::ipc::tauri_invoke_safe("statistics_get", empty).await {
+            Ok(Some(result)) => match serde_wasm_bindgen::from_value::<VaultStatistics>(result) {
+                Ok(s) => stats.set(s),
+                Err(e) => error.set(Some(e.to_string())),
+            }
+            Ok(None) => error.set(Some("statistics_get returned no data.".to_string())),
+            Err(e) => error.set(Some(e.message())),
         }
         loaded.set(true);
     });
@@ -135,10 +139,13 @@ fn reload_pool_health(
     error.set(None);
     spawn_local(async move {
         let empty = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-        let result = crate::ipc::tauri_invoke("pool_health", empty).await;
-        match serde_wasm_bindgen::from_value::<PoolHealthSnapshot>(result) {
-            Ok(p) => pool.set(p),
-            Err(e) => error.set(Some(e.to_string())),
+        match crate::ipc::tauri_invoke_safe("pool_health", empty).await {
+            Ok(Some(result)) => match serde_wasm_bindgen::from_value::<PoolHealthSnapshot>(result) {
+                Ok(p) => pool.set(p),
+                Err(e) => error.set(Some(e.to_string())),
+            }
+            Ok(None) => error.set(Some("pool_health returned no data.".to_string())),
+            Err(e) => error.set(Some(e.message())),
         }
         loaded.set(true);
     });
@@ -227,6 +234,17 @@ pub fn StatisticsView() -> Element {
             rsx! {}
         } else {
             let s = stats.read().clone();
+            if s.note_count == 0 {
+                // ── Empty vault (loaded successfully but no notes) ──
+                rsx! {
+                    div { class: "py-12" }
+                    EmptyState {
+                        icon: Some(Icon::Database),
+                        title: "Your vault is empty".to_string(),
+                        description: "Create your first note to see statistics, writing streaks, and insights here.".to_string(),
+                    }
+                }
+            } else {
             let max_growth = s.growth.iter().map(|g| g.count).max().unwrap_or(1);
             let query = tag_filter.read().to_lowercase();
             let filtered_tags: Vec<TagStat> = if query.is_empty() {
@@ -405,6 +423,22 @@ pub fn StatisticsView() -> Element {
                             Skeleton { width: "100%", height: "24px" }
                         }
                     }
+                } else if pool_error.read().as_ref().is_some() {
+                    let pool_err = pool_error.read().clone();
+                    let pool = pool.clone();
+                    let pool_loaded = pool_loaded.clone();
+                    let pool_error = pool_error.clone();
+                    rsx! {
+                        ErrorPanel {
+                            title: "Worker pool unavailable".to_string(),
+                            message: "Could not load worker pool health.".to_string(),
+                            details: pool_err,
+                            recovery: "The pool may still be starting up. Try again in a moment.".to_string(),
+                            on_retry: move |_: ()| {
+                                reload_pool_health(pool, pool_loaded, pool_error);
+                            },
+                        }
+                    }
                 } else {
                     let p = pool.read().clone();
                     rsx! {
@@ -536,6 +570,7 @@ pub fn StatisticsView() -> Element {
                         } else { rsx!{} }}
                     }
                 }}
+            }
             }
         }}
     }
