@@ -42,7 +42,7 @@
 //! edit to a *different* path. This is intentionally **not** a broad,
 //! time-only suppression window that could swallow genuine external edits.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::mpsc as std_mpsc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -138,6 +138,12 @@ pub struct VaultWatcher {
     shutdown: Arc<AtomicBool>,
     /// Shared with the processing thread so either side can observe registrations.
     self_ops: Arc<Mutex<SelfEventRegistry>>,
+    /// Canonical absolute paths of files that existed when `start()` was
+    /// called. On macOS, FSEvents reports a write to an *existing* file as a
+    /// `Create` event (indistinguishable from a genuine new-file create by
+    /// signal shape alone). The processing thread consults this set to
+    /// downgrade such spurious `Create`s back to `Modify`.
+    known_files: Arc<Mutex<HashSet<PathBuf>>>,
 }
 
 impl VaultWatcher {
@@ -160,6 +166,7 @@ impl VaultWatcher {
             thread: None,
             shutdown: Arc::new(AtomicBool::new(false)),
             self_ops: Arc::new(Mutex::new(SelfEventRegistry::new())),
+            known_files: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -207,6 +214,15 @@ impl VaultWatcher {
             })?;
         self.vault_path = canonical;
 
+        // Seed the "known-existing" file set with a one-time recursive scan of
+        // the vault. macOS FSEvents reports a write to an *existing* file as a
+        // `Create` event (the same signal shape as a genuine new-file create),
+        // so the processing thread cannot tell the two apart from raw events
+        // alone. A path that was already present at watch-start must therefore
+        // be downgraded from `Created` → `Modified`; a path absent from the set
+        // is a genuine creation.
+        self.known_files = Arc::new(Mutex::new(scan_known_files(&self.vault_path)));
+
         let (out_tx, out_rx) = tk_mpsc::unbounded_channel::<VaultEvent>();
         let (raw_tx, raw_rx) = std_mpsc::channel::<notify::Result<notify::Event>>();
 
@@ -218,12 +234,13 @@ impl VaultWatcher {
         self.shutdown = Arc::new(AtomicBool::new(false));
         let shutdown = self.shutdown.clone();
         let self_ops = self.self_ops.clone();
+        let known_files = self.known_files.clone();
         let vault = self.vault_path.clone();
         let config = self.config;
 
         let handle = thread::Builder::new()
             .name("nabu-vault-watcher".into())
-            .spawn(move || processor_loop(vault, config, raw_rx, out_tx, shutdown, self_ops))
+            .spawn(move || processor_loop(vault, config, raw_rx, out_tx, shutdown, self_ops, known_files))
             .map_err(|e| WatcherError::Io(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 e.to_string(),
@@ -313,6 +330,21 @@ fn normalize_abs(path: &Path, vault: &Path) -> PathBuf {
     out
 }
 
+/// Resolve a caller-supplied path (absolute or vault-relative) to a canonicalized
+/// absolute path. Canonicalization matters because the `notify` backend reports
+/// paths under the OS's canonical root — on macOS `/var` is a symlink to
+/// `/private/var`, and FSEvents yields `/private/var/...`. A path that does not
+/// currently exist (e.g. a deleted file whose event is being suppressed) falls
+/// back to lexical normalization so matching still works.
+fn resolve_abs(path: &Path, vault: &Path) -> PathBuf {
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        vault.join(path)
+    };
+    abs.canonicalize().unwrap_or_else(|_| normalize_abs(&abs, vault))
+}
+
 /// Convert an absolute path to a vault-relative string (`Inbox/note.md`),
 /// or `None` if it isn't under the vault root.
 fn to_vault_rel(abs: &Path, vault: &Path) -> Option<String> {
@@ -340,6 +372,44 @@ fn is_nabu_internal(path: &Path, vault: &Path) -> bool {
 /// directory. Returns the path's final component or the path itself.
 fn parent_dir(path: &Path) -> PathBuf {
     path.parent().map(|p| p.to_path_buf()).unwrap_or_default()
+}
+
+/// Recursively collect the canonical absolute paths of every regular file
+/// currently living under `vault` (skipping the `.nabu` sidecar dir, which is
+/// derived state). The result seeds [`VaultWatcher`]'s "known files" set so
+/// spurious `Create` events for existing files (the macOS FSEvents
+/// write-to-existing-file quirk) can be downgraded to `Modify`.
+fn scan_known_files(vault: &Path) -> HashSet<PathBuf> {
+    let mut out = HashSet::new();
+    let nabu = normalize_abs(&vault.join(".nabu"), vault);
+    let mut stack = vec![vault.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let read = match std::fs::read_dir(&dir) {
+            Ok(r) => r,
+            Err(e) => {
+                debug!(subsystem = "watcher", dir = ?dir, error = ?e, "scan: read_dir failed");
+                continue;
+            }
+        };
+        for entry in read {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let path = entry.path();
+            let abs = normalize_abs(&path, vault);
+            // Skip Nabu's own sidecar store and descend into subdirectories.
+            if abs == nabu || abs.starts_with(&nabu) {
+                continue;
+            }
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                stack.push(path);
+            } else if abs.is_file() {
+                out.insert(abs);
+            }
+        }
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -568,6 +638,7 @@ fn processor_loop(
     out_tx: tk_mpsc::UnboundedSender<VaultEvent>,
     shutdown: Arc<AtomicBool>,
     self_ops: Arc<Mutex<SelfEventRegistry>>,
+    known_files: Arc<Mutex<HashSet<PathBuf>>>,
 ) {
     let mut signals: HashMap<PathBuf, Vec<RawChange>> = HashMap::new();
     let mut flush_deadline: Option<Instant> = None;
@@ -592,7 +663,23 @@ fn processor_loop(
         match raw_rx.recv_timeout(timeout) {
             Ok(res) => {
                 let changes = normalize_event(&vault, res);
-                for (abs, ch) in changes {
+                for (abs, mut ch) in changes {
+                    // macOS FSEvents emits a `Create` for writes to existing
+                    // files (truncate+write). If the path was known to exist
+                    // at watch-start, treat the `Create` as a `Modify` of an
+                    // existing file instead. Genuine new files are absent from
+                    // the set and stay `Created`.
+                    if ch == RawChange::Created {
+                        let mut known = known_files.lock().expect("known_files mutex poisoned");
+                        if known.contains(&abs) {
+                            ch = RawChange::Modified;
+                        } else {
+                            known.insert(abs.clone());
+                        }
+                    } else if ch == RawChange::Deleted {
+                        let mut known = known_files.lock().expect("known_files mutex poisoned");
+                        known.remove(&abs);
+                    }
                     let entry = signals.entry(abs).or_default();
                     if !entry.contains(&ch) {
                         entry.push(ch);

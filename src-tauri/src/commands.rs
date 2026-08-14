@@ -1048,8 +1048,16 @@ pub fn inbox_approve(ctx: State<'_, ApplicationContext>, id: String) -> Result<(
         .ok_or_else(|| format!("Inbox item not found: {}", id))?;
 
     let previous = custom_text(&obj, "inbox_status").unwrap_or_else(|| "pending".to_string());
-    set_custom_text(&mut obj, "inbox_status", "approved");
-    manager.save(&obj).map_err(|e| e.to_string())?;
+
+    // Approve == file the capture into a real vault artifact (a Markdown note
+    // for text captures, a native binary file otherwise).  `FilingService::file_object`
+    // stamps the vault path / content / hash / processing state and persists;
+    // the resulting `ITEM_STORED` event is handed off to the indexer/graph by
+    // the canonical pipeline subscriber wired up in `src/lib.rs`.
+    let service = nabu_core::inbox::FilingService::new(manager.clone());
+    service
+        .file_object(&mut obj)
+        .map_err(|e| e.to_string())?;
 
     // Undo flips back to the previous status; redo re-approves.
     let manager_undo = manager.clone();
