@@ -3,6 +3,8 @@ use crate::graph::loader::{load_graph, upgrade_snapshot, LoadResult};
 use crate::graph::persistence::GraphStore;
 use crate::graph::serializer::{GraphSnapshot, SerializedEdge, SerializedNode};
 use crate::graph::version::{BuildSource, GraphVersion};
+use crate::graph::wikilink::{ResolutionIndex, content_as_str, parse_block_references, parse_wiki_links};
+use crate::models::{ObjectContent, ObjectMetadata, ProcessingState};
 use crate::models::KnowledgeObject;
 
 /// The graph recovery coordinator.
@@ -202,11 +204,42 @@ pub fn extract_edges(object: &KnowledgeObject) -> Vec<SerializedEdge> {
             crate::models::RelationType::Custom(label) => label.as_str(),
         };
 
-        edges.push(SerializedEdge::new(
-            object.id,
-            relation.target_id,
-            relationship,
-        ));
+        edges.push(
+            SerializedEdge::new(object.id, relation.target_id, relationship)
+                .with_content_derived(false),
+        );
+    }
+
+    edges
+}
+
+/// Extract content-derived edges (wiki-links, block references) from a
+/// KnowledgeObject's Markdown content, using a resolution index to map
+/// targets to UUIDs. Each edge is tagged with content_derived = true.
+pub fn extract_content_edges(object: &KnowledgeObject, index: &ResolutionIndex) -> Vec<SerializedEdge> {
+    let mut edges = Vec::new();
+    let content_str = content_as_str(&object.content);
+
+    for link in parse_wiki_links(content_str) {
+        if let Some(target_id) = index.resolve_wiki_link(&link) {
+            if target_id != object.id {
+                edges.push(
+                    SerializedEdge::new(object.id, target_id, "references")
+                        .with_content_derived(true),
+                );
+            }
+        }
+    }
+
+    for br in parse_block_references(content_str) {
+        if let Some(target_id) = index.resolve_block_ref(&br) {
+            if target_id != object.id {
+                edges.push(
+                    SerializedEdge::new(object.id, target_id, "block_reference")
+                        .with_content_derived(true),
+                );
+            }
+        }
     }
 
     edges
@@ -214,19 +247,138 @@ pub fn extract_edges(object: &KnowledgeObject) -> Vec<SerializedEdge> {
 
 /// Build a graph snapshot from a list of KnowledgeObjects.
 /// This is the standard rebuild function used during startup.
+/// Derives both relation edges and content-derived edges (wiki-links,
+/// block references) from each object's Markdown content.
 pub fn build_graph_from_objects(
     objects: &[KnowledgeObject],
 ) -> (Vec<SerializedNode>, Vec<SerializedEdge>) {
     let mut nodes = Vec::with_capacity(objects.len());
     let mut edges = Vec::new();
 
+    // Build a resolution index once for all objects
+    let index = ResolutionIndex::from_objects(objects);
+
     for object in objects {
         nodes.push(object_to_node(object));
         edges.extend(extract_edges(object));
+        edges.extend(extract_content_edges(object, &index));
     }
 
     (nodes, edges)
 }
+
+/// Sidecar metadata file stored alongside canonical Markdown content.
+/// Contains graph-relevant metadata (title, tags, creation/update timestamps,
+/// object type) without duplicating the content itself.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultSidecar {
+    pub id: uuid::Uuid,
+    pub object_type: String,
+    pub title: Option<String>,
+    pub vault_path: Option<String>,
+    pub tags: Vec<String>,
+    pub content_ext: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Scan the vault for all `.nabu/*.json` sidecar files.
+pub fn scan_sidecars(vault_root: &Path) -> Vec<PathBuf> {
+    let mut sidecars = Vec::new();
+    let sidecars_dir = vault_root.join(".nabu");
+    if !sidecars_dir.is_dir() {
+        return sidecars;
+    }
+    if let Ok(entries) = std::fs::read_dir(&sidecars_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                sidecars.push(path);
+            }
+        }
+    }
+    sidecars
+}
+
+/// Read a VaultSidecar from a JSON file on disk.
+pub fn read_sidecar(path: &Path) -> Option<VaultSidecar> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str::<VaultSidecar>(&raw).ok()
+}
+
+/// Read the raw content of a note from its vault file path.
+pub fn read_sidecar_content(vault_root: &Path, vault_path: &str) -> Option<String> {
+    let path = vault_root.join(vault_path);
+    std::fs::read_to_string(&path).ok()
+}
+
+/// Build a complete graph snapshot by reading canonical Markdown sources
+/// from the vault. This is the startup rebuild path that derives content
+/// edges from wiki-links and block references.
+pub fn build_graph_from_vault(
+    vault_root: &Path,
+) -> Result<GraphSnapshot, String> {
+    use crate::models::ObjectType;
+
+    // Collect all objects from sidecars
+    let mut objects: Vec<KnowledgeObject> = Vec::new();
+    let sidecar_paths = scan_sidecars(vault_root);
+
+    let mut sidecars: Vec<(VaultSidecar, String)> = Vec::new();
+
+    for sidecar_path in &sidecar_paths {
+        if let Some(sidecar) = read_sidecar(sidecar_path) {
+            let content_str = read_sidecar_content(vault_root, sidecar.vault_path.as_deref().unwrap_or(""))
+                .unwrap_or_default();
+            sidecars.push((sidecar, content_str));
+        }
+    }
+
+    // Build KnowledgeObjects from sidecars
+    for (sidecar, content_str) in &sidecars {
+        let obj_type = match sidecar.object_type.as_str() {
+            "note" => ObjectType::Note,
+            "template" => ObjectType::Template,
+            "folder" => ObjectType::Folder,
+            _ => ObjectType::Note,
+        };
+
+        let content_ext = sidecar.content_ext.as_str();
+        let content = match content_ext {
+            "html" => ObjectContent::RichHtml(content_str.clone()),
+            "txt" => ObjectContent::PlainText(content_str.clone()),
+            "uri" => ObjectContent::Uri(content_str.clone()),
+            "binary" => ObjectContent::Binary {
+                mime_type: "application/octet-stream".to_string(),
+                data: vec![],
+                filename: None,
+            },
+            _ => ObjectContent::Markdown(content_str.clone()),
+        };
+
+        let obj = KnowledgeObject::new(obj_type, content).with_metadata(ObjectMetadata {
+            title: sidecar.title.clone(),
+            vault_path: sidecar.vault_path.clone(),
+            ..Default::default()
+        });
+        objects.push(obj);
+    }
+
+    // Build the graph snapshot using build_graph_from_objects (which
+    // derives content edges from wiki-links and block references)
+    let (nodes, edges) = build_graph_from_objects(&objects);
+
+    let mut snapshot = GraphSnapshot::new(GraphVersion::rebuilt(BuildSource::Canonical));
+    for node in nodes {
+        snapshot.add_node(node);
+    }
+    for edge in edges {
+        snapshot.add_edge(edge);
+    }
+
+    Ok(snapshot)
+}
+
 
 #[cfg(test)]
 mod tests {

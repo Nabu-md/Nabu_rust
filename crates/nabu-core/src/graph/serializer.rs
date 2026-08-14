@@ -63,6 +63,11 @@ pub struct SerializedEdge {
 
     /// Directionality of the relationship
     pub direction: EdgeDirection,
+
+    /// Whether this edge was derived from content parsing (wiki-links,
+    /// block references). Defaults to false for backward compatibility.
+    #[serde(default)]
+    pub content_derived: bool,
 }
 
 /// Direction of a graph edge.
@@ -209,6 +214,7 @@ impl SerializedEdge {
             relationship: relationship.into(),
             weight: 1.0,
             direction: EdgeDirection::Directed,
+            content_derived: false,
         }
     }
 
@@ -219,6 +225,11 @@ impl SerializedEdge {
 
     pub fn with_direction(mut self, direction: EdgeDirection) -> Self {
         self.direction = direction;
+        self
+    }
+
+    pub fn with_content_derived(mut self, content_derived: bool) -> Self {
+        self.content_derived = content_derived;
         self
     }
 }

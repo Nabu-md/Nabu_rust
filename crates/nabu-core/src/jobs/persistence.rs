@@ -43,6 +43,10 @@ impl JobStore {
             fs::create_dir_all(jobs_path.join(status))?;
         }
 
+        // Create the binary-blob storage sub-directory for persisted capture
+        // payloads that cannot be embedded directly in the JSON job payload.
+        fs::create_dir_all(jobs_path.join("blobs"))?;
+
         let store = Self {
             base_path: jobs_path,
             inner: Mutex::new(JobStoreInner {
@@ -254,7 +258,62 @@ impl JobStore {
         &self.base_path
     }
 
-    /// Clear all persisted jobs (for testing).
+    /// Absolute path to the blobs directory used for persisting binary
+    /// capture payloads that are too large (or not safely representable) in
+    /// the JSON job payload.
+    pub fn blobs_path(&self) -> PathBuf {
+        self.base_path.join("blobs")
+    }
+
+    /// Persist a binary blob for a capture, keyed by the object id.
+    ///
+    /// The bytes are written to `<store>/blobs/{id}` and the absolute
+    /// path to the file is returned.  This path is durable across process
+    /// restarts and can be stored in a [`Job`]'s `content_payload` as a
+    /// `blob_path` reference.
+    pub fn store_blob(
+        &self,
+        id: &str,
+        data: &[u8],
+    ) -> JobResult<String> {
+        let blobs_dir = self.base_path.join("blobs");
+        fs::create_dir_all(&blobs_dir)?;
+        let blob_path = blobs_dir.join(id);
+        fs::write(&blob_path, data)?;
+        // Return an absolute, canonicalised path so the reference survives
+        // regardless of the current working directory.
+        let canonical = blob_path
+            .canonicalize()
+            .unwrap_or_else(|_| blob_path.clone());
+        Ok(canonical.to_string_lossy().to_string())
+    }
+
+    /// Load a binary blob from its absolute path.
+    ///
+    /// Returns `Err` when the file is missing or unreadable, so that
+    /// callers can fail explicitly rather than silently producing an empty
+    /// object.
+    ///
+    /// The path is validated to be within the store's `blobs/` directory
+    /// to prevent arbitrary file reads.
+    pub fn load_blob(&self, path: &str) -> JobResult<Vec<u8>> {
+        let path = std::path::Path::new(path);
+        let canonical = path.canonicalize().map_err(|e| JobError::Persistence(e.to_string()))?;
+        let blobs_abs = self
+            .blobs_path()
+            .canonicalize()
+            .map_err(|e| JobError::Persistence(e.to_string()))?;
+        if !canonical.starts_with(&blobs_abs) {
+            return Err(JobError::Persistence(format!(
+                "security: blob path {} is outside the blobs directory {}",
+                canonical.display(),
+                blobs_abs.display()
+            )));
+        }
+        fs::read(&canonical).map_err(JobError::from)
+    }
+
+    /// Clear all persisted jobs and binary blobs (for testing).
     pub fn clear_all(&self) -> JobResult<()> {
         for status in &[
             "queued",
@@ -269,6 +328,14 @@ impl JobStore {
                 for entry in fs::read_dir(&dir_path).into_iter().flatten().flatten() {
                     let _ = fs::remove_file(entry.path());
                 }
+            }
+        }
+
+        // Also remove binary blob files.
+        let blobs_dir = self.base_path.join("blobs");
+        if blobs_dir.exists() {
+            for entry in fs::read_dir(&blobs_dir).into_iter().flatten().flatten() {
+                let _ = fs::remove_file(entry.path());
             }
         }
 
@@ -340,6 +407,87 @@ mod tests {
             let store = JobStore::new(dir.path()).unwrap();
             let loaded = store.load(&job.id.to_string()).unwrap().unwrap();
             assert_eq!(loaded.id, job.id);
+        }
+    }
+
+    #[test]
+    fn test_store_and_load_blob() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = JobStore::new(dir.path()).unwrap();
+
+        let data = vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a];
+        let blob_path = store.store_blob("test-object", &data).unwrap();
+
+        // The blob should be stored inside the store's blobs/ directory.
+        let blobs_dir = store.blobs_path();
+        let canonical_blob = std::path::Path::new(&blob_path).canonicalize().unwrap();
+        let canonical_blobs = blobs_dir.canonicalize().unwrap();
+        assert!(
+            canonical_blob.starts_with(&canonical_blobs),
+            "blob should be in blobs dir: {} vs {}",
+            canonical_blob.display(),
+            canonical_blobs.display()
+        );
+
+        let loaded = store.load_blob(&blob_path).unwrap();
+        assert_eq!(loaded, data);
+    }
+
+    #[test]
+    fn test_blob_path_outside_store_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = JobStore::new(dir.path()).unwrap();
+
+        // Try to load a path outside the blobs directory.
+        let outside = dir.path().join("secret.txt");
+        std::fs::write(&outside, b"secret").unwrap();
+        let result = store.load_blob(&outside.to_string_lossy());
+        assert!(result.is_err(), "should reject paths outside blobs dir");
+    }
+
+    #[test]
+    fn test_job_with_content_payload_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let job;
+        {
+            let store = JobStore::new(dir.path()).unwrap();
+            let blob_path = store.store_blob("obj-1", &[0x00, 0x01, 0x02]).unwrap();
+            job = Job::new(
+                crate::jobs::job::JobType::Ocr,
+                serde_json::json!({
+                    "object_id": "00000000-0000-0000-0000-000000000001",
+                    "object_type": "screenshot",
+                    "title": "Test",
+                }),
+                "ocr_processor",
+            )
+            .with_content_payload(crate::jobs::job::ContentPayload::Binary {
+                mime_type: "image/png".to_string(),
+                filename: None,
+                blob_path,
+            });
+            store.store(&job).unwrap();
+        }
+
+        {
+            let store = JobStore::new(dir.path()).unwrap();
+            let loaded = store.load(&job.id.to_string()).unwrap().unwrap();
+            assert_eq!(loaded.id, job.id);
+            assert!(loaded.content_payload.is_some());
+            match &loaded.content_payload {
+                Some(crate::jobs::job::ContentPayload::Binary {
+                    mime_type,
+                    blob_path,
+                    ..
+                }) => {
+                    assert_eq!(mime_type, "image/png");
+                    // Blob file should still be readable after restart
+                    let blob = std::fs::read(blob_path).unwrap();
+                    assert_eq!(blob, vec![0x00, 0x01, 0x02]);
+                }
+                _ => panic!("expected Binary content payload"),
+            }
         }
     }
 }
