@@ -62,6 +62,17 @@ pub struct Job {
 
     /// The KnowledgeObject ID this job is processing
     pub object_id: Option<Uuid>,
+
+    /// The actual captured content, persisted alongside the job so that the
+    /// executor can rehydrate the full KnowledgeObject without loss at the
+    /// queue boundary.  Binary content is persisted as a separate blob file
+    /// and referenced by absolute `blob_path`; text content is stored inline.
+    ///
+    /// `None` for legacy jobs created before this field existed — the
+    /// executor must treat `None` as an explicit processing failure rather
+    /// than silently building an empty-shell object.
+    #[serde(default)]
+    pub content_payload: Option<ContentPayload>,
 }
 
 impl Job {
@@ -89,6 +100,7 @@ impl Job {
             last_error: None,
             processor_name: processor_name.into(),
             object_id: None,
+            content_payload: None,
         }
     }
 
@@ -145,6 +157,42 @@ impl Job {
         // For now, each call creates a fresh token.
         CancellationToken::new()
     }
+
+    /// Attach the captured content payload so the executor can rehydrate
+    /// the full KnowledgeObject from the persisted job.
+    pub fn with_content_payload(mut self, payload: ContentPayload) -> Self {
+        self.content_payload = Some(payload);
+        self
+    }
+}
+
+/// The actual captured content carried through the job queue so that the
+/// `PipelineExecutor` can reconstruct a `KnowledgeObject` with its real
+/// content rather than an empty-shell placeholder.
+///
+/// This mirrors [`crate::models::ObjectContent`] but replaces the raw
+/// `Vec<u8>` of the `Binary` variant with a durable `blob_path` reference to
+/// a persisted blob file, keeping the serialized Job JSON compact for large
+/// binary captures.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ContentPayload {
+    /// Markdown body text
+    Markdown(String),
+    /// Rich HTML content
+    RichHtml(String),
+    /// Raw plain text
+    PlainText(String),
+    /// URL reference (bookmarks, videos, repos)
+    Uri(String),
+    /// Binary data persisted to a blob file on disk.
+    Binary {
+        /// MIME type of the binary content
+        mime_type: String,
+        /// Optional filename
+        filename: Option<String>,
+        /// Absolute path to the persisted blob file containing the raw bytes.
+        blob_path: String,
+    },
 }
 
 /// Types of jobs that can be enqueued.

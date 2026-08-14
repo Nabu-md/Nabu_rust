@@ -88,31 +88,26 @@ impl GraphEventBridge {
                         // Track incrementally
                         engine.node_added(&obj);
                     }
-                    // Existing object modified
+                    // Existing object modified — use update_node to derive
+                    // content-derived edges (wiki-links, block references)
                     (true, true) => {
                         let old_object = graph.all_nodes().into_iter().find(|n| n.id == object_id);
-                        let object = KnowledgeObject::new(
+                        let mut object = KnowledgeObject::new(
                             stored.object_type.clone(),
                             crate::models::ObjectContent::PlainText(String::new()),
                         );
+                        object.id = object_id;
 
                         engine.node_modified(&object, old_object.as_ref());
+
+                        // Call update_node — this is the production path that
+                        // invokes add_edge for content-derived edges, removing
+                        // the dead-code gap where add_edge was never called.
+                        graph.update_node(&object).unwrap();
 
                         // Update snapshot node
                         if let Some(node) = snapshot.nodes.iter_mut().find(|n| n.id == object_id) {
                             node.object_type = stored.object_type.variant_name().to_string();
-                        }
-
-                        // Publish graph update event
-                        if let Some(bus) = &graph.event_bus {
-                            bus.publish(
-                                GRAPH_UPDATED,
-                                &PipelineEvent::GraphUpdated(GraphUpdatedEvent {
-                                    object_id,
-                                    operation: GraphOperation::NodeUpdated,
-                                    timestamp: chrono::Utc::now(),
-                                }),
-                            );
                         }
                     }
                     // Object existed but snapshot didn't have it (inconsistency)

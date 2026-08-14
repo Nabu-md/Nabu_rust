@@ -2,7 +2,7 @@ use crate::capture::handler::{CaptureHandler, CaptureRequest, CaptureResult};
 use crate::event_bus::kinds::ITEM_CAPTURED;
 use crate::event_bus::{EventBus, ItemCapturedEvent, PipelineEvent};
 use crate::jobs::errors::JobResult;
-use crate::jobs::job::{Job, JobType};
+use crate::jobs::job::{ContentPayload, Job, JobType};
 use crate::jobs::queue::{DurableJobQueue, Queue};
 use crate::models::ObjectType;
 use crate::registry::lifecycle::{Lifecycle, LifecycleManager, LifecycleStage};
@@ -105,6 +105,14 @@ impl CaptureEngine {
                 if let Some(ref source_url) = result.object.metadata.source_url {
                     job = job.with_metadata("source_url", source_url.clone());
                 }
+
+                // Persist the actual captured content so the executor can
+                // rehydrate the full KnowledgeObject after queue persistence
+                // and process restarts.  Text content is stored inline in the
+                // payload; binary content is persisted to a blob file and a
+                // durable reference is stored instead.
+                job.content_payload =
+                    build_content_payload(&result.object, queue, &job.object_id)?;
 
                 queue.enqueue(job)?;
 
@@ -325,6 +333,42 @@ fn object_type_to_job_type(object_type: &ObjectType) -> JobType {
     }
 }
 
+/// Build a [`ContentPayload`] from the captured [`KnowledgeObject`]'s content.
+///
+/// Text variants are stored directly in the payload JSON.  Binary variants are
+/// persisted to a blob file in the job store and a durable path reference is
+/// returned.  This ensures the executor can rehydrate the full content after
+/// queue persistence and process restart.
+fn build_content_payload(
+    object: &crate::models::KnowledgeObject,
+    queue: &Arc<DurableJobQueue>,
+    object_id: &Option<uuid::Uuid>,
+) -> JobResult<Option<ContentPayload>> {
+    use crate::models::ObjectContent;
+    let payload = match &object.content {
+        ObjectContent::Markdown(s) => ContentPayload::Markdown(s.clone()),
+        ObjectContent::RichHtml(s) => ContentPayload::RichHtml(s.clone()),
+        ObjectContent::PlainText(s) => ContentPayload::PlainText(s.clone()),
+        ObjectContent::Uri(s) => ContentPayload::Uri(s.clone()),
+        ObjectContent::Binary {
+            mime_type,
+            data,
+            filename,
+        } => {
+            let id_str = object_id
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| object.id.to_string());
+            let blob_path = queue.store().store_blob(&id_str, data)?;
+            ContentPayload::Binary {
+                mime_type: mime_type.clone(),
+                filename: filename.clone(),
+                blob_path,
+            }
+        }
+    };
+    Ok(Some(payload))
+}
+
 /// Build the default capture engine with all built-in handlers.
 pub fn build_default_capture_engine(
     event_bus: Option<EventBus<PipelineEvent>>,
@@ -385,6 +429,93 @@ mod tests {
         let result = engine.ingest(request).await.unwrap();
 
         assert!(result.is_some(), "Should have enqueued a job");
+    }
+
+    /// Verify that a text capture retains its real content in the job's
+    /// `content_payload` after going through the CaptureEngine.
+    #[tokio::test]
+    async fn test_text_capture_content_payload() {
+        let dir = tempdir().unwrap();
+        let queue = Arc::new(DurableJobQueue::new(dir.path()).unwrap());
+
+        let mut engine = CaptureEngine::new();
+        engine.set_queue(queue.clone());
+        engine.register(Arc::new(crate::capture::handler::ClipboardHandler));
+
+        let distinctive_text = "INVOICE #42\nTotal Due: $999.99\nbill to: Test Corp";
+        let request = CaptureRequest::new(CaptureData::Text(
+            distinctive_text.to_string(),
+        ));
+        engine.ingest(request).await.unwrap();
+
+        // Dequeue and inspect the job
+        let job = queue.dequeue().unwrap().unwrap();
+        let payload = job.content_payload.expect("text job must carry content");
+        match &payload {
+            ContentPayload::PlainText(s) => {
+                assert_eq!(s, distinctive_text);
+            }
+            _ => panic!("expected PlainText content payload, got {:?}", payload),
+        }
+    }
+
+    /// Verify that a binary capture persists its bytes to a blob file and
+    /// stores a durable reference in the job's `content_payload`.
+    #[tokio::test]
+    async fn test_binary_capture_content_payload() {
+        let dir = tempdir().unwrap();
+        let queue = Arc::new(DurableJobQueue::new(dir.path()).unwrap());
+
+        let mut engine = CaptureEngine::new();
+        engine.set_queue(queue.clone());
+        engine.register(Arc::new(crate::capture::handler::ClipboardHandler));
+
+        let image_bytes = vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+        let request = CaptureRequest::new(CaptureData::Binary {
+            mime_type: "image/png".to_string(),
+            data: image_bytes.clone(),
+            filename: None,
+        });
+        engine.ingest(request).await.unwrap();
+
+        let job = queue.dequeue().unwrap().unwrap();
+        let payload = job.content_payload.expect("binary job must carry content");
+        match &payload {
+            ContentPayload::Binary {
+                mime_type, blob_path, ..
+            } => {
+                assert_eq!(mime_type, "image/png");
+                // The blob file should exist on disk and contain the bytes
+                let blob_data = std::fs::read(blob_path).unwrap();
+                assert_eq!(blob_data, image_bytes);
+            }
+            _ => panic!("expected Binary content payload, got {:?}", payload),
+        }
+    }
+
+    /// Verify that a URI capture (bookmark) carries its URL through the
+    /// content_payload, not just the metadata.
+    #[tokio::test]
+    async fn test_uri_capture_content_payload() {
+        let dir = tempdir().unwrap();
+        let queue = Arc::new(DurableJobQueue::new(dir.path()).unwrap());
+
+        let mut engine = CaptureEngine::new();
+        engine.set_queue(queue.clone());
+        engine.register(Arc::new(crate::capture::handler::BookmarkCaptureHandler));
+
+        let url = "https://example.com/bookmark-test".to_string();
+        let request = CaptureRequest::new(CaptureData::Uri(url.clone()));
+        engine.ingest(request).await.unwrap();
+
+        let job = queue.dequeue().unwrap().unwrap();
+        let payload = job.content_payload.expect("uri job must carry content");
+        match &payload {
+            ContentPayload::Uri(s) => {
+                assert_eq!(s, &url);
+            }
+            _ => panic!("expected Uri content payload, got {:?}", payload),
+        }
     }
 
     #[tokio::test]
