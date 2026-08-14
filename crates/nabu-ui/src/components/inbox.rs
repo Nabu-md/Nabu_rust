@@ -127,20 +127,28 @@ pub enum SortField {
 
 // ── Inbox Actions ────────────────────────────────────────────────────────────
 
-fn approve_item(id: String, toasts: crate::components::ui::feedback::ToastContext) {
+fn approve_item(
+    id: String,
+    toasts: crate::components::ui::feedback::ToastContext,
+    refresh: EventHandler<()>,) {
     spawn_local(async move {
         let result = crate::ipc::tauri_invoke(
             "inbox_approve",
             serde_wasm_bindgen::to_value(&serde_json::json!({"id": id})).unwrap(),
         )
         .await;
-        if serde_wasm_bindgen::from_value::<()>(result).is_err() {
+        if serde_wasm_bindgen::from_value::<()>(result).is_ok() {
+            refresh.call(());
+        } else {
             toasts.error("Approve", "Could not approve that capture");
         }
     });
 }
 
-fn reject_item(id: String, toasts: crate::components::ui::feedback::ToastContext) {
+fn reject_item(
+    id: String,
+    toasts: crate::components::ui::feedback::ToastContext,
+    refresh: EventHandler<()>,) {
     spawn_local(async move {
         let result = crate::ipc::tauri_invoke(
             "inbox_reject",
@@ -148,34 +156,65 @@ fn reject_item(id: String, toasts: crate::components::ui::feedback::ToastContext
                 .unwrap(),
         )
         .await;
-        if serde_wasm_bindgen::from_value::<()>(result).is_err() {
+        if serde_wasm_bindgen::from_value::<()>(result).is_ok() {
+            refresh.call(());
+        } else {
             toasts.error("Reject", "Could not reject that capture");
         }
     });
 }
 
-fn retry_item(id: String, toasts: crate::components::ui::feedback::ToastContext) {
+fn retry_item(
+    id: String,
+    toasts: crate::components::ui::feedback::ToastContext,
+    refresh: EventHandler<()>,) {
     spawn_local(async move {
         let result = crate::ipc::tauri_invoke(
             "inbox_retry",
             serde_wasm_bindgen::to_value(&serde_json::json!({"id": id})).unwrap(),
         )
         .await;
-        if serde_wasm_bindgen::from_value::<()>(result).is_err() {
+        if serde_wasm_bindgen::from_value::<()>(result).is_ok() {
+            refresh.call(());
+        } else {
             toasts.error("Retry", "Could not retry that capture");
         }
     });
 }
 
-fn delete_item(id: String, toasts: crate::components::ui::feedback::ToastContext) {
+fn delete_item(
+    id: String,
+    toasts: crate::components::ui::feedback::ToastContext,
+    refresh: EventHandler<()>,) {
     spawn_local(async move {
         let result = crate::ipc::tauri_invoke(
             "inbox_delete",
             serde_wasm_bindgen::to_value(&serde_json::json!({"id": id})).unwrap(),
         )
         .await;
-        if serde_wasm_bindgen::from_value::<()>(result).is_err() {
+        if serde_wasm_bindgen::from_value::<()>(result).is_ok() {
+            refresh.call(());
+        } else {
             toasts.error("Delete", "Could not delete that capture");
+        }
+    });
+}
+
+/// Re-fetches the inbox queue from the backend (`inbox_subscribe`) and
+/// repopulates `state.items`.  Mounted in `Inbox()` and re-invoked after every
+/// approve / reject / retry / delete so the view reflects terminal statuses.
+fn reload_inbox(
+    mut state: Signal<InboxState>,
+    toasts: crate::components::ui::feedback::ToastContext,
+) {
+    spawn_local(async move {
+        let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+        let result = crate::ipc::tauri_invoke("inbox_subscribe", args).await;
+        match serde_wasm_bindgen::from_value::<Vec<InboxItem>>(result) {
+            Ok(items) => state.with_mut(|s| {
+                s.items = items;
+            }),
+            Err(_) => toasts.error("Inbox", "Could not load the inbox queue"),
         }
     });
 }
@@ -283,13 +322,14 @@ pub fn Inbox() -> Element {
     let toasts = crate::components::ui::feedback::use_toast();
     let mut drag_over = use_signal(|| false);
 
-    // Subscribe to EventBus events via Tauri IPC (no polling)
-    spawn_local(async move {
-        let _ = crate::ipc::tauri_invoke(
-            "inbox_subscribe",
-            serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap(),
-        )
-        .await;
+    // Re-fetch the inbox queue on mount and after every approve / reject /
+    // retry / delete so the view reflects terminal states. `on_refresh` is
+    // shared with the preview pane and the keyboard / batch shortcuts.
+    let on_refresh: EventHandler<()> = Callback::new(move |_: ()| {
+        reload_inbox(state, toasts);
+    });
+    use_effect(move || {
+        on_refresh.call(());
     });
 
     let mut toggle_select_item = move |id: String| {
@@ -334,6 +374,8 @@ pub fn Inbox() -> Element {
                 .await;
                 if serde_wasm_bindgen::from_value::<()>(result).is_err() {
                     toasts_b.error("Approve", "Could not approve the selected captures");
+                } else {
+                    on_refresh.call(());
                 }
             });
         }
@@ -361,6 +403,8 @@ pub fn Inbox() -> Element {
                 .await;
                 if serde_wasm_bindgen::from_value::<()>(result).is_err() {
                     toasts_b.error("Reject", "Could not reject the selected captures");
+                } else {
+                    on_refresh.call(());
                 }
             });
         }
@@ -384,6 +428,8 @@ pub fn Inbox() -> Element {
                 .await;
                 if serde_wasm_bindgen::from_value::<()>(result).is_err() {
                     toasts_b.error("Delete", "Could not delete the selected captures");
+                } else {
+                    on_refresh.call(());
                 }
             });
         }
@@ -407,6 +453,8 @@ pub fn Inbox() -> Element {
                 .await;
                 if serde_wasm_bindgen::from_value::<()>(result).is_err() {
                     toasts_b.error("Retry", "Could not retry the selected captures");
+                } else {
+                    on_refresh.call(());
                 }
             });
         }
@@ -455,6 +503,8 @@ pub fn Inbox() -> Element {
                     .await;
                     if serde_wasm_bindgen::from_value::<()>(result).is_err() {
                         toasts_k.error("Approve", "Could not approve the selected captures");
+                    } else {
+                        on_refresh.call(());
                     }
                 });
             }
@@ -481,6 +531,8 @@ pub fn Inbox() -> Element {
                     .await;
                     if serde_wasm_bindgen::from_value::<()>(result).is_err() {
                         toasts_k.error("Reject", "Could not reject the selected captures");
+                    } else {
+                        on_refresh.call(());
                     }
                 });
             }
@@ -504,6 +556,8 @@ pub fn Inbox() -> Element {
                     .await;
                     if serde_wasm_bindgen::from_value::<()>(result).is_err() {
                         toasts_k.error("Delete", "Could not delete the selected captures");
+                    } else {
+                        on_refresh.call(());
                     }
                 });
             }
@@ -517,7 +571,7 @@ pub fn Inbox() -> Element {
             ev.prevent_default();
             let preview_id = state.read().preview_id.clone();
             if let Some(id) = preview_id {
-                approve_item(id, toasts);
+                approve_item(id, toasts, on_refresh);
             }
         } else if meta && shift && (key == "ArrowLeft" || key == "ArrowRight") {
             ev.prevent_default();
@@ -678,9 +732,11 @@ pub fn Inbox() -> Element {
                                 else { "border-l-transparent" }
                             } else { "border-l-transparent" };
                             let item_class = if is_selected { "bg-gray-800 border-l-blue-500" } else { border_class };
+                            let is_terminal = matches!(item.status, InboxStatus::Approved | InboxStatus::Rejected | InboxStatus::Failed);
+                            let terminal_class = if is_terminal { "opacity-50" } else { "" };
                             rsx! {
                                 div {
-                                    class: "inbox-item px-3 py-2 cursor-pointer hover:bg-gray-800 border-l-2 transition-colors {item_class}",
+                                    class: "inbox-item px-3 py-2 cursor-pointer hover:bg-gray-800 border-l-2 transition-colors {item_class} {terminal_class}",
                                     onclick: move |_: MouseEvent| {
                                         toggle_select_item(id.clone());
                                     },
@@ -744,7 +800,7 @@ pub fn Inbox() -> Element {
                     Some(item) => rsx! {
                         div { class: "flex h-full" }
                         div { class: "flex-1 overflow-y-auto p-4" }
-                        InboxPreview { item: item.clone() }
+                        InboxPreview { item: item.clone(), on_refresh }
                         div { class: "flex-none w-72 border-l border-gray-800 overflow-y-auto p-4" }
                         InboxMetadataSidebar { item: item }
                     },
@@ -773,7 +829,7 @@ enum InboxPreviewTab {
 }
 
 #[component]
-fn InboxPreview(item: InboxItem) -> Element {
+fn InboxPreview(item: InboxItem, on_refresh: EventHandler<()>) -> Element {
     let toasts = crate::components::ui::feedback::use_toast();
     let mut active_tab = use_signal(|| InboxPreviewTab::Details);
     let approve_id = item.id.clone();
@@ -820,22 +876,22 @@ fn InboxPreview(item: InboxItem) -> Element {
         div { class: "flex items-center gap-2 mt-4 pt-4 border-t border-gray-800" }
         button {
             class: "px-3 py-1.5 text-sm bg-green-700 rounded hover:bg-green-600",
-            onclick: move |_: MouseEvent| { approve_item(approve_id.clone(), toasts); },
+            onclick: move |_: MouseEvent| { approve_item(approve_id.clone(), toasts, on_refresh); },
             {render_icon_view(Icon::CircleCheck)} " Approve"
         }
         button {
             class: "px-3 py-1.5 text-sm bg-red-700 rounded hover:bg-red-600",
-            onclick: move |_: MouseEvent| { reject_item(reject_id.clone(), toasts); },
+            onclick: move |_: MouseEvent| { reject_item(reject_id.clone(), toasts, on_refresh); },
             {render_icon_view(Icon::CircleX)} " Reject"
         }
         button {
             class: "px-3 py-1.5 text-sm bg-yellow-700 rounded hover:bg-yellow-600",
-            onclick: move |_: MouseEvent| { retry_item(retry_id.clone(), toasts); },
+            onclick: move |_: MouseEvent| { retry_item(retry_id.clone(), toasts, on_refresh); },
             {render_icon_view(Icon::RefreshCw)} " Retry"
         }
         button {
             class: "px-3 py-1.5 text-sm bg-gray-700 rounded hover:bg-gray-600",
-            onclick: move |_: MouseEvent| { delete_item(delete_id.clone(), toasts); },
+            onclick: move |_: MouseEvent| { delete_item(delete_id.clone(), toasts, on_refresh); },
             {render_icon_view(Icon::Trash2)} " Delete"
         }
     }
