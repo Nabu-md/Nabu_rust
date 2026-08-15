@@ -41,10 +41,11 @@ pub use search_page::SearchPage;
 pub use shortcuts::{install_global_shortcuts, KeyboardShortcuts, ShortcutReference};
 pub use smart_folders::SmartFoldersPage;
 pub use state::{
-    fuzzy_score, load_all_nav_state, load_notes_index, parse_view_mode,
+    fuzzy_score, load_all_nav_state, load_notes_index, load_smart_folders, parse_view_mode,
     record_recent_note, record_recent_search, remove_saved_search, save_search,
     save_smart_folder, set_dashboard_sections, toggle_favourite,
     toggle_favourite_command, view_mode_icon, view_mode_key, view_mode_label,
     NavContext, NavProvider, NoteIndexEntry, SavedSearch, ViewMode, DASHBOARD_SECTIONS,
     clear_recent_searches, dashboard_section_label, use_nav,
+    remove_smart_folder,
 };

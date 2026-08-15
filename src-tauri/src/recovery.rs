@@ -401,32 +401,45 @@ pub fn note_save(
     ctx: State<'_, ApplicationContext>,
     store: State<'_, SettingsStore>,
 ) -> Result<(), String> {
-    let vault = vault_path(&store);
+    note_save_impl(&ctx, &store, &path, &content)
+}
+
+pub(crate) fn note_save_impl(
+    ctx: &ApplicationContext,
+    store: &SettingsStore,
+    path: &str,
+    content: &str,
+) -> Result<(), String> {
+    let vault = vault_path(store);
 
     // Validate the path is within the vault (prevents traversal escapes).
-    let _ = resolve_in_vault(&vault, &path)?;
+    let _ = resolve_in_vault(&vault, path)?;
 
     // Route through the canonical StorageManager -- the single persistence
-    // gateway. This publishes ITEM_STORED, which triggers the Indexer and
+    // gateway. This publishes ITEM_STORED, which drives the Indexer and
     // VaultGraph subscribers downstream.
     let manager = ctx
         .storage_manager()
         .ok_or_else(|| "StorageManager is not registered in the application context".to_string())?;
 
     manager
-        .save_note_content(&path, &content)
+        .save_note_content(path, content)
         .map_err(|e| e.to_string())?;
 
     // Version snapshot (crash recovery) — separate from storage persistence.
-    let _ = snapshot_note(&vault, &path);
+    let _ = snapshot_note(&vault, path);
     Ok(())
 }
 
 /// Reads a note's current content (empty string when the note does not exist).
 #[tauri::command]
 pub fn note_read(path: String, store: State<'_, SettingsStore>) -> Result<String, String> {
-    let vault = vault_path(&store);
-    let abs = resolve_in_vault(&vault, &path)?;
+    note_read_impl(&store, &path)
+}
+
+pub(crate) fn note_read_impl(store: &SettingsStore, path: &str) -> Result<String, String> {
+    let vault = vault_path(store);
+    let abs = resolve_in_vault(&vault, path)?;
     if !abs.is_file() {
         return Ok(String::new());
     }
@@ -439,8 +452,12 @@ pub fn versions_list(
     path: String,
     store: State<'_, SettingsStore>,
 ) -> Result<Vec<VersionMeta>, String> {
-    let vault = vault_path(&store);
-    let mut manifest = read_manifest(&vault, &path);
+    versions_list_impl(&store, &path)
+}
+
+pub(crate) fn versions_list_impl(store: &SettingsStore, path: &str) -> Result<Vec<VersionMeta>, String> {
+    let vault = vault_path(store);
+    let mut manifest = read_manifest(&vault, path);
     manifest.versions.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(manifest.versions)
 }
@@ -452,8 +469,12 @@ pub fn versions_get(
     id: String,
     store: State<'_, SettingsStore>,
 ) -> Result<String, String> {
-    let vault = vault_path(&store);
-    let file = version_file(&vault, &path, &id);
+    versions_get_impl(&store, &path, &id)
+}
+
+pub(crate) fn versions_get_impl(store: &SettingsStore, path: &str, id: &str) -> Result<String, String> {
+    let vault = vault_path(store);
+    let file = version_file(&vault, path, id);
     if !file.is_file() {
         return Err(format!("Snapshot {} not found", id));
     }
@@ -473,16 +494,25 @@ pub fn versions_restore(
     ctx: State<'_, ApplicationContext>,
     store: State<'_, SettingsStore>,
 ) -> Result<(), String> {
-    let vault = vault_path(&store);
-    let _ = snapshot_note(&vault, &path);
+    versions_restore_impl(&ctx, &store, &path, &id)
+}
 
-    let file = version_file(&vault, &path, &id);
+pub(crate) fn versions_restore_impl(
+    ctx: &ApplicationContext,
+    store: &SettingsStore,
+    path: &str,
+    id: &str,
+) -> Result<(), String> {
+    let vault = vault_path(store);
+    let _ = snapshot_note(&vault, path);
+
+    let file = version_file(&vault, path, id);
     if !file.is_file() {
         return Err(format!("Snapshot {} not found", id));
     }
     let version_content = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
 
-    let abs = resolve_in_vault(&vault, &path)?;
+    let abs = resolve_in_vault(&vault, path)?;
     let previous = std::fs::read_to_string(&abs).unwrap_or_default();
 
     // Route through the canonical StorageManager so ITEM_STORED events fire,
@@ -491,19 +521,19 @@ pub fn versions_restore(
         .storage_manager()
         .ok_or_else(|| "StorageManager is not registered in the application context".to_string())?;
 
-    let _ = manager.save_note_content(&path, &version_content)?;
+    let _ = manager.save_note_content(path, &version_content)?;
 
     let undo_manager = manager.clone();
     let redo_manager = manager.clone();
-    let undo_path = path.clone();
-    let redo_path = path.clone();
+    let undo_path = path.to_string();
+    let redo_path = path.to_string();
     let undo_prev = previous.clone();
     let redo_content = version_content.clone();
     crate::history::push_history(
-        &ctx,
+        ctx,
         HistoryOp::Editor,
         format!("Restore '{}' from snapshot", path),
-        vec![path.clone()],
+        vec![path.to_string()],
         serde_json::json!({ "path": path, "content": previous }),
         serde_json::json!({ "path": path, "content": version_content }),
         Arc::new(move || {
@@ -531,14 +561,24 @@ pub fn versions_duplicate(
     ctx: State<'_, ApplicationContext>,
     store: State<'_, SettingsStore>,
 ) -> Result<(), String> {
-    let vault = vault_path(&store);
-    let file = version_file(&vault, &path, &id);
+    versions_duplicate_impl(&ctx, &store, &path, &id, &dest)
+}
+
+pub(crate) fn versions_duplicate_impl(
+    ctx: &ApplicationContext,
+    store: &SettingsStore,
+    path: &str,
+    id: &str,
+    dest: &str,
+) -> Result<(), String> {
+    let vault = vault_path(store);
+    let file = version_file(&vault, path, id);
     if !file.is_file() {
         return Err(format!("Snapshot {} not found", id));
     }
     let content = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
 
-    let dest_abs = resolve_in_vault(&vault, &dest)?;
+    let dest_abs = resolve_in_vault(&vault, dest)?;
     if dest_abs.exists() {
         return Err(format!("Destination already exists: {}", dest));
     }
@@ -553,10 +593,10 @@ pub fn versions_duplicate(
     let redo_dest = dest_abs.clone();
     let redo_content = content.clone();
     crate::history::push_history(
-        &ctx,
+        ctx,
         HistoryOp::NoteDuplicate,
         format!("Duplicate '{}' snapshot to '{}'", path, dest),
-        vec![dest.clone()],
+        vec![dest.to_string()],
         serde_json::json!({ "dest": dest, "exists": false }),
         serde_json::json!({ "dest": dest, "exists": true }),
         Arc::new(move || {
