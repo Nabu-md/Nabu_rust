@@ -698,10 +698,18 @@ pub fn trash_restore_many(
     ctx: State<'_, ApplicationContext>,
     store: State<'_, SettingsStore>,
 ) -> Result<Vec<String>, String> {
+    trash_restore_many_impl(&ctx, &store, &trash_paths)
+}
+
+pub(crate) fn trash_restore_many_impl(
+    ctx: &ApplicationContext,
+    store: &SettingsStore,
+    trash_paths: &[String],
+) -> Result<Vec<String>, String> {
     let settings = store.get();
     let vault_path = PathBuf::from(&settings.last_vault_path);
     let mut restored_paths = Vec::new();
-    for tp in &trash_paths {
+    for tp in trash_paths {
         let trash = PathBuf::from(tp);
         if !trash.exists() {
             continue;
@@ -719,10 +727,10 @@ pub fn trash_restore_many(
         let undo_vault = vault_path.clone();
         let redo_vault = vault_path.clone();
         push_history(
-            &ctx,
+            ctx,
             HistoryOp::NoteRestore,
             format!("Restore {} item(s) from Trash", restored_paths.len()),
-            trash_paths.clone(),
+            trash_paths.to_vec(),
             serde_json::json!({ "restored": false }),
             serde_json::json!({ "restored": true, "paths": restored_paths }),
             // Undo: trash the restored items again (fresh timestamped names).
@@ -749,6 +757,10 @@ pub fn trash_restore_many(
 /// vault load.
 #[tauri::command]
 pub fn trash_purge_expired(store: State<'_, SettingsStore>) -> Result<usize, String> {
+    trash_purge_expired_impl(&store)
+}
+
+pub(crate) fn trash_purge_expired_impl(store: &SettingsStore) -> Result<usize, String> {
     let settings = store.get();
     let vault_path = PathBuf::from(&settings.last_vault_path);
     purge_expired(&vault_path, &settings.trash_retention_policy)
@@ -758,6 +770,10 @@ pub fn trash_purge_expired(store: State<'_, SettingsStore>) -> Result<usize, Str
 /// irreversible — the UI shows a confirmation dialog before invoking it.
 #[tauri::command]
 pub fn trash_empty(store: State<'_, SettingsStore>) -> Result<usize, String> {
+    trash_empty_impl(&store)
+}
+
+pub(crate) fn trash_empty_impl(store: &SettingsStore) -> Result<usize, String> {
     let settings = store.get();
     let vault_path = PathBuf::from(&settings.last_vault_path);
     let records = read_trash_manifest(&vault_path);
@@ -781,9 +797,17 @@ pub fn folder_create(
     ctx: State<'_, ApplicationContext>,
     store: State<'_, SettingsStore>,
 ) -> Result<(), String> {
+    folder_create_impl(&ctx, &store, &path)
+}
+
+pub(crate) fn folder_create_impl(
+    ctx: &ApplicationContext,
+    store: &SettingsStore,
+    path: &str,
+) -> Result<(), String> {
     let settings = store.get();
     let vault_path = PathBuf::from(&settings.last_vault_path);
-    let safe_path = validate_path_within_vault(&vault_path, &path)?;
+    let safe_path = validate_path_within_vault(&vault_path, path)?;
     if safe_path.exists() {
         return Err(format!("Folder already exists: {}", path));
     }
@@ -792,10 +816,10 @@ pub fn folder_create(
     let undo_path = safe_path.clone();
     let redo_path = safe_path;
     push_history(
-        &ctx,
+        ctx,
         HistoryOp::FolderCreate,
         format!("Create Folder '{}'", path),
-        vec![path.clone()],
+        vec![path.to_string()],
         serde_json::json!({ "path": path, "exists": false }),
         serde_json::json!({ "path": path, "exists": true }),
         // Undo: remove the (empty) folder.
@@ -882,21 +906,30 @@ pub fn note_duplicate(
     ctx: State<'_, ApplicationContext>,
     store: State<'_, SettingsStore>,
 ) -> Result<String, String> {
+    note_duplicate_impl(&ctx, &store, &from, &dest)
+}
+
+pub(crate) fn note_duplicate_impl(
+    ctx: &ApplicationContext,
+    store: &SettingsStore,
+    from: &str,
+    dest: &str,
+) -> Result<String, String> {
     let settings = store.get();
     let vault_path = PathBuf::from(&settings.last_vault_path);
-    let from_path = validate_path_within_vault(&vault_path, &from)?;
+    let from_path = validate_path_within_vault(&vault_path, from)?;
     if !from_path.exists() {
         return Err(format!("Source does not exist: {}", from));
     }
 
     // Resolve a non-colliding absolute destination, but report the
     // vault-relative path to the frontend so it can refresh correctly.
-    let dest_abs = validate_path_within_vault(&vault_path, &dest)?;
+    let dest_abs = validate_path_within_vault(&vault_path, dest)?;
     let final_abs = resolve_dest_path(&dest_abs);
     let final_rel = final_abs
         .strip_prefix(&vault_path)
         .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| dest.clone());
+        .unwrap_or_else(|_| dest.to_string());
 
     copy_tree(&from_path, &final_abs)?;
 
@@ -904,10 +937,10 @@ pub fn note_duplicate(
     let redo_from = from_path;
     let redo_dest = final_abs;
     push_history(
-        &ctx,
+        ctx,
         HistoryOp::FolderCreate, // grouped with other item mutations
         format!("Duplicate '{}'", from),
-        vec![from.clone(), final_rel.clone()],
+        vec![from.to_string(), final_rel.clone()],
         serde_json::json!({ "copied": false, "from": from }),
         serde_json::json!({ "copied": true, "from": from, "dest": final_rel }),
         // Undo: remove the copy.
@@ -936,6 +969,15 @@ pub fn items_move(
     ctx: State<'_, ApplicationContext>,
     store: State<'_, SettingsStore>,
 ) -> Result<Vec<String>, String> {
+    items_move_impl(&ctx, &store, &items, &dest_folder)
+}
+
+pub(crate) fn items_move_impl(
+    ctx: &ApplicationContext,
+    store: &SettingsStore,
+    items: &[String],
+    dest_folder: &str,
+) -> Result<Vec<String>, String> {
     let settings = store.get();
     let vault_path = PathBuf::from(&settings.last_vault_path);
 
@@ -943,7 +985,7 @@ pub fn items_move(
     let dest_abs = if dest_folder.trim().is_empty() {
         vault_path.clone()
     } else {
-        let d = validate_path_within_vault(&vault_path, &dest_folder)?;
+        let d = validate_path_within_vault(&vault_path, dest_folder)?;
         if !d.is_dir() {
             return Err(format!("Destination is not a folder: {}", dest_folder));
         }
@@ -951,7 +993,7 @@ pub fn items_move(
     };
 
     let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new(); // (from_abs, to_abs)
-    for item in &items {
+    for item in items {
         let from_abs = validate_path_within_vault(&vault_path, item)?;
         if !from_abs.exists() {
             continue;
@@ -989,10 +1031,10 @@ pub fn items_move(
     if !moved.is_empty() {
         let undo_moved = moved.clone();
         let redo_moved = moved.clone();
-        let mut affected: Vec<String> = items.clone();
-        affected.push(dest_folder.clone());
+        let mut affected: Vec<String> = items.to_vec();
+        affected.push(dest_folder.to_string());
         push_history(
-            &ctx,
+            ctx,
             HistoryOp::NoteRename,
             format!("Move {} item(s)", moved.len()),
             affected,
@@ -1030,10 +1072,19 @@ pub fn folder_rename(
     ctx: State<'_, ApplicationContext>,
     store: State<'_, SettingsStore>,
 ) -> Result<(), String> {
+    folder_rename_impl(&ctx, &store, &from, &to)
+}
+
+pub(crate) fn folder_rename_impl(
+    ctx: &ApplicationContext,
+    store: &SettingsStore,
+    from: &str,
+    to: &str,
+) -> Result<(), String> {
     let settings = store.get();
     let vault_path = PathBuf::from(&settings.last_vault_path);
-    let from_path = validate_path_within_vault(&vault_path, &from)?;
-    let to_path = validate_path_within_vault(&vault_path, &to)?;
+    let from_path = validate_path_within_vault(&vault_path, from)?;
+    let to_path = validate_path_within_vault(&vault_path, to)?;
     if !from_path.is_dir() {
         return Err(format!("Source folder does not exist: {}", from));
     }
@@ -1048,10 +1099,10 @@ pub fn folder_rename(
     let redo_to = to_path;
 
     push_history(
-        &ctx,
+        ctx,
         HistoryOp::FolderRename,
         format!("Rename Folder to '{}'", to),
-        vec![from.clone(), to.clone()],
+        vec![from.to_string(), to.to_string()],
         serde_json::json!({ "from": from }),
         serde_json::json!({ "to": to }),
         Arc::new(move || {
