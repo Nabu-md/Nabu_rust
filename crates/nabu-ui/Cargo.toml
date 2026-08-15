@@ -9,7 +9,10 @@ license = "AGPL-3.0"
 [workspace]
 
 [lib]
-crate-type = ["cdylib"]
+# `cdylib` for wasm-pack/wasm-bindgen bundling into the Tauri webview; `rlib`
+# so the pure-Rust layout logic can be exercised by host-target integration
+# tests without a JS runtime.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # Dioxus 0.6 — web renderer with HTML elements, hooks, signals, router.
