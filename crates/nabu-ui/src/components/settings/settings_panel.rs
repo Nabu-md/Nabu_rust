@@ -789,7 +789,7 @@ fn advanced_settings(settings: Signal<AppSettings>, toasts: ToastContext, confir
             on_click: move |_: MouseEvent| {
                 confirm_reset.set(true);
             },
-            variant: ButtonVariant::Danger,
+            variant: ButtonVariant::Destructive,
             {"Reset to Defaults"}
         }
     }

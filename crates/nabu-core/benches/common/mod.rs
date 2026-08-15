@@ -17,6 +17,8 @@ use nabu_core::models::{KnowledgeObject, ObjectContent, ObjectMetadata, ObjectTy
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use chrono::TimeZone;
+
 /// Fixed timestamp used for every generated object so fixtures are independent
 /// of the wall clock.
 pub fn fixed_time() -> chrono::DateTime<chrono::Utc> {
@@ -131,6 +133,11 @@ pub const HUB_COUNT: usize = 10;
 /// CI policy: do **not** fail on sub-threshold timing noise. A regression is
 /// only actionable when criterion reports a statistically significant change
 /// (default ±3.8% confidence window) *and* the magnitude exceeds ~10%.
+///
+/// These constants are reference budgets (not asserted in code, to avoid
+/// gating CI on machine-dependent noise). They are documented exhaustively in
+/// `BENCHMARKS.md` and may be wired into a statistical regression harness later.
+#[allow(dead_code)]
 pub mod budgets {
     /// Search corpus: 500 notes, ~2 KB body each (~1 MB total), body-text
     /// indexing enabled (titles + tags + bodies tokenized together).
