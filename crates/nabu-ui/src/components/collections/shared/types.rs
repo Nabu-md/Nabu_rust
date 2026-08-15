@@ -63,6 +63,7 @@ impl CollectionView {
 #[derive(Clone, PartialEq, Default)]
 pub struct TableFilter {
     pub query: String,
+    pub object_type: Option<String>,
     pub sort_by: String,
     pub sort_ascending: bool,
 }
@@ -97,6 +98,7 @@ pub enum CalendarViewMode {
 #[derive(Clone, PartialEq, Default)]
 pub struct CalendarFilter {
     pub query: String,
+    pub object_type: Option<String>,
     pub view_mode: CalendarViewMode,
     pub group_by: String,
 }
