@@ -46,13 +46,13 @@ fn note_title(index: &[NoteIndexEntry], path: &str) -> String {
     basename(path)
 }
 
-fn open_note(nav: NavContext, ws: WorkspaceContext, path: &str) {
+fn open_note(mut nav: NavContext, ws: WorkspaceContext, path: &str) {
     open_tab(ws, path);
     record_recent_note(nav, path);
     nav.view_mode.set(ViewMode::Editor);
 }
 
-fn open_today(nav: NavContext, ws: WorkspaceContext) {
+fn open_today(mut nav: NavContext, ws: WorkspaceContext) {
     let date = today_str();
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "date": date })).unwrap();
     spawn_local(async move {
@@ -68,7 +68,7 @@ fn open_today(nav: NavContext, ws: WorkspaceContext) {
     });
 }
 
-fn open_new_note(nav: NavContext, ws: WorkspaceContext) {
+fn open_new_note(mut nav: NavContext, ws: WorkspaceContext) {
     let path = "untitled.md".to_string();
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({
         "path": path,
@@ -93,7 +93,7 @@ fn recent_notes(index: &[NoteIndexEntry], limit: usize) -> Vec<NoteIndexEntry> {
 
 #[component]
 pub fn HomeScreen() -> Element {
-    let nav = use_nav();
+    let mut nav = use_nav();
     let ws = use_workspace();
 
     // Refresh the index when notes change elsewhere.
@@ -110,9 +110,9 @@ pub fn HomeScreen() -> Element {
         .filter_map(|p| index.iter().find(|n| n.path == *p).cloned())
         .collect();
 
-    let vm_search = nav.view_mode;
-    let vm_inbox = nav.view_mode;
-    let vm_stats = nav.view_mode;
+    let mut vm_search = nav.view_mode;
+    let mut vm_inbox = nav.view_mode;
+    let mut vm_stats = nav.view_mode;
 
     rsx! {
         div { class: "home-screen h-full overflow-y-auto" }
@@ -128,13 +128,19 @@ pub fn HomeScreen() -> Element {
         div { class: "flex flex-wrap gap-3" }
         button {
             class: "home-action inline-flex items-center gap-2 rounded-lg bg-gray-800/50 px-4 py-2 border border-gray-700 hover:bg-gray-700/50 text-sm text-gray-200",
-            onclick: move |_: MouseEvent| { open_today(nav, ws); },
+            onclick: move |_: MouseEvent| {
+                let mut nv = nav;
+                open_today(nv, ws);
+            },
             {render_icon_view(Icon::Clock)}
             "Today's Note"
         }
         button {
             class: "home-action inline-flex items-center gap-2 rounded-lg bg-gray-800/50 px-4 py-2 border border-gray-700 hover:bg-gray-700/50 text-sm text-gray-200",
-            onclick: move |_: MouseEvent| { open_new_note(nav, ws); },
+            onclick: move |_: MouseEvent| {
+                let mut nv = nav;
+                open_new_note(nv, ws);
+            },
             {render_icon_view(Icon::FilePlus)}
             "New Note"
         }
@@ -194,7 +200,7 @@ fn render_note_row(n: &NoteIndexEntry, nav: NavContext, ws: WorkspaceContext) ->
     rsx! {
         div {
             class: "flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800/50 cursor-pointer text-sm",
-            onclick: move |_: MouseEvent| { open_note(nav, ws, &path); },
+            onclick: move |_: MouseEvent| { let mut nv = nav; open_note(nv, ws, &path); },
             div { class: "flex-1 min-w-0" }
             div { class: "text-sm text-gray-200 truncate", "{title}" }
             if !folder.is_empty() { span { class: "text-xs text-gray-500", "{folder}/" } }
@@ -227,7 +233,7 @@ fn render_favourite_tag(n: &NoteIndexEntry, nav: NavContext, ws: WorkspaceContex
     rsx! {
         span {
             class: "inline-flex items-center gap-1 rounded bg-gray-800/50 px-2 py-1 text-xs text-gray-200 border border-gray-700",
-            onclick: move |_: MouseEvent| { open_note(nav, ws, &path); },
+            onclick: move |_: MouseEvent| { let mut nv = nav; open_note(nv, ws, &path); },
             {render_icon_view(Icon::BookMarked)}
             "{title}"
         }

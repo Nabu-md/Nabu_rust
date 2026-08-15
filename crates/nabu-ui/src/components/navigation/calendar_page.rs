@@ -16,7 +16,7 @@ use crate::components::ui::info::EmptyState;
 use crate::events::{use_event_listener, FrontendEvent, FrontendEventKind};
 use crate::ipc;
 use crate::models::organisation::CalendarEntry;
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use dioxus::prelude::*;
 use std::collections::HashMap;
 use wasm_bindgen_futures::spawn_local;
@@ -54,13 +54,20 @@ fn month_label(month: &str) -> String {
         .unwrap_or_else(|| month.to_string())
 }
 
-fn open_note(nav: NavContext, ws: WorkspaceContext, path: &str) {
+/// Day of week where Sunday = 0, using a simple algorithm (Tomohiko Sakamoto's).
+fn naive_weekday_sunday(y: i32, m: u32, d: u32) -> usize {
+    let dd = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+    let yy = if m < 3 { y - 1 } else { y };
+    ((yy + yy / 4 - yy / 100 + yy / 400 + dd[(m - 1) as usize] as i32 + d as i32) % 7) as usize
+}
+
+fn open_note(mut nav: NavContext, ws: WorkspaceContext, path: &str) {
     open_tab(ws, path);
     record_recent_note(nav, path);
     nav.view_mode.set(ViewMode::Editor);
 }
 
-fn load_month(month: String, entries: Signal<Vec<CalendarEntry>>, state: Signal<LoadState>) {
+fn load_month(month: String, mut entries: Signal<Vec<CalendarEntry>>, mut state: Signal<LoadState>) {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "month": month })).unwrap();
     state.set(LoadState::Loading);
     spawn_local(async move {
@@ -90,12 +97,12 @@ fn open_daily_note(nav: NavContext, ws: WorkspaceContext, date: String) {
 
 #[component]
 pub fn CalendarPage() -> Element {
-    let nav = use_nav();
+    let mut nav = use_nav();
     let ws = use_workspace();
 
-    let month = use_signal(current_month);
-    let entries = use_signal(Vec::<CalendarEntry>::new);
-    let state = use_signal(LoadState::default);
+    let mut month = use_signal(current_month);
+    let mut entries = use_signal(Vec::<CalendarEntry>::new);
+    let mut state = use_signal(LoadState::default);
 
     // Initial load (runs once).
     {
@@ -109,8 +116,8 @@ pub fn CalendarPage() -> Element {
     // Refresh after external edits.
     use_event_listener(FrontendEventKind::ItemStored, move |_ev: &FrontendEvent| {
         let m = month.read().clone();
-        let e = entries;
-        let s = state;
+        let mut e = entries;
+        let mut s = state;
         load_month(m, e, s);
     });
 
@@ -142,7 +149,7 @@ pub fn CalendarPage() -> Element {
         NaiveDate::from_ymd_opt(y, m_mon + 1, 1).unwrap()
     };
     let days_in_month = (next_first - first).num_days() as usize;
-    let start_offset = first.weekday().num_days_from_sunday();
+    let start_offset = naive_weekday_sunday(y, m_mon, 1);
     let total_cells = start_offset + days_in_month;
     let weeks = (total_cells + 6) / 7;
 
@@ -159,25 +166,25 @@ pub fn CalendarPage() -> Element {
                 month.set(m.clone());
                 load_month(m, entries, state);
             },
-            "{render_icon_view(Icon::Clock)}"
+            {render_icon_view(Icon::Clock)}
             "Prev"
         }
         h1 { class: "text-lg font-semibold text-gray-100", "{label}" }
         button {
             class: "cal-btn rounded px-2 py-1 text-sm text-gray-300 hover:bg-gray-700/50",
             onclick: move |_: MouseEvent| {
-                let m = current_month();
-                month.set(m.clone());
-                load_month(m, entries, state);
+                let mm = current_month();
+                month.set(mm.clone());
+                load_month(mm, entries, state);
             },
             "Today"
         }
         button {
             class: "cal-btn rounded px-2 py-1 text-sm text-gray-300 hover:bg-gray-700/50",
             onclick: move |_: MouseEvent| {
-                let m = next_month.clone();
-                month.set(m.clone());
-                load_month(m, entries, state);
+                let mm = next_month.clone();
+                month.set(mm.clone());
+                load_month(mm, entries, state);
             },
             "Next"
         }
@@ -210,9 +217,9 @@ pub fn CalendarPage() -> Element {
                 }
                 tbody {
                     for week in 0..weeks {
-                        tr {
-                            class: "cal-row"
-                            for col in 0..7usize {
+                tr {
+                    class: "cal-row",
+                    for col in 0..7usize {
                                 {
                                     let i = week * 7 + col;
                                     let day_num = if i < start_offset || i >= start_offset + days_in_month {
@@ -247,7 +254,7 @@ fn render_day_cell(
         Some(d) => {
             let date_str = format!("{:04}-{:02}-{:02}", y, m_mon, d);
             let is_today = date_str == today;
-            let day_notes: Vec<&CalendarEntry> = by_date.get(&date_str).cloned().unwrap_or_else(|| Vec::new());
+            let day_notes: Vec<CalendarEntry> = by_date.get(&date_str).cloned().unwrap_or_else(|| Vec::new());
             let cell_class = if is_today {
                 "cal-day cal-day-today border border-blue-500 p-1 align-top text-xs h-20"
             } else {
@@ -258,7 +265,7 @@ fn render_day_cell(
                 div { class: "day-header" }
                 div {
                     class: "day-number text-gray-400 cursor-pointer",
-                    onclick: move |_: MouseEvent| { open_daily_note(nav, ws, date_str.clone()); },
+                    onclick: move |_: MouseEvent| { let mut n = nav; open_daily_note(n, ws, date_str.clone()); },
                     "{d}"
                 }
                 if !day_notes.is_empty() {
@@ -278,7 +285,7 @@ fn render_calendar_note(n: &CalendarEntry, nav: NavContext, ws: WorkspaceContext
     rsx! {
         div {
             class: "day-note truncate text-blue-400 hover:text-blue-300 cursor-pointer",
-            onclick: move |_: MouseEvent| { open_note(nav, ws, &path); },
+            onclick: move |_: MouseEvent| { let mut nn = nav; open_note(nn, ws, &path); },
             title: "{title}",
             "{truncate_title(&title, 18)}"
         }

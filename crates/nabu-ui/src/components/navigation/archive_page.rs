@@ -26,13 +26,13 @@ fn fmt_date(rfc: &str) -> String {
         .unwrap_or_else(|_| rfc.chars().take(10).collect())
 }
 
-fn open_note(nav: NavContext, ws: WorkspaceContext, path: &str) {
+fn open_note(mut nav: NavContext, ws: WorkspaceContext, path: &str) {
     open_tab(ws, path);
     record_recent_note(nav, path);
     nav.view_mode.set(ViewMode::Editor);
 }
 
-fn load_archive(items: Signal<Vec<ArchiveEntry>>, state: Signal<LoadState>) {
+fn load_archive(mut items: Signal<Vec<ArchiveEntry>>, mut state: Signal<LoadState>) {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
     state.set(LoadState::Loading);
     spawn_local(async move {
@@ -50,8 +50,8 @@ fn load_archive(items: Signal<Vec<ArchiveEntry>>, state: Signal<LoadState>) {
 /// Restores one archived note via `archive_restore` and refreshes the list.
 fn restore_entry(
     archive_path: String,
-    items: Signal<Vec<ArchiveEntry>>,
-    state: Signal<LoadState>,
+    mut items: Signal<Vec<ArchiveEntry>>,
+    mut state: Signal<LoadState>,
 ) {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "archive_path": archive_path })).unwrap();
     spawn_local(async move {
@@ -65,12 +65,12 @@ fn restore_entry(
 
 #[component]
 pub fn ArchivePage() -> Element {
-    let nav = use_nav();
+    let mut nav = use_nav();
     let ws = use_workspace();
 
-    let items = use_signal(Vec::<ArchiveEntry>::new);
-    let state = use_signal(LoadState::default);
-    let query = use_signal(String::new);
+    let mut items = use_signal(Vec::<ArchiveEntry>::new);
+    let mut state = use_signal(LoadState::default);
+    let mut query = use_signal(String::new);
 
     // Initial load.
     {
@@ -83,8 +83,8 @@ pub fn ArchivePage() -> Element {
 
     // Refresh on external changes.
     use_event_listener(FrontendEventKind::ItemStored, move |_ev: &FrontendEvent| {
-        let i = items;
-        let s = state;
+        let mut i = items;
+        let mut s = state;
         load_archive(i, s);
     });
 
@@ -116,7 +116,10 @@ pub fn ArchivePage() -> Element {
             placeholder: "Search archived notes…",
             class: "bg-gray-800 text-gray-100 rounded px-3 py-1.5 text-sm border border-gray-700 focus:border-blue-500 focus:outline-none w-64",
             value: "{query.read()}",
-            oninput: move |ev: FormEvent| { query.set(ev.value()); },
+            oninput: move |ev: FormEvent| {
+                let mut q = query;
+                q.set(ev.value());
+            },
         }
 
         div { class: "archive-content px-6 py-4" }
@@ -160,8 +163,8 @@ fn render_archive_row(
     n: &ArchiveEntry,
     nav: NavContext,
     ws: WorkspaceContext,
-    items: Signal<Vec<ArchiveEntry>>,
-    state: Signal<LoadState>,
+    mut items: Signal<Vec<ArchiveEntry>>,
+    mut state: Signal<LoadState>,
 ) -> Element {
     let archive_path = n.archive_path.clone();
     let original_path = n.original_path.clone();
@@ -175,15 +178,18 @@ fn render_archive_row(
         div { class: "flex-1 min-w-0" }
         div {
             class: "text-sm text-gray-200 truncate cursor-pointer",
-            onclick: move |_: MouseEvent| { open_note(nav, ws, &original_path); },
+            onclick: move |_: MouseEvent| { let mut n = nav; open_note(n, ws, &original_path); },
             "{title}"
         }
         if !folder.is_empty() { span { class: "text-xs text-gray-500", "{folder}/" } }
         div { class: "text-xs text-gray-500", "{fmt_date(&modified)}" }
         button {
             class: "restore-btn ml-2 opacity-0 group-hover:opacity-100 rounded px-2 py-1 text-xs text-gray-300 hover:bg-gray-700/50 border border-gray-700",
-            onclick: move |_: MouseEvent| { restore_entry(archive_path.clone(), items, state); },
-            "Restore"
+            onclick: move |_: MouseEvent| {
+            let mut i = items;
+            let mut s = state;
+            restore_entry(archive_path.clone(), i, s);
+        },            "Restore"
         }
     }
 }
