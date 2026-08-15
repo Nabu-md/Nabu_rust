@@ -1,176 +1,247 @@
-//! Board View component.
+//! Board View component (Dioxus).
 //!
-//! Production-ready Kanban-style board view with columns,
-//! filtering, sorting, grouping, and drag-and-drop support.
-//! Views are projections of existing KnowledgeObjects — views never own data.
+//! Kanban-style board view with columns, filtering, and drag-and-drop
+//! reordering between columns. Views are projections of `Vec<CollectionItem>`.
 
-use leptos::prelude::*;
-use crate::models::knowledge_object::KnowledgeObject;
+use crate::components::collections::shared::types::{CollectionItem, BoardFilter};
+use crate::components::ui::icons::{render_icon_view, Icon};
+use dioxus::prelude::*;
+use dioxus::web::WebEventExt;
 
 #[derive(Clone, PartialEq, Default)]
 pub struct BoardColumn {
     pub id: String,
     pub title: String,
-    pub items: Vec<KnowledgeObject>,
+    pub items: Vec<CollectionItem>,
 }
 
 #[derive(Clone, PartialEq, Default)]
 pub struct BoardFilter {
     pub query: String,
     pub object_type: Option<String>,
-    pub group_by: String, // "status", "type", "priority"
+    pub group_by: String,
 }
 
-#[derive(Properties, PartialEq)]
-pub struct Props {
-    pub objects: Vec<KnowledgeObject>,
+#[derive(Props, PartialEq)]
+pub struct BoardViewProps {
+    pub objects: Vec<CollectionItem>,
     pub columns: Vec<BoardColumn>,
     pub filter: BoardFilter,
-    pub on_filter_change: Callback<BoardFilter>,
-    pub on_move_item: Callback<(String, String)>, // (item_id, target_column_id)
+    pub on_filter_change: EventHandler<BoardFilter>,
+    pub on_move_item: EventHandler<(String, String)>,
+    pub on_open: EventHandler<String>,
 }
 
-#[function_component(BoardView)]
-pub fn board_view(props: &Props) -> Html {
-    let filtered = move || {
-        let f = &props.filter;
-        let mut result = props.objects.clone();
-
-        if !f.query.is_empty() {
-            let q = f.query.to_lowercase();
-            result.retain(|obj| {
-                obj.metadata.title.as_ref().map_or(false, |t| t.to_lowercase().contains(&q))
-            });
-        }
-
-        if let Some(ref ot) = f.object_type {
-            result.retain(|obj| obj.object_type.to_string() == *ot);
-        }
-
-        result
+/// Groups items for the board view. With `CollectionItem` we group by
+/// `folder` (the only categorical field available); a fallback "root" bucket
+/// catches items with no folder.
+fn group_items(items: &[CollectionItem], group_by: &str, query: &str) -> Vec<BoardColumn> {
+    let q = query.to_lowercase();
+    let filtered: Vec<&CollectionItem> = if q.is_empty() {
+        items.iter().collect()
+    } else {
+        items
+            .iter()
+            .filter(|i| {
+                i.title.to_lowercase().contains(&q)
+                    || i.folder.to_lowercase().contains(&q)
+                    || i.path.to_lowercase().contains(&q)
+            })
+            .collect()
     };
 
-    let grouped = move || {
-        let f = &props.filter;
-        let items = filtered();
-        let mut groups: std::collections::HashMap<String, Vec<KnowledgeObject>> = std::collections::HashMap::new();
-
-        for obj in items {
-            let key = match f.group_by.as_str() {
-                "type" => obj.object_type.to_string(),
-                "priority" => {
-                    obj.metadata.custom.get("priority")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("normal")
-                        .to_string()
-                }
-                _ => obj.metadata.custom.get("status")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("default")
-                    .to_string(),
+    if group_by == "folder" {
+        let mut groups: std::collections::BTreeMap<String, Vec<CollectionItem>> =
+            std::collections::BTreeMap::new();
+        for obj in &filtered {
+            let key = if obj.folder.is_empty() {
+                "(root)".to_string()
+            } else {
+                obj.folder.clone()
             };
-            groups.entry(key).or_default().push(obj);
+            groups.entry(key).or_default().push((*obj).clone());
         }
 
         groups
+            .into_iter()
+            .map(|(k, items)| BoardColumn {
+                id: k.clone(),
+                title: k,
+                items,
+            })
+            .collect()
+    } else {
+        vec![BoardColumn {
+            id: "all".to_string(),
+            title: "All".to_string(),
+            items: filtered.into_iter().cloned().collect(),
+        }]
+    }
+}
+
+#[component]
+pub fn BoardView(props: &BoardViewProps) -> Element {
+    let filter = props.filter.clone();
+    let on_open = props.on_open;
+    let on_move_item = props.on_move_item;
+
+    let columns_data: Vec<BoardColumn> = if props.columns.is_empty() {
+        group_items(&props.objects, &filter.group_by, &filter.query)
+    } else {
+        props.columns.clone()
     };
 
     let on_drag_start = move |ev: DragEvent, item_id: String| {
-        ev.data_transfer().unwrap().set_data("text/plain", &item_id).unwrap();
-    };
-
-    let on_drop = move |ev: DragEvent, column_id: String| {
-        ev.prevent_default();
-        let data = ev.data_transfer().unwrap().get_data("text/plain").unwrap();
-        props.on_move_item.emit((data, column_id));
+        let web = ev.data().as_web_event();
+        if let Some(dt) = web.data_transfer() {
+            let _ = dt.set_data("text/plain", &item_id);
+        }
     };
 
     let on_drag_over = move |ev: DragEvent| {
         ev.prevent_default();
     };
 
-    view! {
-        <div class="board-view flex gap-4 overflow-x-auto p-4 h-full">
-            {move || {
-                let groups = grouped();
-                let columns = props.columns.clone();
-
-                if columns.is_empty() {
-                    // Auto-generate columns from grouped data
-                    view! {
-                        <div class="flex gap-4 overflow-x-auto h-full">
-                            { groups.iter().map(|(group_key, items)| {
-                                let column_id = group_key.clone();
-                                view! {
-                                    <div
-                                        class="flex-none w-72 bg-gray-800 rounded-lg border border-gray-700 flex flex-col max-h-full"
-                                        on:dragover=on_drag_over
-                                        on:drop=move |ev| on_drop(ev, column_id.clone())
-                                    >
-                                        <div class="px-3 py-2 border-b border-gray-700 flex items-center justify-between">
-                                            <span class="text-sm font-medium text-gray-300">{group_key}</span>
-                                            <span class="text-xs text-gray-500">{items.len()}</span>
-                                        </div>
-                                        <div class="flex-1 overflow-y-auto p-2 space-y-2">
-                                            { items.iter().map(|obj| {
-                                                let obj_id = obj.id.to_string();
-                                                let title = obj.metadata.title.clone().unwrap_or_default();
-                                                view! {
-                                                    <div
-                                                        class="bg-gray-700 rounded p-2 border border-gray-600 cursor-grab hover:border-gray-500 transition-colors"
-                                                        draggable="true"
-                                                        on:dragstart=move |ev| on_drag_start(ev, obj_id.clone())
-                                                    >
-                                                        <div class="text-sm font-medium text-gray-200">{title}</div>
-                                                        <div class="text-xs text-gray-500 mt-1">{obj.object_type.to_string()}</div>
-                                                    </div>
-                                                }
-                                            }).collect_view()}
-                                        </div>
-                                    </div>
-                                }
-                            }).collect_view()}
-                        </div>
-                    }.into_any()
-                } else {
-                    view! {
-                        <div class="flex gap-4 overflow-x-auto h-full">
-                            { columns.iter().map(|col| {
-                                let column_id = col.id.clone();
-                                let items = groups.get(&col.id).cloned().unwrap_or_default();
-                                view! {
-                                    <div
-                                        class="flex-none w-72 bg-gray-800 rounded-lg border border-gray-700 flex flex-col max-h-full"
-                                        on:dragover=on_drag_over
-                                        on:drop=move |ev| on_drop(ev, column_id.clone())
-                                    >
-                                        <div class="px-3 py-2 border-b border-gray-700 flex items-center justify-between">
-                                            <span class="text-sm font-medium text-gray-300">{&col.title}</span>
-                                            <span class="text-xs text-gray-500">{items.len()}</span>
-                                        </div>
-                                        <div class="flex-1 overflow-y-auto p-2 space-y-2">
-                                            { items.iter().map(|obj| {
-                                                let obj_id = obj.id.to_string();
-                                                let title = obj.metadata.title.clone().unwrap_or_default();
-                                                view! {
-                                                    <div
-                                                        class="bg-gray-700 rounded p-2 border border-gray-600 cursor-grab hover:border-gray-500 transition-colors"
-                                                        draggable="true"
-                                                        on:dragstart=move |ev| on_drag_start(ev, obj_id.clone())
-                                                    >
-                                                        <div class="text-sm font-medium text-gray-200">{title}</div>
-                                                        <div class="text-xs text-gray-500 mt-1">{obj.object_type.to_string()}</div>
-                                                    </div>
-                                                }
-                                            }).collect_view()}
-                                        </div>
-                                    </div>
-                                }
-                            }).collect_view()}
-                        </div>
-                    }.into_any()
+    let on_drop = move |ev: DragEvent, column_id: String| {
+        ev.prevent_default();
+        let web = ev.data().as_web_event();
+        if let Some(dt) = web.data_transfer() {
+            if let Ok(data) = dt.get_data("text/plain") {
+                if !data.is_empty() {
+                    on_move_item.call((data, column_id));
                 }
-            }}
-        </div>
+            }
+        }
+    };
+
+    let column_elements: Vec<Element> = columns_data
+        .iter()
+        .map(|col| {
+            let col_title = col.title.clone();
+            let col_count = col.items.len();
+            let column_id = col.id.clone();
+            let col_items: Vec<Element> = col
+                .items
+                .iter()
+                .map(|obj| {
+                    let obj = obj.clone();
+                    let object_id = obj.path.clone();
+                    let title = obj.title.clone();
+                    let obj_type = obj.folder.clone();
+                    let on_open = on_open;
+                    let on_drag_start = &on_drag_start;
+
+                    rsx! {
+                        div {
+                            class: "bg-gray-700 rounded p-2 border border-gray-600 cursor-grab hover:border-gray-500 transition-colors",
+                            draggable: "true",
+                            ondragstart: move |ev: DragEvent| on_drag_start(ev, object_id.clone()),
+                            onclick: move |_: MouseEvent| on_open.call(obj.path.clone()),
+                        }
+                        div { class: "text-sm font-medium text-gray-200", "{title}" }
+                        div { class: "text-xs text-gray-500 mt-1", "{obj_type}" }
+                    }
+                })
+                .collect();
+
+            rsx! {
+                div {
+                    class: "flex-none w-72 bg-gray-800 rounded-lg border border-gray-700 flex flex-col max-h-full",
+                    ondragover: on_drag_over,
+                    ondrop: move |ev: DragEvent| on_drop(ev, column_id.clone()),
+                }
+                div { class: "px-3 py-2 border-b border-gray-700 flex items-center justify-between" }
+                span { class: "text-sm font-medium text-gray-300", "{col_title}" }
+                span { class: "text-xs text-gray-500", "{col_count}" }
+
+                div { class: "flex-1 overflow-y-auto p-2 space-y-2" }
+                for item in col_items {
+                    {item}
+                }
+            }
+        })
+        .collect();
+
+    rsx! {
+        div { class: "board-view flex gap-4 overflow-x-auto p-4 h-full" }
+        for col in column_elements {
+            {col}
+        }
+    }
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(path: &str, title: &str, folder: &str) -> CollectionItem {
+        CollectionItem {
+            path: path.to_string(),
+            title: title.to_string(),
+            folder: folder.to_string(),
+            modified_at: "2024-01-01".to_string(),
+            pinned: false,
+        }
+    }
+
+    #[test]
+    fn group_by_folder_groups_correctly() {
+        let items = vec![
+            item("a.md", "A", ""),
+            item("sub/b.md", "B", "sub"),
+            item("sub/c.md", "C", "sub"),
+            item("other/x.md", "X", "other"),
+        ];
+        let groups = group_items(&items, "folder", "");
+        assert_eq!(groups.len(), 3);
+        let by_id: std::collections::HashMap<_, _> = groups
+            .iter()
+            .map(|g| (g.id.as_str(), g.items.len()))
+            .collect();
+        assert_eq!(by_id.get("(root)"), Some(&1));
+        assert_eq!(by_id.get("sub"), Some(&2));
+        assert_eq!(by_id.get("other"), Some(&1));
+    }
+
+    #[test]
+    fn group_by_folder_filters_by_query() {
+        let items = vec![
+            item("a.md", "Alpha", ""),
+            item("sub/b.md", "Beta", "sub"),
+        ];
+        let groups = group_items(&items, "folder", "alpha");
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].id, "(root)");
+        assert_eq!(groups[0].items.len(), 1);
+    }
+
+    #[test]
+    fn group_by_other_returns_single_all_column() {
+        let items = vec![
+            item("a.md", "A", ""),
+            item("b.md", "B", "sub"),
+        ];
+        let groups = group_items(&items, "type", "");
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].id, "all");
+        assert_eq!(groups[0].items.len(), 2);
+    }
+
+    #[test]
+    fn board_column_default_is_empty() {
+        let col = BoardColumn::default();
+        assert!(col.id.is_empty());
+        assert!(col.title.is_empty());
+        assert!(col.items.is_empty());
+    }
+
+    #[test]
+    fn board_filter_default() {
+        let f = BoardFilter::default();
+        assert!(f.query.is_empty());
+        assert!(f.object_type.is_none());
+        assert!(f.group_by.is_empty());
     }
 }

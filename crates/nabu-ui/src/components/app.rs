@@ -188,10 +188,7 @@ pub fn ViewContent() -> Element {
         },
         ViewMode::ReadingQueue => rsx! {
             div { class: "max-w-7xl mx-auto h-full",
-                div { class: "text-sm text-gray-400",
-                    {render_icon(Icon::BookOpen, Some("w-4 h-4 inline mr-1"))}
-                    "Reading queue placeholder — migrated in a later phase."
-                }
+                crate::components::reading_queue::ReadingQueue {}
             }
         },
         ViewMode::Templates => rsx! {

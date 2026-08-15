@@ -1,39 +1,39 @@
-use leptos::prelude::*;
+//! View switcher component (Dioxus).
+//!
+//! A row of buttons that lets the user toggle between Table, Board, Gallery,
+//! and Calendar views.
+
 use crate::components::collections::shared::types::CollectionView;
+use dioxus::prelude::*;
 
 #[derive(Props, PartialEq)]
-pub struct Props {
+pub struct ViewSwitcherProps {
     pub current_view: CollectionView,
-    pub on_change: Callback<CollectionView>,
+    pub on_change: EventHandler<CollectionView>,
 }
 
 #[component]
-pub fn ViewSwitcher(props: &Props) -> impl IntoView {
-    let views = [
-        CollectionView::Table,
-        CollectionView::Board,
-        CollectionView::Gallery,
-        CollectionView::Calendar,
-    ];
-
-    view! {
-        <div class="view-switcher flex items-center gap-1 p-2 bg-gray-800 border-b border-gray-700">
-            {move || views.iter().map(move |view| {
+pub fn ViewSwitcher(props: &ViewSwitcherProps) -> Element {
+    rsx! {
+        div { class: "view-switcher flex items-center gap-1 p-2 bg-gray-800 border-b border-gray-700" }
+        for view in CollectionView::all() {
+            {
                 let view = *view;
-                let class = if props.current_view == view {
-                    "view-btn bg-blue-600 text-white"
+                let active = props.current_view == view;
+                let label = view.label();
+                let class = if active {
+                    "px-3 py-1.5 text-xs rounded-md bg-blue-600 text-white border border-blue-500"
                 } else {
-                    "view-btn text-gray-400 hover:text-gray-200"
+                    "px-3 py-1.5 text-xs rounded-md border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-600"
                 };
-                let on_click = move |_| {
-                    props.on_change.call(view);
-                };
-                view! {
-                    <button class=class on_click=on_click>
-                        {format!("{:?}", view)}
-                    </button>
+                rsx! {
+                    button {
+                        class: class,
+                        onclick: move |_| props.on_change.call(view),
+                        "{label}"
+                    }
                 }
-            })}
-        </div>
+            }
+        }
     }
 }
