@@ -15,7 +15,7 @@ use crate::components::ui::feedback::{use_toast, SkeletonList, ErrorPanel, Toast
 use crate::components::ui::icons::{render_icon_view, Icon};
 use crate::components::ui::info::EmptyState;
 use crate::components::ui::nav::{TabDef, Tabs};
-use crate::models::graph::{MentionEntry, NoteLinks, OutgoingLink};
+use crate::models::graph::NoteLinks;
 use crate::models::properties::{PropertyDefinition, PropertyValue};
 use dioxus::prelude::*;
 use serde_wasm_bindgen;
@@ -330,7 +330,7 @@ fn inspect_content(
         LinkLoadPhase::Error => rsx! {
             ErrorPanel {
                 title: "Could not load note links".to_string(),
-                message: error_val,
+                message: error_val.unwrap_or_default(),
                 on_retry: {
                     let ws_retry = ws;
                     let state_retry = state;
@@ -411,22 +411,26 @@ fn inspect_content(
                         rsx! {
                             div { class: "space-y-1.5" }
                             for entry in entries {
-                                let click_path = entry.path.clone();
-                                let ws_click = ws;
-                                div {
-                                    class: "backlink-entry border-b border-gray-800 pb-2 last:border-0",
-                                    div { class: "flex items-center justify-between" }
-                                    div { class: "flex items-center gap-1.5" }
-                                    {render_icon_view(Icon::FileText)}
-                                    span {
-                                        class: "text-blue-400 hover:text-blue-300 cursor-pointer text-sm font-medium",
-                                        onclick: move |_: MouseEvent| { open_tab(ws_click, &click_path); },
-                                        "{entry.title}",
-                                    }
-                                    span { class: "text-xs text-gray-500", "{entry.folder}" }
-                                    span { class: "text-xs bg-gray-800 text-gray-400 rounded px-1.5 py-0.25", "x{entry.count}" }
-                                    if !entry.snippet.is_empty() {
-                                        div { class: "mt-1 text-xs text-gray-500", "{entry.snippet}" }
+                                {
+                                    let click_path = entry.path.clone();
+                                    let ws_click = ws;
+                                    rsx! {
+                                        div {
+                                            class: "backlink-entry border-b border-gray-800 pb-2 last:border-0",
+                                            div { class: "flex items-center justify-between" }
+                                            div { class: "flex items-center gap-1.5" }
+                                            {render_icon_view(Icon::FileText)}
+                                            span {
+                                                class: "text-blue-400 hover:text-blue-300 cursor-pointer text-sm font-medium",
+                                                onclick: move |_: MouseEvent| { open_tab(ws_click, &click_path); },
+                                                "{entry.title}",
+                                            }
+                                            span { class: "text-xs text-gray-500", "{entry.folder}" }
+                                            span { class: "text-xs bg-gray-800 text-gray-400 rounded px-1.5 py-0.25", "x{entry.count}" }
+                                            if !entry.snippet.is_empty() {
+                                                div { class: "mt-1 text-xs text-gray-500", "{entry.snippet}" }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -448,35 +452,39 @@ fn inspect_content(
                         rsx! {
                             div { class: "space-y-1.5" }
                             for link in entries {
-                                let ws_click = ws;
-                                let click_path = link.path.clone().unwrap_or_default();
-                                let link_icon = match link.kind.as_str() {
-                                    "external" => Icon::ExternalLink,
-                                    "broken" => Icon::CircleX,
-                                    _ => Icon::Link2,
-                                };
-                                let kind_class = match link.kind.as_str() {
-                                    "external" => "text-xs px-1.5 py-0.25 rounded bg-blue-900/30 text-blue-400",
-                                    "broken" => "text-xs px-1.5 py-0.25 rounded bg-red-900/30 text-red-400",
-                                    _ => "text-xs px-1.5 py-0.25 rounded bg-gray-800 text-gray-400",
-                                };
-                                let is_internal = link.kind == "internal" && link.path.is_some();
-                                div {
-                                    class: "outgoing-link border-b border-gray-800 pb-2 last:border-0",
-                                    div { class: "flex items-center justify-between" }
-                                    div { class: "flex items-center gap-1.5" }
-                                    {render_icon_view(link_icon)}
-                                    if is_internal {
-                                        span {
-                                            class: "text-blue-400 hover:text-blue-300 cursor-pointer text-sm",
-                                            onclick: move |_: MouseEvent| { open_tab(ws_click, &click_path); },
-                                            "{link.target}",
+                                {
+                                    let ws_click = ws;
+                                    let click_path = link.path.clone().unwrap_or_default();
+                                    let link_icon = match link.kind.as_str() {
+                                        "external" => Icon::ExternalLink,
+                                        "broken" => Icon::CircleX,
+                                        _ => Icon::Link2,
+                                    };
+                                    let kind_class = match link.kind.as_str() {
+                                        "external" => "text-xs px-1.5 py-0.25 rounded bg-blue-900/30 text-blue-400",
+                                        "broken" => "text-xs px-1.5 py-0.25 rounded bg-red-900/30 text-red-400",
+                                        _ => "text-xs px-1.5 py-0.25 rounded bg-gray-800 text-gray-400",
+                                    };
+                                    let is_internal = link.kind == "internal" && link.path.is_some();
+                                    rsx! {
+                                        div {
+                                            class: "outgoing-link border-b border-gray-800 pb-2 last:border-0",
+                                            div { class: "flex items-center justify-between" }
+                                            div { class: "flex items-center gap-1.5" }
+                                            {render_icon_view(link_icon)}
+                                            if is_internal {
+                                                span {
+                                                    class: "text-blue-400 hover:text-blue-300 cursor-pointer text-sm",
+                                                    onclick: move |_: MouseEvent| { open_tab(ws_click, &click_path); },
+                                                    "{link.target}",
+                                                }
+                                            } else {
+                                                span { class: "text-sm break-all", "{link.target}" }
+                                            }
+                                            span { class: kind_class, "{link.kind}" }
+                                            span { class: "text-xs text-gray-500", "x{link.count}" }
                                         }
-                                    } else {
-                                        span { class: "text-sm break-all", "{link.target}" }
                                     }
-                                    span { class: kind_class, "{link.kind}" }
-                                    span { class: "text-xs text-gray-500", "x{link.count}" }
                                 }
                             }
                         }
@@ -497,25 +505,29 @@ fn inspect_content(
                         rsx! {
                             div { class: "space-y-1.5" }
                             for entry in entries {
-                                let click_path = entry.path.clone();
-                                let ws_click = ws;
-                                div {
-                                    class: "mention-entry border-b border-gray-800 pb-2 last:border-0",
-                                    div { class: "flex items-center justify-between" }
-                                    div { class: "flex items-center gap-1.5" }
-                                    {render_icon_view(Icon::MessageCircle)}
-                                    if click_path.is_empty() {
-                                        span { class: "text-sm", "{entry.title}" }
-                                    } else {
-                                        span {
-                                            class: "text-blue-400 hover:text-blue-300 cursor-pointer text-sm font-medium",
-                                            onclick: move |_: MouseEvent| { open_tab(ws_click, &click_path); },
-                                            "{entry.title}",
+                                {
+                                    let click_path = entry.path.clone();
+                                    let ws_click = ws;
+                                    rsx! {
+                                        div {
+                                            class: "mention-entry border-b border-gray-800 pb-2 last:border-0",
+                                            div { class: "flex items-center justify-between" }
+                                            div { class: "flex items-center gap-1.5" }
+                                            {render_icon_view(Icon::MessageCircle)}
+                                            if click_path.is_empty() {
+                                                span { class: "text-sm", "{entry.title}" }
+                                            } else {
+                                                span {
+                                                    class: "text-blue-400 hover:text-blue-300 cursor-pointer text-sm font-medium",
+                                                    onclick: move |_: MouseEvent| { open_tab(ws_click, &click_path); },
+                                                    "{entry.title}",
+                                                }
+                                            }
+                                            span { class: "text-xs text-gray-500", "score: {entry.score}" }
+                                            if !entry.snippet.is_empty() {
+                                                div { class: "mt-1 text-xs text-gray-500", "{entry.snippet}" }
+                                            }
                                         }
-                                    }
-                                    span { class: "text-xs text-gray-500", "score: {entry.score}" }
-                                    if !entry.snippet.is_empty() {
-                                        div { class: "mt-1 text-xs text-gray-500", "{entry.snippet}" }
                                     }
                                 }
                             }

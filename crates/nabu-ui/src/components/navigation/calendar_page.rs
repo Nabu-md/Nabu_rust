@@ -7,7 +7,9 @@
 //! Month navigation (prev / today / next) re-fetches for the new month. An
 //! `ItemStored` listener refreshes the current month's notes after edits.
 
-use crate::components::contexts::{open_tab, record_recent_note, use_nav, use_workspace, NavContext, ViewMode, WorkspaceContext};
+use crate::components::contexts::{
+    open_tab, record_recent_note, use_nav, use_workspace, NavContext, ViewMode, WorkspaceContext,
+};
 use crate::components::ui::feedback::{ErrorPanel, LoadingBlock, SpinnerSize};
 use crate::components::ui::icons::{render_icon_view, Icon};
 use crate::components::ui::info::EmptyState;
@@ -35,7 +37,6 @@ fn current_month() -> String {
     today_str().chars().take(7).collect()
 }
 
-/// Shifts a "YYYY-MM" string by `delta` months (negative = prev).
 fn shift_month(month: &str, delta: i32) -> String {
     let y: i32 = month[..4].parse().unwrap_or(2024);
     let m: u32 = month[5..7].parse().unwrap_or(1);
@@ -53,14 +54,12 @@ fn month_label(month: &str) -> String {
         .unwrap_or_else(|| month.to_string())
 }
 
-/// Opens a note (or daily note) and switches to the editor.
 fn open_note(nav: NavContext, ws: WorkspaceContext, path: &str) {
     open_tab(ws, path);
     record_recent_note(nav, path);
     nav.view_mode.set(ViewMode::Editor);
 }
 
-/// Fetches notes for `month` and stores them in `entries`.
 fn load_month(month: String, entries: Signal<Vec<CalendarEntry>>, state: Signal<LoadState>) {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "month": month })).unwrap();
     state.set(LoadState::Loading);
@@ -76,7 +75,6 @@ fn load_month(month: String, entries: Signal<Vec<CalendarEntry>>, state: Signal<
     });
 }
 
-/// Creates/opens the daily note for `date` (YYYY-MM-DD).
 fn open_daily_note(nav: NavContext, ws: WorkspaceContext, date: String) {
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "date": date })).unwrap();
     spawn_local(async move {
@@ -125,10 +123,10 @@ pub fn CalendarPage() -> Element {
     let next_month = shift_month(&month_str, 1);
 
     // Group notes by date (YYYY-MM-DD).
-    let by_date: HashMap<String, Vec<&CalendarEntry>> = {
-        let mut m: HashMap<String, Vec<&CalendarEntry>> = HashMap::new();
+    let by_date: HashMap<String, Vec<CalendarEntry>> = {
+        let mut m: HashMap<String, Vec<CalendarEntry>> = HashMap::new();
         for n in notes.iter() {
-            m.entry(n.date.clone()).or_default().push(n);
+            m.entry(n.date.clone()).or_default().push(n.clone());
         }
         m
     };
@@ -145,7 +143,6 @@ pub fn CalendarPage() -> Element {
     };
     let days_in_month = (next_first - first).num_days() as usize;
     let start_offset = first.weekday().num_days_from_sunday();
-
     let total_cells = start_offset + days_in_month;
     let weeks = (total_cells + 6) / 7;
 
@@ -157,7 +154,7 @@ pub fn CalendarPage() -> Element {
         div { class: "flex items-center gap-2" }
         button {
             class: "cal-btn rounded px-2 py-1 text-sm text-gray-300 hover:bg-gray-700/50",
-            on_click: move |_: MouseEvent| {
+            onclick: move |_: MouseEvent| {
                 let m = prev_month.clone();
                 month.set(m.clone());
                 load_month(m, entries, state);
@@ -168,7 +165,7 @@ pub fn CalendarPage() -> Element {
         h1 { class: "text-lg font-semibold text-gray-100", "{label}" }
         button {
             class: "cal-btn rounded px-2 py-1 text-sm text-gray-300 hover:bg-gray-700/50",
-            on_click: move |_: MouseEvent| {
+            onclick: move |_: MouseEvent| {
                 let m = current_month();
                 month.set(m.clone());
                 load_month(m, entries, state);
@@ -177,7 +174,7 @@ pub fn CalendarPage() -> Element {
         }
         button {
             class: "cal-btn rounded px-2 py-1 text-sm text-gray-300 hover:bg-gray-700/50",
-            on_click: move |_: MouseEvent| {
+            onclick: move |_: MouseEvent| {
                 let m = next_month.clone();
                 month.set(m.clone());
                 load_month(m, entries, state);
@@ -187,7 +184,7 @@ pub fn CalendarPage() -> Element {
 
         // Body.
         {match cur_state {
-            LoadState::Loading => rsx! { LoadingBlock { spinner_size: SpinnerSize::Md } },
+            LoadState::Loading => rsx! { LoadingBlock { size: SpinnerSize::Md } },
             LoadState::Error => rsx! {
                 ErrorPanel {
                     title: "Calendar".to_string(),
@@ -213,15 +210,19 @@ pub fn CalendarPage() -> Element {
                 }
                 tbody {
                     for week in 0..weeks {
-                        tr { class: "cal-row" }
-                        for col in 0..7usize {
-                            let i = week * 7 + col;
-                            let day_num = if i < start_offset || i >= start_offset + days_in_month {
-                                None
-                            } else {
-                                Some(i - start_offset + 1)
-                            };
-                            {render_day_cell(day_num, y, m_mon, &by_date, &today, nav, &ws)}
+                        tr {
+                            class: "cal-row"
+                            for col in 0..7usize {
+                                {
+                                    let i = week * 7 + col;
+                                    let day_num = if i < start_offset || i >= start_offset + days_in_month {
+                                        None
+                                    } else {
+                                        Some(i - start_offset + 1)
+                                    };
+                                    render_day_cell(day_num, y, m_mon, &by_date, &today, nav, ws)
+                                }
+                            }
                         }
                     }
                 }
@@ -234,10 +235,10 @@ fn render_day_cell(
     day: Option<usize>,
     y: i32,
     m_mon: u32,
-    by_date: &HashMap<String, Vec<&CalendarEntry>>,
+    by_date: &HashMap<String, Vec<CalendarEntry>>,
     today: &str,
     nav: NavContext,
-    ws: &WorkspaceContext,
+    ws: WorkspaceContext,
 ) -> Element {
     match day {
         None => rsx! {
@@ -246,7 +247,7 @@ fn render_day_cell(
         Some(d) => {
             let date_str = format!("{:04}-{:02}-{:02}", y, m_mon, d);
             let is_today = date_str == today;
-            let day_notes: Vec<&CalendarEntry> = by_date.get(&date_str).cloned().unwrap_or_default();
+            let day_notes: Vec<&CalendarEntry> = by_date.get(&date_str).cloned().unwrap_or_else(|| Vec::new());
             let cell_class = if is_today {
                 "cal-day cal-day-today border border-blue-500 p-1 align-top text-xs h-20"
             } else {
@@ -254,29 +255,32 @@ fn render_day_cell(
             };
             rsx! {
                 td { class: cell_class }
+                div { class: "day-header" }
                 div {
-                    class: "day-number text-gray-400 mb-1 cursor-pointer",
-                    onclick: move |_: MouseEvent| { open_daily_note(nav, *ws, date_str.clone()); },
+                    class: "day-number text-gray-400 cursor-pointer",
+                    onclick: move |_: MouseEvent| { open_daily_note(nav, ws, date_str.clone()); },
                     "{d}"
                 }
                 if !day_notes.is_empty() {
                     div { class: "day-notes space-y-0.5" }
                     for n in &day_notes {
-                        let path = n.path.clone();
-                        let title = n.title.clone();
-                        let ws = *ws;
-                        let nav_copy = nav;
-                        rsx! {
-                            div {
-                                class: "day-note truncate text-blue-400 hover:text-blue-300 cursor-pointer",
-                                onclick: move |_: MouseEvent| { open_note(nav_copy, ws, &path); },
-                                title: "{title}",
-                                "{truncate_title(&title, 18)}"
-                            }
-                        }
+                        {render_calendar_note(n, nav, ws)}
                     }
                 }
             }
+        }
+    }
+}
+
+fn render_calendar_note(n: &CalendarEntry, nav: NavContext, ws: WorkspaceContext) -> Element {
+    let path = n.path.clone();
+    let title = n.title.clone();
+    rsx! {
+        div {
+            class: "day-note truncate text-blue-400 hover:text-blue-300 cursor-pointer",
+            onclick: move |_: MouseEvent| { open_note(nav, ws, &path); },
+            title: "{title}",
+            "{truncate_title(&title, 18)}"
         }
     }
 }

@@ -34,7 +34,7 @@ pub enum Icon {
     // Status & feedback
     ToastSuccess, ToastWarning, ToastError, ToastInfo, Bell, BellRing,
     Warning, CircleAlert, Circle, Info, Check, CircleCheck, CircleX, X,
-    Plus, Loader, RefreshCw, RefreshCcw, LifeBuoy,
+    Plus, Minus, Loader, RefreshCw, RefreshCcw, LifeBuoy,
     // Actions
     Star, StarHalf, Pin, Edit, Delete, Undo, Redo,
     // Communication
@@ -145,6 +145,7 @@ impl Icon {
         Icon::CircleX => "circle-x",
         Icon::X => "x",
         Icon::Plus => "plus",
+        Icon::Minus => "minus",
         Icon::Loader => "loader",
         Icon::RefreshCw => "refresh-cw",
         Icon::RefreshCcw => "refresh-ccw",
@@ -1626,6 +1627,23 @@ pub fn icon_component(icon: Icon) -> Element {
                     class: "lucide",
                     path { d: "M5 12h14" }
                     path { d: "M12 5v14" }
+                }
+            }
+        }
+        Icon::Minus => {
+            rsx! {
+                svg {
+                    xmlns: "http://www.w3.org/2000/svg",
+                    width: "24",
+                    height: "24",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    class: "lucide",
+                    path { d: "M5 12h14" }
                 }
             }
         }

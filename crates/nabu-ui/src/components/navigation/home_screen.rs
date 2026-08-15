@@ -2,13 +2,15 @@
 //!
 //! Shown when no note is open in the editor. It is the vault's front door — a
 //! welcome banner, a row of quick actions (today's note, new note, search,
-//! statistics, inbox), the *Recently Modified* list (sourced from the NavContext
-//! note index, no extra IPC required) and the user's *Favourites*.
+//! statistics, inbox), the *Recently Modified* list (sourced from the
+//! NavContext note index, no extra IPC) and the user's *Favourites*.
 //!
 //! Opening a note here switches the view to the editor and records the visit
-//! in the recent-notes history, mirroring the Quick Switcher behaviour.
+//! in recent-notes history, mirroring the Quick Switcher behaviour.
 
-use crate::components::contexts::{open_tab, record_recent_note, toggle_favourite, use_nav, use_workspace, NavContext, ViewMode, WorkspaceContext};
+use crate::components::contexts::{
+    open_tab, record_recent_note, use_nav, use_workspace, NavContext, ViewMode, WorkspaceContext,
+};
 use crate::components::navigation::state::{load_notes_index, NoteIndexEntry};
 use crate::components::ui::icons::{render_icon_view, Icon};
 use crate::components::ui::info::EmptyState;
@@ -16,10 +18,8 @@ use crate::events::{use_event_listener, FrontendEvent, FrontendEventKind};
 use crate::ipc;
 use chrono::DateTime;
 use dioxus::prelude::*;
-use serde::Deserialize;
 use wasm_bindgen_futures::spawn_local;
 
-/// RFC 3339 → "Mon d, YYYY".
 fn fmt_date(rfc: &str) -> String {
     DateTime::parse_from_rfc3339(rfc)
         .map(|dt| dt.format("%b %e, %Y").to_string().replace("  ", " "))
@@ -46,14 +46,12 @@ fn note_title(index: &[NoteIndexEntry], path: &str) -> String {
     basename(path)
 }
 
-/// Opens a note from the home screen.
 fn open_note(nav: NavContext, ws: WorkspaceContext, path: &str) {
     open_tab(ws, path);
     record_recent_note(nav, path);
     nav.view_mode.set(ViewMode::Editor);
 }
 
-/// Creates today's daily note (or opens the existing one).
 fn open_today(nav: NavContext, ws: WorkspaceContext) {
     let date = today_str();
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "date": date })).unwrap();
@@ -70,7 +68,6 @@ fn open_today(nav: NavContext, ws: WorkspaceContext) {
     });
 }
 
-/// Creates a new untitled note and opens it.
 fn open_new_note(nav: NavContext, ws: WorkspaceContext) {
     let path = "untitled.md".to_string();
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({
@@ -99,7 +96,7 @@ pub fn HomeScreen() -> Element {
     let nav = use_nav();
     let ws = use_workspace();
 
-    // Refresh the index-backed list when notes change elsewhere.
+    // Refresh the index when notes change elsewhere.
     use_event_listener(FrontendEventKind::ItemStored, move |_ev: &FrontendEvent| {
         load_notes_index(nav);
     });
@@ -123,65 +120,55 @@ pub fn HomeScreen() -> Element {
         // Hero banner.
         div { class: "home-hero border-b border-gray-700 px-6 py-8" }
         h1 { class: "home-title text-3xl font-bold text-gray-100", "Welcome to {vault_name}" }
-        p { class: "home-subtitle text-sm text-gray-400 mt-2 max-w-lg",
+        p { class: "text-sm text-gray-400 mt-2 max-w-lg",
             "Your knowledge base is ready. Start a note, search everything, or open today's entry."
         }
 
         div { class: "home-actions px-6 py-4" }
         div { class: "flex flex-wrap gap-3" }
-        HomeActionButton {
-            icon: Icon::Clock, label: "Today's Note".to_string(),
-            on_click: move |_: MouseEvent| { open_today(nav, ws); },
+        button {
+            class: "home-action inline-flex items-center gap-2 rounded-lg bg-gray-800/50 px-4 py-2 border border-gray-700 hover:bg-gray-700/50 text-sm text-gray-200",
+            onclick: move |_: MouseEvent| { open_today(nav, ws); },
+            {render_icon_view(Icon::Clock)}
+            "Today's Note"
         }
-        HomeActionButton {
-            icon: Icon::FilePlus, label: "New Note".to_string(),
-            on_click: move |_: MouseEvent| { open_new_note(nav, ws); },
+        button {
+            class: "home-action inline-flex items-center gap-2 rounded-lg bg-gray-800/50 px-4 py-2 border border-gray-700 hover:bg-gray-700/50 text-sm text-gray-200",
+            onclick: move |_: MouseEvent| { open_new_note(nav, ws); },
+            {render_icon_view(Icon::FilePlus)}
+            "New Note"
         }
-        HomeActionButton {
-            icon: Icon::Search, label: "Search".to_string(),
-            on_click: move |_: MouseEvent| { vm_search.set(ViewMode::Search); },
+        button {
+            class: "home-action inline-flex items-center gap-2 rounded-lg bg-gray-800/50 px-4 py-2 border border-gray-700 hover:bg-gray-700/50 text-sm text-gray-200",
+            onclick: move |_: MouseEvent| { vm_search.set(ViewMode::Search); },
+            {render_icon_view(Icon::Search)}
+            "Search"
         }
-        HomeActionButton {
-            icon: Icon::Inbox, label: "Inbox".to_string(),
-            on_click: move |_: MouseEvent| { vm_inbox.set(ViewMode::Inbox); },
+        button {
+            class: "home-action inline-flex items-center gap-2 rounded-lg bg-gray-800/50 px-4 py-2 border border-gray-700 hover:bg-gray-700/50 text-sm text-gray-200",
+            onclick: move |_: MouseEvent| { vm_inbox.set(ViewMode::Inbox); },
+            {render_icon_view(Icon::Inbox)}
+            "Inbox"
         }
-        HomeActionButton {
-            icon: Icon::Database, label: "Statistics".to_string(),
-            on_click: move |_: MouseEvent| { vm_stats.set(ViewMode::Statistics); },
+        button {
+            class: "home-action inline-flex items-center gap-2 rounded-lg bg-gray-800/50 px-4 py-2 border border-gray-700 hover:bg-gray-700/50 text-sm text-gray-200",
+            onclick: move |_: MouseEvent| { vm_stats.set(ViewMode::Statistics); },
+            {render_icon_view(Icon::Database)}
+            "Statistics"
         }
 
         div { class: "home-content px-6 py-6 space-y-8" }
-
-        // Recently modified.
         section { class: "home-section" }
         h2 { class: "text-sm font-semibold text-gray-200 mb-3", "Recently Modified" }
-        {render_note_list(&recent, &index, nav, &ws)}
+        {render_note_list(&recent, nav, &ws)}
 
-        // Favourites.
         section { class: "home-section mt-8" }
         h2 { class: "text-sm font-semibold text-gray-200 mb-3", "Favourites" }
         {render_favourites(&fav_rows, nav, &ws)}
     }
 }
 
-#[component]
-fn HomeActionButton(icon: Icon, label: String, on_click: EventHandler<MouseEvent>) -> Element {
-    rsx! {
-        button {
-            class: "home-action inline-flex items-center gap-2 rounded-lg bg-gray-800/50 px-4 py-2 border border-gray-700 hover:bg-gray-700/50 text-sm text-gray-200",
-            on_click,
-            {render_icon_view(icon)}
-            "{label}"
-        }
-    }
-}
-
-fn render_note_list(
-    notes: &[NoteIndexEntry],
-    index: &[NoteIndexEntry],
-    nav: NavContext,
-    ws: &WorkspaceContext,
-) -> Element {
+fn render_note_list(notes: &[NoteIndexEntry], nav: NavContext, ws: &WorkspaceContext) -> Element {
     if notes.is_empty() {
         return rsx! {
             EmptyState {
@@ -194,30 +181,29 @@ fn render_note_list(
     rsx! {
         div { class: "space-y-1" }
         for n in notes {
-            let path = n.path.clone();
-            let title = n.title.clone();
-            let folder = n.folder.clone();
-            let modified = n.modified_at.clone();
-            let ws = *ws; let nav_copy = nav;
-            rsx! {
-                div {
-                    class: "flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800/50 cursor-pointer text-sm",
-                    onclick: move |_: MouseEvent| { open_note(nav_copy, ws, &path); },
-                    div { class: "flex-1 min-w-0" }
-                    div { class: "text-sm text-gray-200 truncate", "{title}" }
-                    if !folder.is_empty() { span { class: "text-xs text-gray-500", "{folder}/" } }
-                    div { class: "ml-auto text-xs text-gray-500", "{fmt_date(&modified)}" }
-                }
-            }
+            {render_note_row(n, nav, *ws)}
         }
     }
 }
 
-fn render_favourites(
-    favs: &[NoteIndexEntry],
-    nav: NavContext,
-    ws: &WorkspaceContext,
-) -> Element {
+fn render_note_row(n: &NoteIndexEntry, nav: NavContext, ws: WorkspaceContext) -> Element {
+    let path = n.path.clone();
+    let title = n.title.clone();
+    let folder = n.folder.clone();
+    let modified = n.modified_at.clone();
+    rsx! {
+        div {
+            class: "flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800/50 cursor-pointer text-sm",
+            onclick: move |_: MouseEvent| { open_note(nav, ws, &path); },
+            div { class: "flex-1 min-w-0" }
+            div { class: "text-sm text-gray-200 truncate", "{title}" }
+            if !folder.is_empty() { span { class: "text-xs text-gray-500", "{folder}/" } }
+            div { class: "ml-auto text-xs text-gray-500", "{fmt_date(&modified)}" }
+        }
+    }
+}
+
+fn render_favourites(favs: &[NoteIndexEntry], nav: NavContext, ws: &WorkspaceContext) -> Element {
     if favs.is_empty() {
         return rsx! {
             EmptyState {
@@ -228,27 +214,22 @@ fn render_favourites(
         };
     }
     rsx! {
-        div { class: "space-y-1" }
+        div { class: "flex flex-wrap gap-2" }
         for n in favs {
-            let path = n.path.clone();
-            let title = n.title.clone();
-            let folder = n.folder.clone();
-            let ws = *ws; let nav_copy = nav;
-            let toggle = nav;
-            rsx! {
-                div {
-                    class: "flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800/50 cursor-pointer text-sm group",
-                    onclick: move |_: MouseEvent| { open_note(nav_copy, ws, &path); },
-                    div { class: "flex-1 min-w-0" }
-                    div { class: "text-sm text-gray-200 truncate", "{title}" }
-                    if !folder.is_empty() { span { class: "text-xs text-gray-500", "{folder}/" } }
-                    button {
-                        class: "ml-auto opacity-0 group-hover:opacity-100 text-gray-400 hover:text-yellow-400",
-                        onclick: move |_: MouseEvent| { toggle_favourite(toggle, &path); },
-                        "★"
-                    }
-                }
-            }
+            {render_favourite_tag(n, nav, *ws)}
+        }
+    }
+}
+
+fn render_favourite_tag(n: &NoteIndexEntry, nav: NavContext, ws: WorkspaceContext) -> Element {
+    let path = n.path.clone();
+    let title = n.title.clone();
+    rsx! {
+        span {
+            class: "inline-flex items-center gap-1 rounded bg-gray-800/50 px-2 py-1 text-xs text-gray-200 border border-gray-700",
+            onclick: move |_: MouseEvent| { open_note(nav, ws, &path); },
+            {render_icon_view(Icon::BookMarked)}
+            "{title}"
         }
     }
 }
