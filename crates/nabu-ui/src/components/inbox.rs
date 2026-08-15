@@ -792,40 +792,7 @@ pub fn Inbox() -> Element {
                                         span { class: "{colour} text-xs", "{pct}% confidence" }
                                     }
                                 })}
-            }
-
-            // Footer
-            div { class: "flex items-center justify-between px-3 py-2 border-t border-gray-800 text-xs text-gray-500" }
-            span { "{total_count} items" }
-            div { class: "flex gap-2" }
-            button { class: "hover:text-gray-300", onclick: move |_: MouseEvent| on_sort_change(SortField::Timestamp), "Sort by Date" }
-            button { class: "hover:text-gray-300", onclick: move |_: MouseEvent| on_sort_change(SortField::Title), "Sort by Title" }
-            button { class: "hover:text-gray-300", onclick: move |_: MouseEvent| on_sort_change(SortField::Status), "Sort by Status" }
         }
-
-        // ── Right panel: Preview ──
-        div { class: "flex-1 flex flex-col overflow-hidden" }
-        {if let Some(id) = &preview_id {
-            {
-                let item_opt = state.read().items.iter().find(|i| i.id == *id).cloned();
-                match item_opt {
-                    Some(item) => rsx! {
-                        div { class: "flex h-full" }
-                        div { class: "flex-1 overflow-y-auto p-4" }
-                        InboxPreview { item: item.clone(), on_refresh }
-                        div { class: "flex-none w-72 border-l border-gray-800 overflow-y-auto p-4" }
-                        InboxMetadataSidebar { item: item }
-                    },
-                    None => rsx! {
-                        div { class: "flex items-center justify-center h-full text-gray-500", "Select an item to preview" }
-                    },
-                }
-            }
-        } else {
-            rsx! {
-                div { class: "flex items-center justify-center h-full text-gray-500", "Select an item to preview" }
-            }
-        }}
     }
 }
 

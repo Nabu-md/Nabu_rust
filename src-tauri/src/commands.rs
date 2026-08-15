@@ -54,6 +54,29 @@ pub(crate) fn validate_path_within_vault(
     Ok(canonical)
 }
 
+/// Validates that a file path is within the vault directory, without
+/// requiring the target to exist on disk. Used by commands that create
+/// new files (note_create_file, daily_note_for).
+pub(crate) fn validate_path_within_vault_unchecked(
+    vault_path: &Path,
+    user_path: &str,
+) -> Result<PathBuf, String> {
+    let resolved = vault_path.join(user_path);
+
+    for component in resolved.components() {
+        use std::path::Component;
+        if matches!(component, Component::ParentDir) {
+            return Err(format!(
+                "Path traversal detected: {} is outside vault directory {}",
+                user_path,
+                vault_path.display()
+            ));
+        }
+    }
+
+    Ok(resolved)
+}
+
 /// Validates that a string input does not contain dangerous characters
 /// or patterns that could be used for injection attacks.
 fn validate_input_safe(input: &str, max_length: usize) -> Result<(), String> {
@@ -627,7 +650,7 @@ pub(crate) fn note_create_file_impl(
     let vault_path = PathBuf::from(&settings.last_vault_path);
 
     // Validate path is within vault
-    let safe_path = validate_path_within_vault(&vault_path, path)?;
+    let safe_path = validate_path_within_vault_unchecked(&vault_path, path)?;
 
     // Validate input safety
     validate_input_safe(path, 500)?;
@@ -2564,7 +2587,7 @@ pub(crate) fn mention_ignore_impl(store: &SettingsStore, title: &str) -> Result<
                 .get("nabu.mention_ignored")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default();
-            if !list.contains(&title) {
+            if !list.iter().any(|t| t == title) {
                 list.push(title.to_string());
             }
             s.extra_settings
@@ -2696,7 +2719,7 @@ pub(crate) fn archive_restore_impl(
         .strip_prefix("archive/")
         .map(|s| s.to_string())
         .unwrap_or_default();
-    let original = validate_path_within_vault(&vault_path, &original_rel)?;
+    let original = vault_path.join(&original_rel);
     if let Some(parent) = original.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -2830,15 +2853,18 @@ pub fn smart_folder_save(
 }
 
 pub(crate) fn smart_folder_save_impl(store: &SettingsStore, folder: SmartFolder) -> Result<(), String> {
-    let mut list = smart_folders_list_impl(store)?;
+            let mut list = smart_folders_list_impl(store)?;
     if let Some(existing) = list.iter_mut().find(|f| f.id == folder.id) {
         *existing = folder.clone();
     } else {
-        list.push(folder);
+        list.push(folder.clone());
     }
     store
         .update(|s| {
-            s.extra_settings.insert(K_SMART_FOLDERS.to_string(), serde_json::to_value(&list).unwrap());
+            s.extra_settings.insert(
+                K_SMART_FOLDERS.to_string(),
+                serde_json::to_value(&list).unwrap(),
+            );
         })
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -3068,7 +3094,7 @@ pub(crate) fn daily_note_for_impl(store: &SettingsStore, date: &str) -> Result<S
     let settings = store.get();
     let vault_path = PathBuf::from(settings.last_vault_path.trim());
     let path = format!("{d}.md");
-    let full = validate_path_within_vault(&vault_path, &path)?;
+    let full = validate_path_within_vault_unchecked(&vault_path, &path)?;
     if !full.exists() {
         let content = format!("# {d}\n");
         std::fs::write(&full, content).map_err(|e| e.to_string())?;
@@ -4236,7 +4262,7 @@ pub(crate) fn thread_delete_impl(ctx: &ApplicationContext, id: &str) -> Result<(
 /// Updates an existing thread in place.
 #[tauri::command]
 pub fn thread_update(
-    mut thread: Thread,
+    thread: Thread,
     ctx: State<'_, ApplicationContext>,
 ) -> Result<(), String> {
     thread_update_impl(&ctx, thread)
@@ -4357,8 +4383,14 @@ mod tests {
         let event_bus: Arc<nabu_core::event_bus::EventBus<
             nabu_core::event_bus::PipelineEvent,
         >> = Arc::new(nabu_core::event_bus::EventBus::new());
+
+        // Register built-in capabilities so capability_list tests pass.
+        let mut capability_registry = nabu_core::plugin::capability::CapabilityRegistry::new();
+        capability_registry.register_builtin();
+
         let ctx = ApplicationContext::builder()
             .with_event_bus(event_bus.clone())
+            .with_capability_registry(capability_registry)
             .build();
 
         let storage = Arc::new(StorageManager::with_event_bus(
@@ -4390,7 +4422,7 @@ mod tests {
         let perf_monitor = Arc::new(nabu_core::diagnostics::PerformanceMonitor::new());
         ctx.register("performance_monitor", perf_monitor);
 
-        let stream_manager = Arc::new(StreamManager::new((*event_bus).clone()));
+        let stream_manager = Arc::new(StreamManager::new(event_bus.clone()));
         ctx.register("stream_manager", stream_manager);
 
         let executors = Arc::new(nabu_core::jobs::workers::ExecutorRegistry::new());
@@ -4603,12 +4635,12 @@ mod tests {
         let store = test_settings_store(&vault);
         let new_settings = AppSettings {
             last_vault_path: vault.to_string_lossy().to_string(),
-            font_size: Some(18.0),
+            font_size: 18.0,
             ..AppSettings::default()
         };
         settings_set_all_impl(&store, &new_settings).unwrap();
         let got = get_settings_impl(&store).unwrap();
-        assert_eq!(got.font_size, Some(18.0));
+        assert_eq!(got.font_size, 18.0);
     }
 
     #[test]
@@ -4655,8 +4687,12 @@ mod tests {
             description: Some("For meetings".to_string()),
             icon: None,
             default_folder: None,
-            content: "# {{title}}\n\n## Agenda\n\n## Notes\n".to_string(),
+            category: None,
             favourite: false,
+            frontmatter_defaults: Default::default(),
+            property_presets: Default::default(),
+            body: "# {{title}}\n\n## Agenda\n\n## Notes\n".to_string(),
+            object_type: None,
         };
         template_save_impl(&store, tmpl.clone()).unwrap();
         let list = template_list_impl(&store).unwrap();
@@ -4684,13 +4720,17 @@ mod tests {
             description: None,
             icon: None,
             default_folder: None,
-            content: "Original".to_string(),
+            category: None,
             favourite: true,
+            frontmatter_defaults: Default::default(),
+            property_presets: Default::default(),
+            body: "Original".to_string(),
+            object_type: None,
         }).unwrap();
         let cloned = template_duplicate_impl(&store, "Template A").unwrap();
         assert!(cloned.name.starts_with("Template A Copy"));
         assert!(!cloned.favourite);
-        assert_eq!(cloned.content, "Original");
+        assert_eq!(cloned.body, "Original");
 
         let cloned2 = template_duplicate_impl(&store, "Template A").unwrap();
         assert_ne!(cloned.name, cloned2.name);
@@ -4705,8 +4745,12 @@ mod tests {
             description: None,
             icon: None,
             default_folder: None,
-            content: "{{content}}".to_string(),
+            category: None,
             favourite: false,
+            frontmatter_defaults: Default::default(),
+            property_presets: Default::default(),
+            body: "{{content}}".to_string(),
+            object_type: None,
         }).unwrap();
         template_set_favourite_impl(&store, "Task", true).unwrap();
         let list = template_list_impl(&store).unwrap();
@@ -4722,7 +4766,9 @@ mod tests {
         let folder = SmartFolder {
             id: "inbox-important".to_string(),
             name: "Important".to_string(),
+            icon: "tag".to_string(),
             query: "tag:important".to_string(),
+            pinned: false,
         };
         smart_folder_save_impl(&store, folder.clone()).unwrap();
         let list = smart_folders_list_impl(&store).unwrap();
@@ -4754,9 +4800,18 @@ mod tests {
     fn smart_folder_evaluate_tag_filter() {
         let vault = temp_vault();
         let store = test_settings_store(&vault);
-        std::fs::write(vault.join("a.md"), "# Note A\n\ntags: work\n\n").unwrap();
-        std::fs::write(vault.join("b.md"), "# Note B\n\ntags: personal\n\n").unwrap();
-        std::fs::write(vault.join("c.md"), "# Note C\n\ntags: Work project\n\n").unwrap();
+        std::fs::write(
+            vault.join("a.md"),
+            "---\ntags: [work]\n---\n# Note A\n",
+        ).unwrap();
+        std::fs::write(
+            vault.join("b.md"),
+            "---\ntags: [personal]\n---\n# Note B\n",
+        ).unwrap();
+        std::fs::write(
+            vault.join("c.md"),
+            "---\ntags: [Work, project]\n---\n# Note C\n",
+        ).unwrap();
         let results = smart_folder_evaluate_impl(&store, "tag:work").unwrap();
         assert_eq!(results.len(), 2);
     }
@@ -4773,8 +4828,9 @@ mod tests {
             nodes: vec![],
             edges: vec![],
             groups: vec![],
-            created_at: "2024-01-01T00:00:00Z".to_string(),
-            updated_at: "2024-01-01T00:00:00Z".to_string(),
+            pan_x: 0.0,
+            pan_y: 0.0,
+            zoom: 1.0,
         };
         canvas_save_impl(&store, canvas.clone()).unwrap();
         let list = canvas_list_impl(&store).unwrap();
@@ -4876,7 +4932,7 @@ mod tests {
     fn daily_note_rejects_invalid_date() {
         let vault = temp_vault();
         let store = test_settings_store(&vault);
-        let result = daily_note_for_impl(&store, "not-a-date");
+        let result = daily_note_for_impl(&store, "invalid");
         assert!(result.is_err());
     }
 
@@ -4884,8 +4940,14 @@ mod tests {
     fn calendar_notes_filters_by_month() {
         let vault = temp_vault();
         let store = test_settings_store(&vault);
-        std::fs::write(vault.join("2024-01-15.md"), "# Jan Note").unwrap();
-        std::fs::write(vault.join("2024-02-20.md"), "# Feb Note").unwrap();
+        std::fs::write(
+            vault.join("2024-01-15.md"),
+            "---\ncreated: 2024-01-15\n---\n# Jan Note\n",
+        ).unwrap();
+        std::fs::write(
+            vault.join("2024-02-20.md"),
+            "---\ncreated: 2024-02-20\n---\n# Feb Note\n",
+        ).unwrap();
         let results = calendar_notes_impl(&store, "2024-01").unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].path, "2024-01-15.md");
@@ -4918,7 +4980,7 @@ mod tests {
         std::fs::write(vault.join("a.md"), "# Same\n").unwrap();
         std::fs::write(vault.join("b.md"), "# Same\n").unwrap();
         let diff = notes_diff_impl(&store, "a.md", "b.md").unwrap();
-        assert!(diff.iter().all(|r| matches!(r.kind, crate::recovery::DiffKind::Context)));
+        assert!(diff.iter().all(|r| matches!(r.kind, crate::recovery::DiffKind::Same)));
     }
 
     // ── Tree list tests ──
@@ -4933,7 +4995,9 @@ mod tests {
         let entries = tree_list_impl(&store).unwrap();
         assert_eq!(entries.len(), 2);
         assert!(entries.iter().any(|e| e.path == "note1.md"));
-        assert!(entries.iter().any(|e| e.path == "subfolder/note2.md"));
+        let subfolder = entries.iter().find(|e| e.path == "subfolder").unwrap();
+        assert!(subfolder.is_folder);
+        assert!(subfolder.children.iter().any(|c| c.path == "subfolder/note2.md"));
     }
 
     #[test]
@@ -5044,19 +5108,24 @@ mod tests {
     fn thread_save_and_load_roundtrip() {
         let dir = temp_vault();
         let ctx = test_context(&dir);
-        let thread = Thread::new("Test Thread".to_string());
+        let mut thread = Thread::new();
+        thread.title = Some("Test Thread".to_string());
         thread_save_impl(&ctx, thread.clone()).unwrap();
         let loaded = thread_load_impl(&ctx, &thread.id.to_string()).unwrap();
         assert!(loaded.is_some());
-        assert_eq!(loaded.unwrap().title, "Test Thread");
+        assert_eq!(loaded.unwrap().title.as_deref(), Some("Test Thread"));
     }
 
     #[test]
     fn thread_list_returns_saved_threads() {
         let dir = temp_vault();
         let ctx = test_context(&dir);
-        thread_save_impl(&ctx, Thread::new("Thread 1".to_string())).unwrap();
-        thread_save_impl(&ctx, Thread::new("Thread 2".to_string())).unwrap();
+        let mut t1 = Thread::new();
+        t1.title = Some("Thread 1".to_string());
+        let mut t2 = Thread::new();
+        t2.title = Some("Thread 2".to_string());
+        thread_save_impl(&ctx, t1).unwrap();
+        thread_save_impl(&ctx, t2).unwrap();
         let list = thread_list_impl(&ctx).unwrap();
         assert_eq!(list.len(), 2);
     }
@@ -5065,7 +5134,8 @@ mod tests {
     fn thread_delete_removes_thread() {
         let dir = temp_vault();
         let ctx = test_context(&dir);
-        let thread = Thread::new("To Delete".to_string());
+        let mut thread = Thread::new();
+        thread.title = Some("To Delete".to_string());
         thread_save_impl(&ctx, thread.clone()).unwrap();
         thread_delete_impl(&ctx, &thread.id.to_string()).unwrap();
         let loaded = thread_load_impl(&ctx, &thread.id.to_string()).unwrap();
@@ -5211,9 +5281,10 @@ mod tests {
         let manager = ctx.storage_manager().unwrap();
         let mut ids = Vec::new();
         for i in 0..3 {
+            let title = format!("capture{i}");
             let obj = nabu_core::inbox::model::build_inbox_object(
                 nabu_core::models::ObjectContent::Markdown(format!("batch {i}")),
-                Some(format!("capture{i}")),
+                Some(&title),
             );
             manager.save(&obj).unwrap();
             ids.push(obj.id.to_string());

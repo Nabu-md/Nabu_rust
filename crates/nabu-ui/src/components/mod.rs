@@ -38,7 +38,7 @@ pub mod editor;
 pub mod file_tree;
 pub mod graph_layout;
 pub mod graph_view;
-// inbox temporarily disabled for build check
+pub mod inbox;
 pub mod layout;
 pub mod navigation;
 pub mod note_editor;

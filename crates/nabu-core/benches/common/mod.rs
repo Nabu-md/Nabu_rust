@@ -13,6 +13,11 @@
 //! All outputs are reproducible run-to-run so criterion baselines remain
 //! comparable across machines and commits.
 
+// This module is shared across multiple `[[bench]]` binaries via
+// `mod common;`. Individual helpers are only used by some benches, so silence
+// the cross-binary dead-code warnings for the shared helper module.
+#![allow(dead_code)]
+
 use nabu_core::models::{KnowledgeObject, ObjectContent, ObjectMetadata, ObjectType, ProcessingState};
 use std::collections::HashMap;
 use uuid::Uuid;
