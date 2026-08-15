@@ -12,13 +12,10 @@
 
 use crate::components::contexts::use_workspace;
 use crate::components::recovery::LoadState;
-use crate::components::ui::feedback::{
-    use_toast, ErrorPanel, LoadingBlock, SpinnerSize, ToastKind,
-};
+use crate::components::ui::feedback::{ErrorPanel, LoadingBlock, SpinnerSize};
 use crate::components::ui::icons::{render_icon_view, Icon};
 use crate::components::ui::info::EmptyState;
 use dioxus::prelude::*;
-use dioxus::web::WebEventExt;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen_futures::spawn_local;
 
@@ -82,7 +79,11 @@ pub enum ReaderPhase {
 }
 
 /// Pure-classification: maps reactive signal states to a single phase.
-/// Tests live in `#[cfg(test)] mod tests` below.
+///
+/// * `loaded`  — true when the load state is `LoadState::Loaded`.
+/// * `note_missing` — true when the note was not found on disk.
+/// * `load_error` — `Some(msg)` with a non-empty string on failure.
+/// Error takes precedence over every other state.
 pub fn classify_reader_phase(
     loaded: bool,
     note_missing: bool,
@@ -102,7 +103,7 @@ pub fn classify_reader_phase(
     ReaderPhase::Loaded
 }
 
-// ── Markdown renderer (pure Rust, no Leptos/Dioxus dependency) ─────────────
+// ── Markdown renderer (pure Rust — no Leptos/Dioxus dependency) ─────────────
 
 fn html_escape(text: &str) -> String {
     text.replace('&', "&amp;")
@@ -350,7 +351,7 @@ fn render_markdown(md: &str) -> String {
     html
 }
 
-// ── IPC load helpers ────────────────────────────────────────────────────────
+// ── IPC load helper ─────────────────────────────────────────────────────────
 
 /// Loads a note's content from the `note_read` backend command.
 ///
@@ -370,17 +371,16 @@ fn load_note_content(
     let this_nonce = *nonce.peek();
 
     spawn_local(async move {
-        // Set loading state immediately.
         *content_state.write_unchecked() = LoadState::Loading;
         *load_error.write_unchecked() = None;
         *note_missing.write_unchecked() = false;
 
-        let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "path": path.clone() }))
-            .unwrap();
+        let args =
+            serde_wasm_bindgen::to_value(&serde_json::json!({ "path": path.clone() })).unwrap();
         match crate::ipc::tauri_invoke_safe("note_read", args).await {
             Ok(Some(val)) => match serde_wasm_bindgen::from_value::<String>(val) {
                 Ok(saved) => {
-                    if nonce_is_stale(*nonce.peek(), this_nonce) {
+                    if super::nonce_is_stale(*nonce.peek(), this_nonce) {
                         return;
                     }
                     if !saved.is_empty() {
@@ -393,7 +393,7 @@ fn load_note_content(
                     *content_state.write_unchecked() = LoadState::Loaded;
                 }
                 Err(e) => {
-                    if nonce_is_stale(*nonce.peek(), this_nonce) {
+                    if super::nonce_is_stale(*nonce.peek(), this_nonce) {
                         return;
                     }
                     *load_error.write_unchecked() =
@@ -402,7 +402,7 @@ fn load_note_content(
                 }
             },
             Ok(None) => {
-                if nonce_is_stale(*nonce.peek(), this_nonce) {
+                if super::nonce_is_stale(*nonce.peek(), this_nonce) {
                     return;
                 }
                 *load_error.write_unchecked() =
@@ -410,7 +410,7 @@ fn load_note_content(
                 *content_state.write_unchecked() = LoadState::Failed;
             }
             Err(e) => {
-                if nonce_is_stale(*nonce.peek(), this_nonce) {
+                if super::nonce_is_stale(*nonce.peek(), this_nonce) {
                     return;
                 }
                 *load_error.write_unchecked() = Some(e.message());
@@ -430,7 +430,6 @@ fn load_note_content(
 #[component]
 pub fn ReaderView() -> Element {
     let ws = use_workspace();
-    let toasts = use_toast();
 
     // ── Content / load state ──
     let content = use_signal(String::new);
@@ -472,7 +471,6 @@ pub fn ReaderView() -> Element {
         use_effect(move || {
             let path = active_path.read().clone().unwrap_or_default();
             if path.is_empty() {
-                // Clear stale content when no note is active.
                 nonce_l.with_mut(|n| *n = n.wrapping_add(1));
                 *content_l.write_unchecked() = String::new();
                 *state_l.write_unchecked() = LoadState::Idle;
@@ -480,23 +478,48 @@ pub fn ReaderView() -> Element {
                 *missing_l.write_unchecked() = false;
                 return;
             }
-            load_note_content(
-                path,
-                nonce_l,
-                content_l,
-                state_l,
-                error_l,
-                missing_l,
-            );
+            load_note_content(path, nonce_l, content_l, state_l, error_l, missing_l);
         });
     }
 
-    // ── Setting handlers (update + persist) ──
+    // ── Pre-compute render values ──
+    let active_path_str = ws.active_path.read().clone().unwrap_or_default();
+
+    let cs = *content_state.read();
+    let is_content_loaded = cs == LoadState::Loaded;
+    let load_error_opt = load_error.read().clone();
+    let is_missing = *note_missing.read();
+    let show_panel = show_settings.with_mut(|s| *s); // peek
+
+    let font_size = settings.read().font_size;
+    let line_width = settings.read().line_width;
+    let theme = settings.read().theme.clone();
+    let focus_mode = settings.read().focus_mode;
+
+    let phase = if active_path_str.is_empty() {
+        ReaderPhase::Empty // no note selected
+    } else {
+        classify_reader_phase(is_content_loaded, is_missing, load_error_opt.as_deref())
+    };
+
+    let prose_class = if focus_mode {
+        "reader-prose reader-focus-mode"
+    } else {
+        "reader-prose"
+    };
+
+    let content_html = if phase == ReaderPhase::Loaded {
+        Some(render_markdown(&content.read().clone()))
+    } else {
+        None
+    };
+
+    // ── Setting handlers ──
     let on_font_size = {
         let settings_ref = settings;
         move |ev: FormEvent| {
             let val: u32 = ev.value().parse().unwrap_or(18);
-            settings_ref.with_mut(|s| s.font_size = val);
+            settings_ref.write_unchecked().font_size = val;
             let current = settings_ref.read().clone();
             persist_reader_settings(&current);
         }
@@ -506,7 +529,7 @@ pub fn ReaderView() -> Element {
         let settings_ref = settings;
         move |ev: FormEvent| {
             let val: u32 = ev.value().parse().unwrap_or(720);
-            settings_ref.with_mut(|s| s.line_width = val);
+            settings_ref.write_unchecked().line_width = val;
             let current = settings_ref.read().clone();
             persist_reader_settings(&current);
         }
@@ -515,65 +538,26 @@ pub fn ReaderView() -> Element {
     let on_focus_toggle = {
         let settings_ref = settings;
         move |_: MouseEvent| {
-            settings_ref.with_mut(|s| s.focus_mode = !s.focus_mode);
+            settings_ref.write_unchecked().focus_mode = !settings_ref.read().focus_mode;
             let current = settings_ref.read().clone();
             persist_reader_settings(&current);
         }
     };
 
-    let on_theme = {
-        let settings_ref = settings;
-        move |theme: String| {
-            settings_ref.with_mut(|s| s.theme = theme.clone());
-            let current = settings_ref.read().clone();
-            persist_reader_settings(&current);
-            toasts.info("Theme", format!("Reader theme set to {}", theme));
+    let on_retry_load = {
+        let active_path = ws.active_path;
+        move |_: ()| {
+            if let Some(path) = active_path.read().clone() {
+                load_note_content(
+                    path,
+                    nonce,
+                    content,
+                    content_state,
+                    load_error,
+                    note_missing,
+                );
+            }
         }
-    };
-
-    let on_retry = move |_: ()| {
-        if let Some(path) = ws.active_path.read().clone() {
-            load_note_content(
-                path,
-                nonce,
-                content,
-                content_state,
-                load_error,
-                note_missing,
-            );
-        }
-    };
-
-    // ── Pre-compute render values ──────────────────────────────
-    let active_path_str = ws.active_path.read().clone().unwrap_or_default();
-    let cs = *content_state.read();
-    let is_loaded = cs == LoadState::Loaded;
-    let has_error = load_error.read().clone().unwrap_or_default();
-    let is_missing = *note_missing.read();
-    let show_panel = *show_settings.read();
-
-    let font_size = settings.read().font_size;
-    let line_width = settings.read().line_width;
-    let theme = settings.read().theme.clone();
-    let focus_mode = settings.read().focus_mode;
-
-    let phase = classify_reader_phase(
-        is_loaded,
-        is_missing,
-        has_error.as_deref(),
-    );
-
-    let prose_class = if focus_mode {
-        "reader-prose reader-focus-mode"
-    } else {
-        "reader-prose"
-    };
-
-    let content_html = if phase == ReaderPhase::Loaded {
-        let text = content.read().clone();
-        Some(render_markdown(&text))
-    } else {
-        None
     };
 
     rsx! {
@@ -602,7 +586,7 @@ pub fn ReaderView() -> Element {
                     ) },
                     onclick: on_focus_toggle,
                     title: "Toggle focus mode",
-                    {render_icon_view(Icon::Target)}
+                    {render_icon_view(Icon::Target) }
                     " Focus"
                 }
                 button {
@@ -615,10 +599,10 @@ pub fn ReaderView() -> Element {
                         }
                     ) },
                     onclick: move |_: MouseEvent| {
-                        show_settings.with_mut(|s| *s = !*s);
+                        *show_settings.write_unchecked() = !*show_settings.peek();
                     },
                     title: "Reader settings",
-                    {render_icon_view(Icon::Settings)}
+                    {render_icon_view(Icon::Settings) }
                 }
             }
 
@@ -669,24 +653,36 @@ pub fn ReaderView() -> Element {
                         "Theme"
                     }
                     div { class: "flex gap-2 mt-1" }
-                    {["dark", "sepia", "light"].iter().map(|t| {
-                        let t = t.to_string();
-                        let is_active = theme == t;
+                    {
+                        let themes = ["dark", "sepia", "light"];
                         rsx! {
-                            button {
-                                class: { format!(
-                                    "px-3 py-1 text-xs rounded border {}",
-                                    if is_active {
-                                        "bg-blue-900/50 border-blue-600 text-blue-300"
-                                    } else {
-                                        "border-gray-700 text-gray-400 hover:text-gray-200"
+                            for theme_name in themes {
+                                {
+                                    let t = (*theme_name).to_string();
+                                    let is_active = theme == t;
+                                    let settings_for_btn = settings;
+                                    rsx! {
+                                        button {
+                                            class: { format!(
+                                                "px-3 py-1 text-xs rounded border {}",
+                                                if is_active {
+                                                    "bg-blue-900/50 border-blue-600 text-blue-300"
+                                                } else {
+                                                    "border-gray-700 text-gray-400 hover:text-gray-200"
+                                                }
+                                            ) },
+                                            onclick: move |_: MouseEvent| {
+                                                settings_for_btn.write_unchecked().theme = t.clone();
+                                                let current = settings_for_btn.read().clone();
+                                                persist_reader_settings(&current);
+                                            },
+                                            "{t}"
+                                        }
                                     }
-                                ) },
-                                onclick: move |_: MouseEvent| on_theme.call(t.clone()),
-                                "{t}"
+                                }
                             }
                         }
-                    })}
+                    }
                 }
             }
 
@@ -695,8 +691,8 @@ pub fn ReaderView() -> Element {
                 class: "reader-content mx-auto px-8 py-8",
                 style: "max-width: {line_width}px; font-size: {font_size}px; line-height: 1.7;",
 
-                match phase {
-                    ReaderPhase::Loading | ReaderPhase::Empty if active_path_str.is_empty() => rsx! {
+                if active_path_str.is_empty() {
+                    rsx! {
                         div {
                             class: "flex h-full items-center justify-center py-20",
                             EmptyState {
@@ -705,15 +701,17 @@ pub fn ReaderView() -> Element {
                                 description: "Open a note and switch to Reader mode to start reading.".to_string(),
                             }
                         }
-                    },
-                    ReaderPhase::Loading => rsx! {
+                    }
+                } else if phase == ReaderPhase::Loading {
+                    rsx! {
                         div { class: "flex items-center justify-center py-20" }
                         LoadingBlock {
                             label: "Loading note…",
                             size: SpinnerSize::Md,
                         }
-                    },
-                    ReaderPhase::Error => rsx! {
+                    }
+                } else if phase == ReaderPhase::Error {
+                    rsx! {
                         div { class: "flex-1 flex items-center justify-center p-6" }
                         div { class: "w-full max-w-md" }
                         ErrorPanel {
@@ -721,10 +719,11 @@ pub fn ReaderView() -> Element {
                             message: "The note content could not be loaded.".to_string(),
                             details: has_error,
                             recovery: "Make sure the note is accessible and the backend is running, then retry.".to_string(),
-                            on_retry: on_retry,
+                            on_retry: on_retry_load,
                         }
-                    },
-                    ReaderPhase::Empty => rsx! {
+                    }
+                } else if phase == ReaderPhase::Empty {
+                    rsx! {
                         div {
                             class: "flex h-full items-center justify-center py-20",
                             EmptyState {
@@ -733,17 +732,14 @@ pub fn ReaderView() -> Element {
                                 description: "The selected note doesn't exist yet. Create it in the Editor view.".to_string(),
                             }
                         }
-                    },
-                    ReaderPhase::Loaded => {
-                        if let Some(html) = &content_html {
-                            rsx! {
-                                div {
-                                    class: "{prose_class}",
-                                    innerhtml: "{html}",
-                                }
-                            }
-                        } else {
-                            rsx! {}
+                    }
+                } else {
+                    // ReaderPhase::Loaded
+                    let html = content_html.clone().unwrap_or_default();
+                    rsx! {
+                        div {
+                            class: "{prose_class}",
+                            innerhtml: html,
                         }
                     }
                 }
@@ -759,7 +755,7 @@ mod tests {
     use super::*;
     use crate::components::recovery::diff_view::{DiffKind, DiffRow};
 
-    // ── Phase classification ──────────────────────────────────────────
+    // ── Phase classification ──
 
     #[test]
     fn phase_loading_when_not_loaded() {
@@ -801,7 +797,7 @@ mod tests {
         );
     }
 
-    // ── Nonce race-safety ────────────────────────────────────────────
+    // ── Nonce race-safety ──
 
     #[test]
     fn stale_nonce_discards_result() {
@@ -813,7 +809,7 @@ mod tests {
         assert!(!nonce_is_stale(5, 5));
     }
 
-    // ── Markdown renderer ────────────────────────────────────────────
+    // ── Markdown renderer ──
 
     #[test]
     fn markdown_renders_headings() {
@@ -857,7 +853,7 @@ mod tests {
         assert!(html.contains(">example<"));
     }
 
-    // ── DiffRow helpers (shared with comparison tests) ───────────────
+    // ── Comparison has_changes (shared helper) ──
 
     fn make_row(kind: DiffKind, old: Option<u32>, new: Option<u32>, text: &str) -> DiffRow {
         DiffRow {

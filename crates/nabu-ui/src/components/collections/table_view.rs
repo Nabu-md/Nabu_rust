@@ -17,7 +17,7 @@ pub struct ColumnConfig {
     pub width: Option<String>,
 }
 
-#[derive(Props, PartialEq)]
+#[derive(Props, PartialEq, Clone)]
 pub struct TableViewProps {
     pub objects: Vec<CollectionItem>,
     pub columns: Vec<ColumnConfig>,
@@ -50,7 +50,7 @@ fn get_column_value(obj: &CollectionItem, key: &str) -> String {
 }
 
 #[component]
-pub fn TableView(props: &TableViewProps) -> Element {
+pub fn TableView(props: TableViewProps) -> Element {
     let filtered: Vec<CollectionItem> = {
         let f = &props.filter;
         let mut result = props.objects.clone();
@@ -65,7 +65,7 @@ pub fn TableView(props: &TableViewProps) -> Element {
         }
 
         if let Some(ref ot) = f.object_type {
-            result.retain(|obj| obj.folder == *ot || obj.path.contains(ot));
+            result.retain(|obj| obj.folder == *ot);
         }
 
         if !f.sort_by.is_empty() {
@@ -94,7 +94,7 @@ pub fn TableView(props: &TableViewProps) -> Element {
     let on_sort = props.on_sort;
     let on_open = props.on_open;
 
-    let header_cells: Vec<Element> = visible_columns
+    let th_elems: Vec<Element> = visible_columns
         .iter()
         .map(|col| {
             let col = col.clone();
@@ -102,14 +102,9 @@ pub fn TableView(props: &TableViewProps) -> Element {
             let sort_key = col.key.clone();
             let is_sorted = sort_by == col.key;
 
-            let class_str = if sortable {
-                "px-4 py-3 cursor-pointer hover:text-gray-200".to_string()
-            } else {
-                "px-4 py-3".to_string()
-            };
-
+            let class_str = if sortable { "cursor-pointer hover:text-gray-200" } else { "" };
             let width_str = col.width.clone().unwrap_or_default();
-            let full_class = format!("{} {}", class_str, width_str);
+            let full_class = format!("px-4 py-3 {} {}", class_str, width_str);
 
             let icon: Option<Element> = if sortable && is_sorted {
                 if sort_ascending {
@@ -136,50 +131,70 @@ pub fn TableView(props: &TableViewProps) -> Element {
         })
         .collect();
 
+    let row_elems: Vec<Element> = filtered
+        .iter()
+        .map(|obj| {
+            let obj = obj.clone();
+            let cells: Vec<Element> = visible_columns
+                .iter()
+                .map(|col| {
+                    let value = get_column_value(&obj, &col.key);
+                    let cell_class = if col.key == "title" {
+                        "px-4 py-2 text-gray-300 font-medium truncate max-w-xs".to_string()
+                    } else {
+                        "px-4 py-2 text-gray-300".to_string()
+                    };
+                    rsx! {
+                        td { class: cell_class, "{value}" }
+                    }
+                })
+                .collect();
+
+            let on_click = {
+                let on_open = on_open;
+                let path = obj.path.clone();
+                move |_: MouseEvent| on_open.call(path.clone())
+            };
+
+            rsx! {
+                tr {
+                    class: "hover:bg-gray-800/50 transition-colors",
+                    onclick: on_click,
+                }
+                for cell in cells {
+                    {cell}
+                }
+            }
+        })
+        .collect();
+
+    let colspan_val = visible_columns.len().to_string();
+
     rsx! {
         div { class: "table-view w-full overflow-auto h-full" }
+
         table { class: "w-full text-sm text-left text-gray-300" }
-        thead { class: "text-xs text-gray-400 uppercase bg-gray-800 border-b border-gray-700" }
-        tr {}
-        for cell in header_cells {
-            {cell}
-        }
-        tbody { class: "divide-y divide-gray-800" }
-        if filtered.is_empty() {
-            rsx! {
-                tr {}
-                td { class: "px-4 py-8 text-center text-gray-500", colspan: "{visible_columns.len()}" }
-                "No items to display"
-                }
+        thead {
+            class: "text-xs text-gray-400 uppercase bg-gray-800 border-b border-gray-700",
+            tr {},
+            for th_elem in th_elems {
+                {th_elem}
             }
-        } else {
-            for obj in &filtered {
-                {
-                    let obj = obj.clone();
-                    let on_open = on_open;
-                    let cells: Vec<Element> = visible_columns
-                        .iter()
-                        .map(|col| {
-                            let value = get_column_value(&obj, &col.key);
-                            let class = if col.key == "title" {
-                                "px-4 py-2 text-gray-300 font-medium truncate max-w-xs"
-                            } else {
-                                "px-4 py-2 text-gray-300"
-                            };
-                            rsx! { td { class: class, "{value}" } }
-                        })
-                        .collect();
-                    rsx! {
-                        tr {
-                            class: "hover:bg-gray-800/50 transition-colors",
-                            onclick: move |_: MouseEvent| on_open.call(obj.path.clone()),
-                        }
-                        for cell in cells {
-                            {cell}
-                        }
+        }
+        tbody {
+            class: "divide-y divide-gray-800",
+            {if filtered.is_empty() {
+                rsx! {
+                    tr {}
+                    td { class: "px-4 py-8 text-center text-gray-500", colspan: "{colspan_val}", "No items to display" }
+                }
+            } else {
+                rsx! {
+                    for row_elem in row_elems {
+                        {row_elem}
                     }
                 }
-            }
+            }}
         }
     }
 }

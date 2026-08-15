@@ -59,6 +59,48 @@ impl CollectionView {
     }
 }
 
+/// Filter state for the Table view.
+#[derive(Clone, PartialEq, Default)]
+pub struct TableFilter {
+    pub query: String,
+    pub sort_by: String,
+    pub sort_ascending: bool,
+}
+
+/// Filter state for the Board view.
+#[derive(Clone, PartialEq, Default)]
+pub struct BoardFilter {
+    pub query: String,
+    pub object_type: Option<String>,
+    pub group_by: String,
+}
+
+/// Filter state for the Gallery view.
+#[derive(Clone, PartialEq, Default)]
+pub struct GalleryFilter {
+    pub query: String,
+    pub object_type: Option<String>,
+    pub sort_by: String,
+    pub sort_ascending: bool,
+}
+
+/// Which calendar sub-view is active.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum CalendarViewMode {
+    #[default]
+    Month,
+    Week,
+    Day,
+}
+
+/// Filter state for the Calendar view.
+#[derive(Clone, PartialEq, Default)]
+pub struct CalendarFilter {
+    pub query: String,
+    pub view_mode: CalendarViewMode,
+    pub group_by: String,
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

@@ -223,19 +223,13 @@ pub fn ViewContent() -> Element {
             }
         },
         ViewMode::Reader => rsx! {
-            div { class: "w-full h-full",
-                div { class: "text-sm text-gray-400",
-                    {render_icon(Icon::BookText, Some("w-4 h-4 inline mr-1"))}
-                    "Reader mode placeholder — migrated in a later phase."
-                }
+            div { class: "max-w-4xl mx-auto h-full",
+                crate::components::shipped::ReaderView {}
             }
         },
         ViewMode::Comparison => rsx! {
-            div { class: "w-full h-full",
-                div { class: "text-sm text-gray-400",
-                    {render_icon(Icon::Comparison, Some("w-4 h-4 inline mr-1"))}
-                    "Comparison view placeholder — migrated in a later phase."
-                }
+            div { class: "max-w-7xl mx-auto h-full",
+                crate::components::shipped::ComparisonView {}
             }
         },
         ViewMode::Statistics => rsx! {

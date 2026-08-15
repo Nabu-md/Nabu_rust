@@ -14,7 +14,7 @@
 //! backend `ItemStored` event triggers a reload so newly-stored objects appear.
 
 use crate::components::ui::feedback::{ErrorPanel, SkeletonList, ToastContext, use_toast};
-use crate::components::ui::icons::{render_icon_view, Icon};
+use crate::components::ui::icons::Icon;
 use crate::components::ui::info::EmptyState;
 use crate::events::{use_event_listener, FrontendEvent, FrontendEventKind};
 use dioxus::prelude::*;
@@ -23,7 +23,7 @@ use wasm_bindgen_futures::spawn_local;
 
 // ── Types (mirror backend QueueItem/QueueStatus/QueuePriority in commands.rs) ──
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QueueStatus {
     Unread,
@@ -60,7 +60,7 @@ impl QueueStatus {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QueuePriority {
     Low,
@@ -286,12 +286,15 @@ fn mutate_single(
     failure_title: &str,
     failure_msg: &str,
 ) {
+    let cmd = cmd.to_string();
+    let failure_title = failure_title.to_string();
+    let failure_msg = failure_msg.to_string();
     let args_val = serde_wasm_bindgen::to_value(&serde_json::Value::Object(args))
         .unwrap_or_default();
     spawn_local(async move {
-        match crate::ipc::tauri_invoke_safe(cmd, args_val).await {
+        match crate::ipc::tauri_invoke_safe(&cmd, args_val).await {
             Err(e) => {
-                toasts.error(failure_title, &format!("{}: {}", failure_msg, e.message()));
+                toasts.error(&failure_title, &format!("{}: {}", failure_msg, e.message()));
             }
             Ok(_) => {
                 load_queue(items, loaded, error, toasts);
@@ -475,9 +478,8 @@ pub fn ReadingQueue() -> Element {
             oninput: on_filter_change,
         }
 
-        // Status filter pills
         div { class: "flex items-center gap-2 px-3 py-2 border-b border-gray-800" }
-        {move || {
+        {
             let (unread, reading, completed, archived) = status_counts(&items.read());
             let f = filter.read().clone();
             rsx! {
@@ -510,7 +512,7 @@ pub fn ReadingQueue() -> Element {
                     on_toggle: on_status_filter,
                 }
             }
-        }}
+        }
 
         // Priority filter
         div { class: "flex items-center gap-2 px-3 py-1.5 border-b border-gray-800" }
@@ -534,8 +536,7 @@ pub fn ReadingQueue() -> Element {
             on_toggle: on_priority_filter,
         }
 
-        // Batch actions
-        {move || {
+        {
             let count = items.read().iter().filter(|i| i.selected).count();
             if count > 0 {
                 rsx! {
@@ -548,11 +549,10 @@ pub fn ReadingQueue() -> Element {
             } else {
                 rsx! {}
             }
-        }}
+        }
 
-        // Queue list (loading / error / empty / populated)
         div { class: "flex-1 overflow-y-auto" }
-        {move || {
+        {
             let phase = classify_queue(
                 *loaded.read(),
                 load_error.read().as_deref(),
@@ -602,6 +602,7 @@ pub fn ReadingQueue() -> Element {
                                     let progress = item.progress;
                                     let object_type = item.object_type.clone();
                                     let selected = item.selected;
+                                    let pct = progress_pct(progress);
                                     rsx! {
                                         div {
                                             key: item.id.clone(),
@@ -616,11 +617,10 @@ pub fn ReadingQueue() -> Element {
                                         span { class: "text-xs text-gray-500", "{object_type}" }
                                         div { class: "flex-1 h-1 bg-gray-700 rounded-full overflow-hidden" }
                                         div {
-                                            class: format!("h-full bg-blue-500 rounded-full transition-all"),
-                                            style: "width: {}%",
-                                            progress_pct(progress),
+                                            class: "h-full bg-blue-500 rounded-full transition-all",
+                                            style: "width: {pct}%",
                                         }
-                                        span { class: "text-xs text-gray-500", "{progress_pct(progress)}%" }
+                                        span { class: "text-xs text-gray-500", "{pct}%" }
                                     }
                                 }
                             }
@@ -628,7 +628,7 @@ pub fn ReadingQueue() -> Element {
                     }
                 }
             }
-        }}
+        }
 
         // Footer with sort controls
         div { class: "flex items-center justify-between px-3 py-2 border-t border-gray-800 text-xs text-gray-500" }
@@ -641,7 +641,7 @@ pub fn ReadingQueue() -> Element {
 
         // ── Right panel: detail view ──
         div { class: "flex-1 flex flex-col overflow-hidden" }
-        {move || {
+        {
             let selected = items.read().iter().find(|i| i.selected).cloned();
             match selected {
                 Some(item) => rsx! {
@@ -725,7 +725,7 @@ pub fn ReadingQueue() -> Element {
                     div { class: "flex items-center justify-center h-full text-gray-500", "Select an item to view details" }
                 },
             }
-        }}
+        }
     }
 }
 

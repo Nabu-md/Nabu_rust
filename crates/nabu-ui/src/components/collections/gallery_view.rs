@@ -7,15 +7,7 @@ use crate::components::collections::shared::types::{CollectionItem, GalleryFilte
 use crate::components::ui::icons::{render_icon_view, Icon};
 use dioxus::prelude::*;
 
-#[derive(Clone, PartialEq, Default)]
-pub struct GalleryFilter {
-    pub query: String,
-    pub object_type: Option<String>,
-    pub sort_by: String,
-    pub sort_ascending: bool,
-}
-
-#[derive(Props, PartialEq)]
+#[derive(Props, PartialEq, Clone)]
 pub struct GalleryViewProps {
     pub objects: Vec<CollectionItem>,
     pub filter: GalleryFilter,
@@ -34,7 +26,7 @@ fn get_sort_value(obj: &CollectionItem, key: &str) -> String {
 }
 
 #[component]
-pub fn GalleryView(props: &GalleryViewProps) -> Element {
+pub fn GalleryView(props: GalleryViewProps) -> Element {
     let filter = props.filter.clone();
     let on_open = props.on_open;
 
