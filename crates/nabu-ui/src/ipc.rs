@@ -102,6 +102,41 @@ impl IntoJsValue for Option<JsValue> {
     }
 }
 
+// ── Test hook ─────────────────────────────────────────────────────────
+
+#[cfg(test)]
+thread_local! {
+    /// Optional mock IPC handler used in unit tests.  When set, `tauri_invoke`
+    /// short-circuits to this function instead of calling the wasm-bindgen
+    /// extern `invoke` (which is unavailable on non-wasm targets).
+    ///
+    /// This is a genuine testability defect: without a seam, every call to
+    /// `tauri_invoke` / `tauri_invoke_safe` is an untestable hard dependency on
+    /// `window.__TAURI__.core.invoke`.  The mock lets tests inject canned
+    /// responses for IPC commands.
+    static MOCK_INVOKE: std::cell::RefCell<Option<Box<dyn Fn(&str, &wasm_bindgen::JsValue) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> + Send + Sync>>> =
+        std::cell::RefCell::new(None);
+}
+
+/// Install a mock IPC handler for the duration of a test.
+#[cfg(test)]
+pub fn set_ipc_mock<F>(f: F)
+where
+    F: Fn(&str, &wasm_bindgen::JsValue)
+        -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue>
+        + Send
+        + Sync
+        + 'static,
+{
+    MOCK_INVOKE.with(|cell| *cell.borrow_mut() = Some(Box::new(f)));
+}
+
+/// Remove any installed mock IPC handler.
+#[cfg(test)]
+pub fn clear_ipc_mock() {
+    MOCK_INVOKE.with(|cell| *cell.borrow_mut() = None);
+}
+
 // ── Public IPC wrappers ────────────────────────────────────────────────
 
 /// Raw Tauri IPC invoke.  Returns `Ok(JsValue)` on success and
@@ -111,7 +146,27 @@ impl IntoJsValue for Option<JsValue> {
 /// turned into `None`, a default value, or a successful `()`.  The previous
 /// panicking `.unwrap()` has been removed so a backend failure is surfaced
 /// rather than crashing the renderer.
+///
+/// In `#[cfg(test)]` builds, if a mock has been installed via
+/// [`set_ipc_mock`], the mock is invoked instead of the real wasm-bindgen
+/// `invoke` extern — enabling native-target tests of IPC-dependent code.
 pub async fn tauri_invoke(cmd: &str, args: JsValue) -> Result<JsValue, IpcError> {
+    #[cfg(test)]
+    {
+        let mock_result: Option<Result<JsValue, JsValue>> = MOCK_INVOKE
+            .try_with(|cell| {
+                let borrow = cell.borrow();
+                borrow.as_ref().map(|f| f(cmd, &args))
+            })
+            .ok()
+            .flatten();
+        if let Some(res) = mock_result {
+            return res.map_err(|cause| IpcError {
+                cmd: cmd.to_string(),
+                cause,
+            });
+        }
+    }
     JsFuture::from(invoke(cmd, args)).await.map_err(|cause| IpcError {
         cmd: cmd.to_string(),
         cause,
@@ -308,5 +363,114 @@ mod tests {
             .filter_map(|r| r.as_ref().err().map(|e| e.message()))
             .collect();
         assert_eq!(failure_msgs, vec!["permission denied", "file in use"]);
+    }
+
+    // ── IPC mock hook (Test 5+) ───────────────────────────────────────────
+    ///
+    //  On native (non-wasm32) targets the real `invoke` extern calls
+    //  `window.__TAURI__.core.invoke`, which panics.  The `set_ipc_mock` /
+    //  `clear_ipc_mock` seam lets tests inject a fake handler so
+    //  `tauri_invoke` and `tauri_invoke_safe` can be exercised natively.
+
+    #[test]
+    fn mock_invoke_returns_canned_success_response() {
+        set_ipc_mock(|cmd, _args| {
+            assert_eq!(cmd, "get_settings");
+            let val: serde_json::Value =
+                serde_json::json!({ "theme": "dark", "main_window_opacity": 0.9 });
+            let json = serde_json::to_string(&val).unwrap();
+            Ok(JsValue::from_str(&json))
+        });
+
+        let fut = tauri_invoke("get_settings", JsValue::NULL);
+        let result = futures::executor::block_on(fut);
+        clear_ipc_mock();
+
+        assert!(result.is_ok());
+        let jsval = result.unwrap();
+        // The mock returned a JSON string as a JsValue.
+        assert!(jsval.as_string().is_some());
+    }
+
+    #[test]
+    fn mock_invoke_returns_error_preserved_in_ipc_error() {
+        set_ipc_mock(|_cmd, _args| Err(JsValue::from_str("backend exploded")));
+
+        let fut = tauri_invoke("trash_list", JsValue::NULL);
+        let result = futures::executor::block_on(fut);
+        clear_ipc_mock();
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.cmd, "trash_list");
+        assert_eq!(err.message(), "backend exploded");
+    }
+
+    #[test]
+    fn mock_invoke_safe_distinction_null_vs_error() {
+        // Null response → Ok(None) (soft-fail probe).
+        set_ipc_mock(|_cmd, _args| Ok(JsValue::NULL));
+        let fut = tauri_invoke_safe("settings_get", JsValue::NULL);
+        let result = futures::executor::block_on(fut);
+        clear_ipc_mock();
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn mock_invoke_safe_returns_value_on_success() {
+        set_ipc_mock(|_cmd, _args| {
+            let json = serde_json::to_string(&serde_json::json!([1, 2, 3])).unwrap();
+            Ok(JsValue::from_str(&json))
+        });
+        let fut = tauri_invoke_safe("trash_list", JsValue::NULL);
+        let result = futures::executor::block_on(fut);
+        clear_ipc_mock();
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
+    }
+
+    #[test]
+    fn mock_invoke_safe_propagates_error() {
+        set_ipc_mock(|_cmd, _args| Err(JsValue::from_str("connection refused")));
+        let fut = tauri_invoke_safe("versions_all", JsValue::NULL);
+        let result = futures::executor::block_on(fut);
+        clear_ipc_mock();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().message(), "connection refused");
+    }
+
+    #[test]
+    fn to_value_from_value_roundtrip_native() {
+        let original = serde_json::json!({
+            "id": "abc123",
+            "count": 42,
+            "active": true,
+            "tags": ["a", "b"],
+        });
+        let jsval = serde_wasm_bindgen::to_value(&original).unwrap();
+        let roundtrip: serde_json::Value = serde_wasm_bindgen::from_value(jsval).unwrap();
+        assert_eq!(roundtrip, original);
+    }
+
+    #[test]
+    fn from_value_deserialize_struct_native() {
+        #[derive(serde::Deserialize, PartialEq, Debug)]
+        struct TestStruct {
+            name: String,
+            count: u32,
+        }
+        let json = r#"{"name":"test","count":7}"#;
+        let jsval = JsValue::from_str(json);
+        let parsed: TestStruct = serde_wasm_bindgen::from_value(jsval).unwrap();
+        assert_eq!(parsed.name, "test");
+        assert_eq!(parsed.count, 7);
+    }
+
+    #[test]
+    fn from_value_failure_when_jsvalue_is_null() {
+        let jsval = JsValue::NULL;
+        let result: Result<serde_json::Value, _> = serde_wasm_bindgen::from_value(jsval);
+        assert!(result.is_err(), "null JsValue should fail deserialization of a Value");
     }
 }
