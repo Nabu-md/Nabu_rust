@@ -59,11 +59,15 @@ pub fn CalendarView(props: CalendarViewProps) -> Element {
 
     let date_groups = group_by_date(&props.objects, &query);
 
-    let on_query_input = move |ev: FormEvent| {
-        on_filter_change.call(CalendarFilter {
-            query: ev.value(),
-            ..filter.clone()
-        });
+    let on_query_input = {
+        let on_filter_change = on_filter_change;
+        let filter = filter.clone();
+        move |ev: FormEvent| {
+            on_filter_change.call(CalendarFilter {
+                query: ev.value(),
+                ..filter.clone()
+            });
+        }
     };
 
     let switch_to_month = {

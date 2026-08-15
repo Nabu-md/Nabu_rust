@@ -298,6 +298,7 @@ pub fn CollectionContainer() -> Element {
                             query: q.clone(),
                             object_type: None,
                             view_mode: CalendarViewMode::Month,
+                            group_by: "date".to_string(),
                         };
                         rsx! {
                             CalendarView {

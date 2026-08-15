@@ -451,9 +451,11 @@ pub fn ReaderView() -> Element {
                     &serde_json::json!({ "key": READER_SETTINGS_KEY }),
                 )
                 .unwrap();
-                let result = crate::ipc::tauri_invoke("settings_get", args).await;
-                if let Ok(s) = serde_wasm_bindgen::from_value::<ReaderSettings>(result) {
-                    settings_for_load.set(s);
+                if let Ok(Some(val)) = crate::ipc::tauri_invoke_safe("settings_get", args).await {
+                    if let Ok(s) = serde_wasm_bindgen::from_value::<ReaderSettings>(val) {
+                        let mut sfl = settings_for_load;
+                        sfl.set(s);
+                    }
                 }
             });
         });
@@ -466,12 +468,13 @@ pub fn ReaderView() -> Element {
         let state_l = content_state;
         let error_l = load_error;
         let missing_l = note_missing;
-        let nonce_l = nonce;
+        let mut nonce_l = nonce;
 
         use_effect(move || {
             let path = active_path.read().clone().unwrap_or_default();
             if path.is_empty() {
-                nonce_l.with_mut(|n| *n = n.wrapping_add(1));
+                let mut n = nonce_l;
+                n.with_mut(|v| *v = v.wrapping_add(1));
                 *content_l.write_unchecked() = String::new();
                 *state_l.write_unchecked() = LoadState::Idle;
                 *error_l.write_unchecked() = None;
@@ -489,7 +492,7 @@ pub fn ReaderView() -> Element {
     let is_content_loaded = cs == LoadState::Loaded;
     let load_error_opt = load_error.read().clone();
     let is_missing = *note_missing.read();
-    let show_panel = show_settings.with_mut(|s| *s); // peek
+    let show_panel = *show_settings.read();
 
     let font_size = settings.read().font_size;
     let line_width = settings.read().line_width;
@@ -718,7 +721,7 @@ pub fn ReaderView() -> Element {
                             message: "The note content could not be loaded.".to_string(),
                             details: load_error_opt,
                             recovery: "Make sure the note is accessible and the backend is running, then retry.".to_string(),
-                            on_retry: Some(on_retry_load),
+                            on_retry: EventHandler::new(on_retry_load),
                         }
                     }
                 } else if phase == ReaderPhase::Empty {
@@ -799,12 +802,12 @@ mod tests {
 
     #[test]
     fn stale_nonce_discards_result() {
-        assert!(nonce_is_stale(3, 2));
+        assert!(crate::components::shipped::nonce_is_stale(3, 2));
     }
 
     #[test]
     fn current_nonce_accepts_result() {
-        assert!(!nonce_is_stale(5, 5));
+        assert!(!crate::components::shipped::nonce_is_stale(5, 5));
     }
 
     // ── Markdown renderer ──
@@ -868,7 +871,7 @@ mod tests {
             make_row(DiffKind::Same, Some(1), Some(1), "same line"),
             make_row(DiffKind::Added, None, Some(2), "new line"),
         ];
-        assert!(super::comparison::has_changes(&rows));
+        assert!(crate::components::shipped::comparison::has_changes(&rows));
     }
 
     #[test]
@@ -877,11 +880,12 @@ mod tests {
             make_row(DiffKind::Same, Some(1), Some(1), "same line"),
             make_row(DiffKind::Same, Some(2), Some(2), "same line 2"),
         ];
-        assert!(!super::comparison::has_changes(&rows));
+        assert!(!crate::components::shipped::comparison::has_changes(&rows));
     }
 
     #[test]
     fn has_changes_empty_vec() {
-        assert!(!super::comparison::has_changes(&[]));
+        let empty: Vec<DiffRow> = vec![];
+        assert!(!crate::components::shipped::comparison::has_changes(&empty));
     }
 }

@@ -670,7 +670,7 @@ mod tests {
     fn failed_state_classifies_as_error() {
         let data: Option<GraphData> = None;
         assert_eq!(
-            classify_view(data, GraphLoadState::Failed),
+            classify_view(data.as_ref(), GraphLoadState::Failed),
             ViewPhase::Error
         );
     }
@@ -687,7 +687,7 @@ mod tests {
         // Simulate selecting node "a.md".
         let _selected = Some("a.md".to_string());
         let after = layout_graph(&data);
-        assert_eq!(before, after, "layout is independent of view selection");
+        assert_eq!(before, after.positions, "layout is independent of view selection");
         assert_ne!(
             layout.positions["a.md"],
             layout.positions["b.md"],

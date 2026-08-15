@@ -198,10 +198,10 @@ pub fn ComparisonView() -> Element {
         let revision_path_c = revision_path;
         let version_a_c = version_a;
         let version_b_c = version_b;
-        let diff_state_c = diff_state;
+        let mut diff_state_c = diff_state;
         let diff_rows_c = diff_rows;
         let diff_error_c = diff_error;
-        let diff_nonce_c = diff_nonce;
+        let mut diff_nonce_c = diff_nonce;
         let toasts_c = toasts;
 
         move |_: MouseEvent| {
@@ -250,17 +250,31 @@ pub fn ComparisonView() -> Element {
                 }
                 .unwrap();
 
-                let result = crate::ipc::tauri_invoke(cmd, args).await;
-                match serde_wasm_bindgen::from_value::<Vec<DiffRow>>(result) {
-                    Ok(rows) => {
+                let result = crate::ipc::tauri_invoke_safe(cmd, args).await;
+                match result {
+                    Ok(Some(val)) => match serde_wasm_bindgen::from_value::<Vec<DiffRow>>(val) {
+                        Ok(rows) => {
+                            if !super::nonce_is_stale(*diff_nonce_c.peek(), this_nonce) {
+                                *diff_rows_c.write_unchecked() = Some(rows);
+                                *diff_state_c.write_unchecked() = LoadState::Loaded;
+                            }
+                        }
+                        Err(e) => {
+                            if !super::nonce_is_stale(*diff_nonce_c.peek(), this_nonce) {
+                                *diff_error_c.write_unchecked() = Some(e.to_string());
+                                *diff_state_c.write_unchecked() = LoadState::Failed;
+                            }
+                        }
+                    },
+                    Ok(None) => {
                         if !super::nonce_is_stale(*diff_nonce_c.peek(), this_nonce) {
-                            *diff_rows_c.write_unchecked() = Some(rows);
-                            *diff_state_c.write_unchecked() = LoadState::Loaded;
+                            *diff_error_c.write_unchecked() = Some("No data returned.".to_string());
+                            *diff_state_c.write_unchecked() = LoadState::Failed;
                         }
                     }
                     Err(e) => {
                         if !super::nonce_is_stale(*diff_nonce_c.peek(), this_nonce) {
-                            *diff_error_c.write_unchecked() = Some(e.to_string());
+                            *diff_error_c.write_unchecked() = Some(e.message());
                             *diff_state_c.write_unchecked() = LoadState::Failed;
                         }
                     }
@@ -271,6 +285,10 @@ pub fn ComparisonView() -> Element {
 
     let on_retry = {
         let mode_r = mode;
+        let mut diff_state_c = diff_state;
+        let mut diff_nonce_c = diff_nonce;
+        let diff_rows_c = diff_rows;
+        let diff_error_c = diff_error;
         move |_: ()| {
             let current_mode = *mode_r.read();
             let path_a = note_a.read().clone();
@@ -284,9 +302,9 @@ pub fn ComparisonView() -> Element {
                 CompareMode::Revisions => "versions_diff",
             };
 
-            diff_state.with_mut(|s| *s = LoadState::Loading);
-            diff_nonce.with_mut(|n| *n = n.wrapping_add(1));
-            let this_nonce = *diff_nonce.peek();
+            diff_state_c.with_mut(|s| *s = LoadState::Loading);
+            diff_nonce_c.with_mut(|n| *n = n.wrapping_add(1));
+            let this_nonce = *diff_nonce_c.peek();
 
             spawn_local(async move {
                 let args = match current_mode {
@@ -303,18 +321,32 @@ pub fn ComparisonView() -> Element {
                 }
                 .unwrap();
 
-                let result = crate::ipc::tauri_invoke(cmd, args).await;
-                match serde_wasm_bindgen::from_value::<Vec<DiffRow>>(result) {
-                    Ok(rows) => {
-                        if !super::nonce_is_stale(*diff_nonce.peek(), this_nonce) {
-                            *diff_rows.write_unchecked() = Some(rows);
-                            *diff_state.write_unchecked() = LoadState::Loaded;
+                let result = crate::ipc::tauri_invoke_safe(cmd, args).await;
+                match result {
+                    Ok(Some(val)) => match serde_wasm_bindgen::from_value::<Vec<DiffRow>>(val) {
+                        Ok(rows) => {
+                            if !super::nonce_is_stale(*diff_nonce_c.peek(), this_nonce) {
+                                *diff_rows_c.write_unchecked() = Some(rows);
+                                *diff_state_c.write_unchecked() = LoadState::Loaded;
+                            }
+                        }
+                        Err(e) => {
+                            if !super::nonce_is_stale(*diff_nonce_c.peek(), this_nonce) {
+                                *diff_error_c.write_unchecked() = Some(e.to_string());
+                                *diff_state_c.write_unchecked() = LoadState::Failed;
+                            }
+                        }
+                    },
+                    Ok(None) => {
+                        if !super::nonce_is_stale(*diff_nonce_c.peek(), this_nonce) {
+                            *diff_error_c.write_unchecked() = Some("No data returned.".to_string());
+                            *diff_state_c.write_unchecked() = LoadState::Failed;
                         }
                     }
                     Err(e) => {
-                        if !super::nonce_is_stale(*diff_nonce.peek(), this_nonce) {
-                            *diff_error.write_unchecked() = Some(e.to_string());
-                            *diff_state.write_unchecked() = LoadState::Failed;
+                        if !super::nonce_is_stale(*diff_nonce_c.peek(), this_nonce) {
+                            *diff_error_c.write_unchecked() = Some(e.message());
+                            *diff_state_c.write_unchecked() = LoadState::Failed;
                         }
                     }
                 }
@@ -324,10 +356,12 @@ pub fn ComparisonView() -> Element {
 
     // ── Mode toggle handlers ──
     let on_mode_notes = move |_: MouseEvent| {
-        mode.with_mut(|m| *m = CompareMode::Notes);
+        let mut m = mode;
+        m.with_mut(|mv| *mv = CompareMode::Notes);
     };
     let on_mode_revisions = move |_: MouseEvent| {
-        mode.with_mut(|m| *m = CompareMode::Revisions);
+        let mut m = mode;
+        m.with_mut(|mv| *mv = CompareMode::Revisions);
     };
 
     // ── Pre-compute render values ──
@@ -435,7 +469,8 @@ pub fn ComparisonView() -> Element {
                         class: "w-full bg-gray-800 text-gray-100 rounded px-2 py-1.5 text-sm border border-gray-700",
                         value: "{sel_a}",
                         onchange: move |ev: FormEvent| {
-                            note_a.set(ev.value());
+                            let mut na = note_a;
+                            na.set(ev.value());
                         },
                         option { value: "", "Select note A…" }
                         for note in notes.iter() {
@@ -458,7 +493,8 @@ pub fn ComparisonView() -> Element {
                         class: "w-full bg-gray-800 text-gray-100 rounded px-2 py-1.5 text-sm border border-gray-700",
                         value: "{sel_b}",
                         onchange: move |ev: FormEvent| {
-                            note_b.set(ev.value());
+                            let mut nb = note_b;
+                            nb.set(ev.value());
                         },
                         option { value: "", "Select note B…" }
                         for note in notes.iter() {
@@ -485,10 +521,12 @@ pub fn ComparisonView() -> Element {
                         value: "{rev_path}",
                         onchange: move |ev: FormEvent| {
                             let path = ev.value();
-                            revision_path.set(path.clone());
-                            // Reset version selections
-                            version_a.set(None);
-                            version_b.set(None);
+                            let mut rp = revision_path;
+                            rp.set(path.clone());
+                            let mut va = version_a;
+                            va.set(None);
+                            let mut vb = version_b;
+                            vb.set(None);
                         },
                         option { value: "", "Select note…" }
                         for note in notes.iter() {
@@ -512,7 +550,8 @@ pub fn ComparisonView() -> Element {
                         value: "{sel_version_a_val}",
                         onchange: move |ev: FormEvent| {
                             let val = ev.value();
-                            version_a.set(if val.is_empty() { None } else { Some(val) });
+                            let mut va = version_a;
+                            va.set(if val.is_empty() { None } else { Some(val) });
                         },
                         option { value: "", "Current" }
                         {if vs == LoadState::Loading || vs == LoadState::Idle {
@@ -545,7 +584,8 @@ pub fn ComparisonView() -> Element {
                         value: "{sel_version_b_val}",
                         onchange: move |ev: FormEvent| {
                             let val = ev.value();
-                            version_b.set(if val.is_empty() { None } else { Some(val) });
+                            let mut vb = version_b;
+                            vb.set(if val.is_empty() { None } else { Some(val) });
                         },
                         option { value: "", "Current" }
                         for v in versions_list.iter().rev() {
@@ -607,7 +647,7 @@ pub fn ComparisonView() -> Element {
                         message: "Could not compute the diff.".to_string(),
                         details: diff_err_opt,
                         recovery: "Make sure both notes exist and are accessible.".to_string(),
-                        on_retry: Some(on_retry),
+                        on_retry: EventHandler::new(on_retry),
                     }
                 }
             } else if phase == ComparisonPhase::NoDiff {
@@ -709,8 +749,9 @@ mod tests {
 
     #[test]
     fn phase_no_diff_when_empty_result() {
+        let empty: Vec<DiffRow> = vec![];
         assert_eq!(
-            classify_comparison_phase(LoadState::Loaded, None, Some(&[])),
+            classify_comparison_phase(LoadState::Loaded, None, Some(&empty)),
             ComparisonPhase::NoDiff
         );
     }
@@ -756,19 +797,20 @@ mod tests {
 
     #[test]
     fn has_changes_empty() {
-        assert!(!has_changes(&[]));
+        let empty: Vec<DiffRow> = vec![];
+        assert!(!has_changes(&empty));
     }
 
     // ── nonce_is_stale ──
 
     #[test]
     fn stale_nonce() {
-        assert!(super::nonce_is_stale(2, 1));
+        assert!(crate::components::shipped::nonce_is_stale(2, 1));
     }
 
     #[test]
     fn fresh_nonce() {
-        assert!(!super::nonce_is_stale(7, 7));
+        assert!(!crate::components::shipped::nonce_is_stale(7, 7));
     }
 
     // ── revision_label ──
