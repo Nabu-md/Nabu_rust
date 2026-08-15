@@ -374,6 +374,10 @@ fn scan_tree(dir: &Path, prefix: &str) -> Vec<TreeEntry> {
 /// renders this and drives drag-and-drop, context menus and inline rename.
 #[tauri::command]
 pub fn tree_list(store: State<'_, SettingsStore>) -> Result<Vec<TreeEntry>, String> {
+    tree_list_impl(&store)
+}
+
+pub(crate) fn tree_list_impl(store: &SettingsStore) -> Result<Vec<TreeEntry>, String> {
     let settings = store.get();
     let vault_path = PathBuf::from(&settings.last_vault_path);
     if vault_path.as_os_str().is_empty() || !vault_path.exists() {
@@ -446,13 +450,14 @@ pub fn reveal_in_file_manager(
 
 #[tauri::command]
 pub fn check_vault_exists(store: State<'_, SettingsStore>) -> Result<Option<String>, String> {
+    check_vault_exists_impl(&store)
+}
+
+pub(crate) fn check_vault_exists_impl(store: &SettingsStore) -> Result<Option<String>, String> {
     let settings = store.get();
     let path = settings.last_vault_path.trim();
     if !path.is_empty() && Path::new(path).exists() {
-        // Retention runs at app startup with a previously-configured vault, so
-        // expired trashed items are purged even if the Trash screen is never
-        // opened (matches `trash_purge_expired`'s "on vault load" contract).
-        let _ = crate::history::trash_purge_expired(store.clone());
+        let _ = crate::history::trash_purge_expired_impl(store);
         Ok(Some(path.to_string()))
     } else {
         Ok(None)
@@ -678,6 +683,10 @@ pub fn note_daily() -> Result<String, String> {
 
 #[tauri::command]
 pub fn get_settings(store: State<'_, SettingsStore>) -> Result<AppSettings, String> {
+    get_settings_impl(&store)
+}
+
+pub(crate) fn get_settings_impl(store: &SettingsStore) -> Result<AppSettings, String> {
     Ok(store.get())
 }
 
@@ -687,9 +696,17 @@ pub fn settings_set(
     value: serde_json::Value,
     store: State<'_, SettingsStore>,
 ) -> Result<(), String> {
+    settings_set_impl(&store, &key, value)
+}
+
+pub(crate) fn settings_set_impl(
+    store: &SettingsStore,
+    key: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
     store
         .update(|s| {
-            s.extra_settings.insert(key, value);
+            s.extra_settings.insert(key.to_string(), value);
         })
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -700,7 +717,11 @@ pub fn settings_get(
     key: String,
     store: State<'_, SettingsStore>,
 ) -> Result<serde_json::Value, String> {
-    Ok(store.get_value(&key))
+    settings_get_impl(&store, &key)
+}
+
+pub(crate) fn settings_get_impl(store: &SettingsStore, key: &str) -> Result<serde_json::Value, String> {
+    Ok(store.get_value(key))
 }
 
 #[tauri::command]
@@ -708,7 +729,11 @@ pub fn settings_set_all(
     settings: AppSettings,
     store: State<'_, SettingsStore>,
 ) -> Result<(), String> {
-    store.save(&settings).map_err(|e| e.to_string())?;
+    settings_set_all_impl(&store, &settings)
+}
+
+pub(crate) fn settings_set_all_impl(store: &SettingsStore, settings: &AppSettings) -> Result<(), String> {
+    store.save(settings).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -716,6 +741,10 @@ pub fn settings_set_all(
 
 #[tauri::command]
 pub fn settings_export(store: State<'_, SettingsStore>) -> Result<Vec<u8>, String> {
+    settings_export_impl(&store)
+}
+
+pub(crate) fn settings_export_impl(store: &SettingsStore) -> Result<Vec<u8>, String> {
     let export = store
         .export_settings()
         .map_err(|e| e.to_string())?;
@@ -727,14 +756,25 @@ pub fn settings_import(
     payload: Vec<u8>,
     store: State<'_, SettingsStore>,
 ) -> Result<AppSettings, String> {
+    settings_import_impl(&store, &payload)
+}
+
+pub(crate) fn settings_import_impl(
+    store: &SettingsStore,
+    payload: &[u8],
+) -> Result<AppSettings, String> {
     store
-        .import_settings(&payload)
+        .import_settings(payload)
         .map(|s| s.clone())
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn settings_reset(store: State<'_, SettingsStore>) -> Result<AppSettings, String> {
+    settings_reset_impl(&store)
+}
+
+pub(crate) fn settings_reset_impl(store: &SettingsStore) -> Result<AppSettings, String> {
     store.reset().map(|s| s.clone()).map_err(|e| e.to_string())
 }
 
@@ -2582,30 +2622,37 @@ pub fn archive_note(
     ctx: State<'_, ApplicationContext>,
     store: State<'_, SettingsStore>,
 ) -> Result<(), String> {
+    archive_note_impl(&ctx, &store, &path)
+}
+
+pub(crate) fn archive_note_impl(
+    ctx: &ApplicationContext,
+    store: &SettingsStore,
+    path: &str,
+) -> Result<(), String> {
     let settings = store.get();
     let vault_path = PathBuf::from(settings.last_vault_path.trim());
     if path.trim().is_empty() || path == ARCHIVE_FOLDER || path.starts_with("archive/") {
         return Err("Invalid path for archiving".to_string());
     }
-    let full = validate_path_within_vault(&vault_path, &path)?;
+    let full = validate_path_within_vault(&vault_path, path)?;
     if !full.exists() {
         return Err(format!("Not found: {path}"));
     }
-    let dest = archive_dir(&vault_path).join(&path);
+    let dest = archive_dir(&vault_path).join(path);
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::rename(&full, &dest).map_err(|e| format!("Could not archive: {e}"))?;
-    // Persist a reversible history entry so Archive → Undo restores the note.
     let src_arc = full.clone();
     let dst_arc = dest.clone();
     let src_rename = full.clone();
     let dst_rename = dest.clone();
     let _ = crate::history::push_history(
-        &ctx,
+        ctx,
         nabu_core::history::HistoryOp::Metadata,
         format!("Archive '{path}'"),
-        vec![path.clone()],
+        vec![path.to_string()],
         serde_json::json!({ "archived": false }),
         serde_json::json!({ "archived": true }),
         std::sync::Arc::new(move || {
@@ -2628,14 +2675,22 @@ pub fn archive_restore(
     ctx: State<'_, ApplicationContext>,
     store: State<'_, SettingsStore>,
 ) -> Result<(), String> {
+    archive_restore_impl(&ctx, &store, &archive_path)
+}
+
+pub(crate) fn archive_restore_impl(
+    ctx: &ApplicationContext,
+    store: &SettingsStore,
+    archive_path: &str,
+) -> Result<(), String> {
     let settings = store.get();
     let vault_path = PathBuf::from(settings.last_vault_path.trim());
     if !archive_path.starts_with("archive/") {
         return Err("Not an archived path".to_string());
     }
-    let full = validate_path_within_vault(&vault_path, &archive_path)?;
+    let full = validate_path_within_vault(&vault_path, archive_path)?;
     if !full.exists() {
-        return Err(format!("Not found: {archive_path}"));
+        return Err(format!("Not found: {}", archive_path));
     }
     let original_rel = archive_path
         .strip_prefix("archive/")
@@ -2651,10 +2706,10 @@ pub fn archive_restore(
     let src_undo = full.clone();
     let dst_undo = original.clone();
     let _ = crate::history::push_history(
-        &ctx,
+        ctx,
         nabu_core::history::HistoryOp::Metadata,
         format!("Restore '{original_rel}'"),
-        vec![original_rel.clone()],
+        vec![original_rel.to_string()],
         serde_json::json!({ "archived": true }),
         serde_json::json!({ "archived": false }),
         std::sync::Arc::new(move || {
@@ -2674,6 +2729,10 @@ pub fn archive_restore(
 /// location, so the Archive view can offer restore.
 #[tauri::command]
 pub fn archive_list(store: State<'_, SettingsStore>) -> Result<Vec<ArchiveEntry>, String> {
+    archive_list_impl(&store)
+}
+
+pub(crate) fn archive_list_impl(store: &SettingsStore) -> Result<Vec<ArchiveEntry>, String> {
     let settings = store.get();
     let vault_path = PathBuf::from(settings.last_vault_path.trim());
     let dir = archive_dir(&vault_path);
@@ -2746,6 +2805,10 @@ const K_SMART_FOLDERS: &str = "nabu.smart_folders";
 /// Lists all saved smart folders (persisted in settings).
 #[tauri::command]
 pub fn smart_folders_list(store: State<'_, SettingsStore>) -> Result<Vec<SmartFolder>, String> {
+    smart_folders_list_impl(&store)
+}
+
+pub(crate) fn smart_folders_list_impl(store: &SettingsStore) -> Result<Vec<SmartFolder>, String> {
     Ok(store
         .get_value(K_SMART_FOLDERS)
         .as_array()
@@ -2763,7 +2826,11 @@ pub fn smart_folder_save(
     folder: SmartFolder,
     store: State<'_, SettingsStore>,
 ) -> Result<(), String> {
-    let mut list = smart_folders_list(store.clone()).unwrap_or_default();
+    smart_folder_save_impl(&store, folder)
+}
+
+pub(crate) fn smart_folder_save_impl(store: &SettingsStore, folder: SmartFolder) -> Result<(), String> {
+    let mut list = smart_folders_list_impl(store)?;
     if let Some(existing) = list.iter_mut().find(|f| f.id == folder.id) {
         *existing = folder.clone();
     } else {
@@ -2780,7 +2847,11 @@ pub fn smart_folder_save(
 /// Deletes a smart folder by id.
 #[tauri::command]
 pub fn smart_folder_delete(id: String, store: State<'_, SettingsStore>) -> Result<(), String> {
-    let list = smart_folders_list(store.clone()).unwrap_or_default();
+    smart_folder_delete_impl(&store, &id)
+}
+
+pub(crate) fn smart_folder_delete_impl(store: &SettingsStore, id: &str) -> Result<(), String> {
+    let list = smart_folders_list_impl(store)?;
     let filtered: Vec<SmartFolder> = list.into_iter().filter(|f| f.id != id).collect();
     store
         .update(|s| {
@@ -3013,6 +3084,10 @@ const K_TEMPLATES: &str = "nabu.templates";
 
 #[tauri::command]
 pub fn template_list(store: State<'_, SettingsStore>) -> Result<Vec<TemplateRecord>, String> {
+    template_list_impl(&store)
+}
+
+pub(crate) fn template_list_impl(store: &SettingsStore) -> Result<Vec<TemplateRecord>, String> {
     Ok(store
         .get_value(K_TEMPLATES)
         .as_array()
@@ -3035,25 +3110,37 @@ fn template_persist(store: &SettingsStore, list: &[TemplateRecord]) -> Result<()
 
 #[tauri::command]
 pub fn template_save(template: TemplateRecord, store: State<'_, SettingsStore>) -> Result<(), String> {
-    let mut list = template_list(store.clone()).unwrap_or_default();
+    template_save_impl(&store, template)
+}
+
+pub(crate) fn template_save_impl(store: &SettingsStore, template: TemplateRecord) -> Result<(), String> {
+    let mut list = template_list_impl(store)?;
     if let Some(existing) = list.iter_mut().find(|t| t.name == template.name) {
-        *existing = template.clone();
+        *existing = template;
     } else {
         list.push(template);
     }
-    template_persist(&store, &list)
+    template_persist(store, &list)
 }
 
 #[tauri::command]
 pub fn template_delete(name: String, store: State<'_, SettingsStore>) -> Result<(), String> {
-    let list = template_list(store.clone()).unwrap_or_default();
+    template_delete_impl(&store, &name)
+}
+
+pub(crate) fn template_delete_impl(store: &SettingsStore, name: &str) -> Result<(), String> {
+    let list = template_list_impl(store)?;
     let filtered: Vec<TemplateRecord> = list.into_iter().filter(|t| t.name != name).collect();
-    template_persist(&store, &filtered)
+    template_persist(store, &filtered)
 }
 
 #[tauri::command]
 pub fn template_duplicate(name: String, store: State<'_, SettingsStore>) -> Result<TemplateRecord, String> {
-    let mut list = template_list(store.clone()).unwrap_or_default();
+    template_duplicate_impl(&store, &name)
+}
+
+pub(crate) fn template_duplicate_impl(store: &SettingsStore, name: &str) -> Result<TemplateRecord, String> {
+    let mut list = template_list_impl(store)?;
     let source = list
         .iter()
         .find(|t| t.name == name)
@@ -3071,7 +3158,7 @@ pub fn template_duplicate(name: String, store: State<'_, SettingsStore>) -> Resu
     }
     copy.name = candidate;
     list.push(copy.clone());
-    template_persist(&store, &list)?;
+    template_persist(store, &list)?;
     Ok(copy)
 }
 
@@ -3081,11 +3168,15 @@ pub fn template_set_favourite(
     favourite: bool,
     store: State<'_, SettingsStore>,
 ) -> Result<(), String> {
-    let mut list = template_list(store.clone()).unwrap_or_default();
+    template_set_favourite_impl(&store, &name, favourite)
+}
+
+pub(crate) fn template_set_favourite_impl(store: &SettingsStore, name: &str, favourite: bool) -> Result<(), String> {
+    let mut list = template_list_impl(store)?;
     if let Some(t) = list.iter_mut().find(|t| t.name == name) {
         t.favourite = favourite;
     }
-    template_persist(&store, &list)
+    template_persist(store, &list)
 }
 
 // ── Quick capture ────────────────────────────────────────────────────────
@@ -3233,7 +3324,11 @@ fn save_canvases(store: &SettingsStore, canvases: &[CanvasDef]) -> Result<(), St
 /// Lists every saved canvas (id + name only — nodes/edges omitted for speed).
 #[tauri::command]
 pub fn canvas_list(store: State<'_, SettingsStore>) -> Result<Vec<CanvasDef>, String> {
-    Ok(load_canvases(&store))
+    canvas_list_impl(&store)
+}
+
+pub(crate) fn canvas_list_impl(store: &SettingsStore) -> Result<Vec<CanvasDef>, String> {
+    Ok(load_canvases(store))
 }
 
 /// Returns the full canvas definition (nodes, edges, groups).
@@ -3242,7 +3337,11 @@ pub fn canvas_get(
     id: String,
     store: State<'_, SettingsStore>,
 ) -> Result<Option<CanvasDef>, String> {
-    Ok(load_canvases(&store).into_iter().find(|c| c.id == id))
+    canvas_get_impl(&store, &id)
+}
+
+pub(crate) fn canvas_get_impl(store: &SettingsStore, id: &str) -> Result<Option<CanvasDef>, String> {
+    Ok(load_canvases(store).into_iter().find(|c| c.id == id))
 }
 
 /// Creates or updates a canvas (deduped by id) and persists it.
@@ -3251,21 +3350,29 @@ pub fn canvas_save(
     canvas: CanvasDef,
     store: State<'_, SettingsStore>,
 ) -> Result<(), String> {
-    let mut canvases = load_canvases(&store);
+    canvas_save_impl(&store, canvas)
+}
+
+pub(crate) fn canvas_save_impl(store: &SettingsStore, canvas: CanvasDef) -> Result<(), String> {
+    let mut canvases = load_canvases(store);
     if let Some(existing) = canvases.iter_mut().find(|c| c.id == canvas.id) {
         *existing = canvas;
     } else {
         canvases.push(canvas);
     }
-    save_canvases(&store, &canvases)
+    save_canvases(store, &canvases)
 }
 
 /// Deletes a canvas by id.
 #[tauri::command]
 pub fn canvas_delete(id: String, store: State<'_, SettingsStore>) -> Result<(), String> {
-    let mut canvases = load_canvases(&store);
+    canvas_delete_impl(&store, &id)
+}
+
+pub(crate) fn canvas_delete_impl(store: &SettingsStore, id: &str) -> Result<(), String> {
+    let mut canvases = load_canvases(store);
     canvases.retain(|c| c.id != id);
-    save_canvases(&store, &canvases)
+    save_canvases(store, &canvases)
 }
 
 // ── Comparison View (Phase 13.3) ───────────────────────────────────

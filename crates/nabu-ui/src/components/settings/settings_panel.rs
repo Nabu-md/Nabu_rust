@@ -6,10 +6,12 @@
 
 use crate::components::ui::button::{Button, ButtonVariant};
 use crate::components::ui::dialog::ConfirmDialog;
-use crate::components::ui::feedback::{use_toast, ErrorPanel, LoadingBlock, SpinnerSize};
+use crate::components::ui::feedback::{use_toast, ToastContext, ErrorPanel, LoadingBlock, SpinnerSize};
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
-use wasm_bindgen_futures::spawn_local;
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::{spawn_local, JsFuture};
 
 // ── AppSettings (mirrors backend) ───────────────────────────────────────────
 
@@ -266,6 +268,106 @@ fn setting_select(
     }
 }
 
+// ── Settings Import / Export helpers ─────────────────────────────────
+
+/// Triggers a browser download of a JSON string as a file.
+fn download_json(filename: &str, content: &str) {
+    if let Some(window) = web_sys::window() {
+        let encoded = js_sys::encode_uri_component(content);
+        let href = format!("data:application/json;charset=utf-8,{}", encoded);
+        let script = format!(
+            r#"(function() {{
+                var a = document.createElement('a');
+                a.href = '{}';
+                a.download = '{}';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }})()"#,
+            href, filename
+        );
+        let _ = window.eval(&script);
+    }
+}
+
+/// Opens a hidden `<input type="file">`, reads the selected file as bytes, and
+/// calls the `settings_import` IPC command. Updates the local settings signal
+/// on success and fires toasts for feedback.
+fn open_file_import(settings: Signal<AppSettings>, toasts: ToastContext) {
+    let window = match web_sys::window() {
+        Some(w) => w,
+        None => return,
+    };
+    let document = match window.document() {
+        Some(d) => d,
+        None => return,
+    };
+
+    let input = match document
+        .create_element("input")
+        .ok()
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+    {
+        Some(input) => input,
+        None => return,
+    };
+    input.set_type("file");
+    input.set_accept(".json,application/json");
+    input.set_style("display", "none");
+
+    let input_for_closure = input.clone();
+    let settings_copy = settings;
+    let toasts_copy = toasts;
+
+    let closure: Closure<dyn FnMut(web_sys::Event)> = Closure::wrap(Box::new(move |_ev: web_sys::Event| {
+        if let Some(files) = input_for_closure.files() {
+            if files.length() > 0 {
+                if let Some(file) = files.get(0) {
+                    let settings_s = settings_copy;
+                    let toasts_s = toasts_copy;
+                    spawn_local(async move {
+                        match file.array_buffer().await {
+                            Ok(buf) => {
+                                let data = js_sys::Uint8Array::new(&buf).to_vec();
+                                let args = serde_wasm_bindgen::to_value(
+                                    &serde_json::json!({ "payload": data })
+                                ).unwrap();
+                                match crate::ipc::tauri_invoke("settings_import", args).await {
+                                    Ok(result) => {
+                                        match serde_wasm_bindgen::from_value::<AppSettings>(result) {
+                                            Ok(loaded) => {
+                                                settings_s.set(loaded);
+                                                toasts_s.success("Settings imported", "Applied successfully.");
+                                            }
+                                            Err(e) => {
+                                                toasts_s.error("Import failed", format!("Parse error: {e}"));
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        toasts_s.error("Import failed", e.message());
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                toasts_s.error("Import failed", "Could not read the selected file.");
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    }) as Box<dyn FnMut(web_sys::Event)>);
+
+    input.set_onchange(Some(closure.as_ref().unchecked_ref()));
+    closure.forget();
+
+    if document.body().is_some() {
+        let _ = document.body().unwrap().append_child(&input);
+    }
+    input.click();
+}
+
 // ── SettingsPanel ──────────────────────────────────────────────────────────
 
 /// The root settings panel component.
@@ -275,7 +377,9 @@ fn setting_select(
 #[component]
 pub fn SettingsPanel() -> Element {
     let settings = use_signal(AppSettings::default);
+    let toasts = use_toast();
     let active_tab = use_signal(|| "Appearance".to_string());
+    let confirm_reset = use_signal(|| false);
 
     // Load settings from backend on mount.
     use_effect(move || {
@@ -292,8 +396,8 @@ pub fn SettingsPanel() -> Element {
     let tabs = [
         "Appearance", "Editor", "Markdown", "Search", "Graph",
         "Files & Vaults", "Import & Export", "OCR", "Accessibility",
-        "Performance", "Privacy", "Keyboard Shortcuts", "Advanced",
-        "Experimental", "Capabilities", "About",
+        "Performance", "Privacy", "Keyboard Shortcuts", "Diagnostics",
+        "Advanced", "Experimental", "Capabilities", "About",
     ];
 
     rsx! {
@@ -336,18 +440,37 @@ pub fn SettingsPanel() -> Element {
                 "Search"             => rsx! { { search_settings(settings) } },
                 "Graph"              => rsx! { { graph_settings(settings) } },
                 "Files & Vaults"     => rsx! { { files_settings(settings) } },
-                "Import & Export"    => rsx! { { import_export_settings(settings) } },
+                "Import & Export"    => rsx! { { import_export_settings(settings, toasts) } },
                 "OCR"                => rsx! { { ocr_settings(settings) } },
                 "Accessibility"      => rsx! { { accessibility_settings(settings) } },
                 "Performance"        => rsx! { { performance_settings(settings) } },
                 "Privacy"            => rsx! { { privacy_settings(settings) } },
                 "Keyboard Shortcuts" => rsx! { { keyboard_shortcuts_settings(settings) } },
-                "Advanced"           => rsx! { { advanced_settings(settings) } },
+                "Diagnostics"        => rsx! { { diagnostics_settings(settings) } },
+                "Advanced"           => rsx! { { advanced_settings(settings, toasts, confirm_reset) } },
                 "Experimental"       => rsx! { { experimental_settings(settings) } },
                 "Capabilities"       => rsx! { crate::components::settings::capability_management::CapabilityManagementPage {} },
                 "About"              => rsx! { { about_settings() } },
                 _                    => rsx! {},
             }
+        }
+
+        ConfirmDialog {
+            open: confirm_reset,
+            title: "Reset to Defaults",
+            message: "This will restore all settings to their default values and cannot be undone. Continue?",
+            confirm_label: "Reset",
+            on_confirm: move |_| {
+                let settings_copy = settings;
+                spawn_local(async move {
+                    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+                    if let Ok(result) = crate::ipc::tauri_invoke("settings_reset", args).await {
+                        if let Ok(loaded) = serde_wasm_bindgen::from_value::<AppSettings>(result) {
+                            settings_copy.set(loaded);
+                        }
+                    }
+                });
+            },
         }
     }
 }

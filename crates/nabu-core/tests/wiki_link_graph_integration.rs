@@ -10,16 +10,13 @@
 //! - `build_graph_from_vault` (full disk-based rebuild from sidecars + content files)
 //!
 //! These tests exercise the public API boundary only — no private internals.
-```
 
 use nabu_core::graph::{
     build_graph_from_objects, build_graph_from_vault, VaultGraph, ResolutionIndex,
     parse_wiki_links, parse_block_references, content_as_str,
-    SerializedEdge, extract_content_edges, object_to_node,
-    VaultSidecar, BuildSource,
+    object_to_node, VaultSidecar,
 };
-use nabu_core::models::{KnowledgeObject, ObjectContent, ObjectMetadata, ObjectType};
-use std::sync::Arc;
+use nabu_core::models::{KnowledgeObject, ObjectContent, ObjectType};
 use tempfile::tempdir;
 use uuid::Uuid;
 
@@ -121,7 +118,7 @@ fn build_graph_block_reference_edges() {
     );
     let obj_b = make_note("Target Block", "The content to embed.", Some("Target Block.md"));
 
-    let (_, edges) = build_graph_from_objects(&[obj_a.clone(), obj_b]);
+    let (_, edges) = build_graph_from_objects(&[obj_a.clone(), obj_b.clone()]);
 
     let block_edges: Vec<_> = edges
         .iter()
@@ -140,7 +137,7 @@ fn build_graph_multiple_wiki_links() {
     let obj_b = make_note("Note B", "B content.", Some("Note B.md"));
     let obj_c = make_note("Note C", "C content.", Some("Note C.md"));
 
-    let (_, edges) = build_graph_from_objects(&[obj_a.clone(), obj_b.clone(), obj_c]);
+    let (_, edges) = build_graph_from_objects(&[obj_a.clone(), obj_b.clone(), obj_c.clone()]);
 
     let refs: Vec<_> = edges.iter().filter(|e| e.relationship == "references").collect();
     // Two distinct targets (B and C), even though B is linked twice.
@@ -229,7 +226,11 @@ fn vaultgraph_rebuild_replaces_existing_state() {
 
     assert_eq!(graph.node_count(), 2, "should have only the 2 new nodes");
     assert_eq!(graph.edge_count(), 0, "no edges between new notes");
-    assert!(!graph.has_node(obj1.id), "old node should be removed");
+    assert_eq!(
+        graph.edges_for(obj1.id).len(),
+        0,
+        "old node should be removed by rebuild (no edges for it)"
+    );
 }
 
 /// `rebuild_from_objects` with persistent storage writes to disk and a
