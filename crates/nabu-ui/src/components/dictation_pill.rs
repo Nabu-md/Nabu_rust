@@ -36,6 +36,7 @@ pub fn DictationPill() -> Element {
     });
 
     let mut is_dictating = use_signal(|| false);
+    let mut is_processing = use_signal(|| false);
     let mut is_dragging = use_signal(|| false);
 
     let mode_options = vec![
@@ -100,13 +101,17 @@ pub fn DictationPill() -> Element {
             },
         }
 
-        // Recording pulse indicator
+        // Recording pulse indicator / processing spinner
         {if *is_dictating.read() {
             rsx! {
                 div { class: "flex space-x-1" }
                 div { class: "h-4 w-1 bg-white animate-pulse" }
                 div { class: "h-6 w-1 bg-white animate-pulse delay-75" }
                 div { class: "h-4 w-1 bg-white animate-pulse delay-150" }
+            }
+        } else if *is_processing.read() {
+            rsx! {
+                div { class: "text-xs text-gray-400", "Transcribing..." }
             }
         } else { rsx! {} }}
 
@@ -159,15 +164,67 @@ pub fn DictationPill() -> Element {
             "dictation" => rsx! {
                 Button {
                     variant: ButtonVariant::Primary,
+                    disabled: *is_processing.read(),
                     on_click: move |_: MouseEvent| {
+                        if *is_processing.read() {
+                            return;
+                        }
                         let current = *is_dictating.read();
-                        is_dictating.set(!current);
-                        let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-                        spawn_local(async move {
-                            let _ = crate::ipc::tauri_invoke("start_dictation", args).await;
-                        });
+                        if current {
+                            is_dictating.set(false);
+                            is_processing.set(true);
+                            let toasts_clone = toasts;
+                            let mut scratch_clone = scratchpad;
+                            spawn_local(async move {
+                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+                                match serde_wasm_bindgen::from_value::<String>(
+                                    crate::ipc::tauri_invoke("stop_dictation", args).await
+                                ) {
+                                    Ok(text) => {
+                                        if !text.is_empty() {
+                                            scratch_clone.with_mut(|s| {
+                                                if !s.is_empty() {
+                                                    s.push_str("\n");
+                                                }
+                                                s.push_str(&text);
+                                            });
+                                            toasts_clone.success("Dictation", "Transcription captured");
+                                        } else {
+                                            toasts_clone.warning("Dictation", "No speech detected");
+                                        }
+                                    },
+                                    Err(e) => {
+                                        toasts_clone.error("Dictation", format!("Failed to stop: {e}"));
+                                    },
+                                }
+                                is_processing.set(false);
+                            });
+                        } else {
+                            is_dictating.set(true);
+                            let toasts_clone = toasts;
+                            spawn_local(async move {
+                                let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+                                match serde_wasm_bindgen::from_value::<String>(
+                                    crate::ipc::tauri_invoke("start_dictation", args).await
+                                ) {
+                                    Ok(_status) => {
+                                        toasts_clone.success("Dictation", format!("Listening..."));
+                                    },
+                                    Err(e) => {
+                                        toasts_clone.error("Dictation", format!("Could not start: {e}"));
+                                        is_dictating.set(false);
+                                    },
+                                }
+                            });
+                        }
                     },
-                    {if *is_dictating.read() { "Stop" } else { "Record" }}
+                    {if *is_processing.read() {
+                        "Transcribing"
+                    } else if *is_dictating.read() {
+                        "Stop"
+                    } else {
+                        "Record"
+                    }}
                 }
             },
             "scratchpad" => rsx! {

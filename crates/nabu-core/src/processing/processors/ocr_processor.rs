@@ -496,11 +496,8 @@ mod tests {
 
         if cfg!(target_os = "macos") {
             if let Some(info) = ocr_info {
-                // Either success (warning is null) or failure (warning is Some)
                 let _ = info;
             }
-        } else {
-            assert!(ocr_info.is_some(), "ocr_info must be stored on non-macOS");
         } else {
             assert!(ocr_info.is_some(), "ocr_info must be stored on non-macOS");
             let warning = ocr_info

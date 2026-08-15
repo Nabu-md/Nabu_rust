@@ -12,7 +12,7 @@
 //! The service never fabricates text: every non-`Completed` terminal state is
 //! an explicit error/cancellation, never a "successful" transcription.
 
-use super::audio::{CapturedAudio, Microphone, MicrophoneFactory, SystemMicrophoneFactory};
+use super::audio::{Microphone, MicrophoneFactory, SystemMicrophoneFactory};
 use super::error::DictationError;
 use super::transcribe::{Transcriber, WhisperTranscriber};
 use std::path::PathBuf;
