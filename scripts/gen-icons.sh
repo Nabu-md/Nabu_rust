@@ -10,7 +10,7 @@
 #   2. Run `cargo tauri icon` from the master -> `src-tauri/icons/`
 #      (icns, ico, PNGs, plus iOS and Android sets).
 #   3. Sync derived assets that are also generated from the master:
-#      `resources/icon.png` (512) and the Safari extension PNGs + SVG embeds.
+#      `resources/icon.png` (512) and the browser extension PNGs + SVG embeds.
 #
 # Run from anywhere; resolves the repo root via its own location.
 set -euo pipefail
@@ -54,8 +54,8 @@ Image.open(src).convert("RGBA").resize((size, size), Image.LANCZOS).save(dst)
 print("    wrote", dst)
 PY
 
-echo "==> Syncing Safari extension icons (PNG + SVG embeds)"
-python3 - "$MASTER" "$ROOT/extensions/safari/icons" <<'PY'
+echo "==> Syncing browser extension icons (PNG + SVG embeds)"
+python3 - "$MASTER" "$ROOT/extensions/browser/icons" <<'PY'
 import base64, io, sys
 from PIL import Image
 

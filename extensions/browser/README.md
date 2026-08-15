@@ -1,11 +1,13 @@
-# Nabu Safari Extension
+# Nabu Browser Extension (Native Messaging Host)
 
-Safari Web Extension for capturing web content directly into Nabu.
+A generic Manifest-V2 web extension for capturing web content directly into
+Nabu, communicating with the Nabu native messaging host over standard native
+messaging.
 
 ## Architecture
 
 ```
-Safari Extension
+Browser Extension
     ↓ (native messaging)
 Native Messaging Host
     ↓ (Unix socket)
@@ -14,11 +16,16 @@ Tauri App (CaptureEngine)
 ProcessingPipeline → StorageManager
 ```
 
+The extension is a standard web extension (Manifest V2). It talks to the
+browser's native messaging API, which launches the standalone
+`native-messaging-host` binary and exchanges length-prefixed JSON messages.
+The host forwards validated captures to the Nabu Tauri app over a Unix socket.
+
 ## Components
 
-### Safari Extension
+### Browser Extension
 
-The browser extension provides three capture modes:
+The browser extension provides several capture modes:
 
 - **Capture Page**: Captures the current page URL, title, and favicon as a Bookmark
 - **Capture Selection**: Captures selected text with source URL and title as a Note
@@ -28,11 +35,11 @@ The browser extension provides three capture modes:
 
 A separate binary (`native-messaging-host`) that:
 
-1. Reads length-prefixed JSON messages from Safari via stdin
+1. Reads length-prefixed JSON messages from the browser via stdin
 2. Validates messages (command, payload size, capture type)
 3. Forwards validated messages to the Tauri app via Unix socket
 4. Reads responses from the Tauri app
-5. Writes length-prefixed JSON responses to Safari via stdout
+5. Writes length-prefixed JSON responses to the browser via stdout
 
 ### Tauri App Integration
 
@@ -63,29 +70,23 @@ chmod +x /usr/local/bin/nabu-native-messaging-host
 
 ### 3. Register the Native Messaging Host
 
-Create the Safari native messaging hosts directory if it doesn't exist:
+The browser launches the native messaging host via a host registration
+manifest named `com.nabu.capture.host`. Register it in your browser's native
+messaging hosts directory (e.g. `~/.config/google-chrome/NativeMessagingHosts/`
+for Chrome/Chromium, `~/.mozilla/native-messaging-hosts/` for Firefox).
 
-```bash
-mkdir -p ~/Library/Application\ Support/com.apple.Safari/NativeMessagingHosts
-```
+The canonical per-platform registration is part of the native host setup; see
+the native messaging host implementation for the exact manifest expected by
+Nabu.
 
-Copy the plist file:
+### 4. Load the Browser Extension
 
-```bash
-cp extensions/safari/native-messaging/com.nabu.capture.host.plist \
-   ~/Library/Application\ Support/com.apple.Safari/NativeMessagingHosts/
-```
-
-Update the plist to point to the correct binary path if needed.
-
-### 4. Install the Safari Extension
-
-1. Open Safari
-2. Go to Safari → Settings → Advanced
-3. Enable "Show Develop menu in menu bar"
-4. Go to Develop → Show Web Extension Builder
-5. Click "Add Extension" and select the `extensions/safari` folder
-6. Enable the extension in Safari Settings → Extensions
+1. Open the browser's extension management page (`chrome://extensions/` for
+   Chrome/Chromium, `edge://extensions/` for Edge, `about:addons` → "Debug
+   Add-ons" → "Load Temporary Add-on" for Firefox).
+2. Enable "Developer mode".
+3. Click "Load unpacked" and select the `extensions/browser` folder.
+4. Enable the extension.
 
 ## Security
 
@@ -176,14 +177,14 @@ Enable debug logging in the Tauri app to see capture requests and responses.
 
 ### Native messaging host not found
 
-Ensure the plist file is correctly installed in:
-```
-~/Library/Application Support/com.apple.Safari/NativeMessagingHosts/com.nabu.capture.host.plist
-```
+Ensure the host registration manifest `com.nabu.capture.host` is installed in
+your browser's native messaging hosts directory. The browser must be restarted
+after installing the manifest.
 
 ### Socket connection refused
 
-Ensure the Tauri app is running before attempting to capture. The socket server starts when the app launches.
+Ensure the Tauri app is running before attempting to capture. The socket server
+starts when the app launches.
 
 ### Permission denied
 

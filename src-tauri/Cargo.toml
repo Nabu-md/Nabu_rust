@@ -20,6 +20,10 @@ default-run = "app"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "native-messaging-host"
+path = "src/bin/native_messaging_host.rs"
+
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
 
