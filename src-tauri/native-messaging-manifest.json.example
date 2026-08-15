@@ -1,0 +1,9 @@
+{
+  "name": "com.nabu.capture.host",
+  "description": "Nabu native messaging host for browser capture",
+  "path": "<PATH_TO_PACKAGED_BINARY>",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://<EXTENSION_ID>/"
+  ]
+}
