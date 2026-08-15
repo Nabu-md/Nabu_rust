@@ -144,45 +144,47 @@ pub fn CalendarView(props: CalendarViewProps) -> Element {
             }
         }
 
-        if date_groups.is_empty() {
+        {if date_groups.is_empty() {
             rsx! {
                 div { class: "col-span-full flex items-center justify-center h-64 text-gray-500" }
                 "No items to display"
             }
         } else {
-            for (date_key_str, day_items) in &date_groups {
-                {
-                    let key = date_key_str.clone();
-                    let count = day_items.len();
-                    let items: Vec<Element> = day_items
-                        .iter()
-                        .take(3)
-                        .map(|obj| {
-                            let obj = obj.clone();
-                            let title = obj.title.clone();
-                            let on_open = on_open;
-                            rsx! {
-                                div {
-                                    class: "text-xs text-blue-400 truncate",
-                                    title: "{title}",
-                                    onclick: move |_: MouseEvent| on_open.call(obj.path.clone()),
+            rsx! {
+                for (date_key_str, day_items) in &date_groups {
+                    {
+                        let key = date_key_str.clone();
+                        let count = day_items.len();
+                        let items: Vec<Element> = day_items
+                            .iter()
+                            .take(3)
+                            .map(|obj| {
+                                let obj = obj.clone();
+                                let title = obj.title.clone();
+                                let on_open = on_open;
+                                rsx! {
+                                    div {
+                                        class: "text-xs text-blue-400 truncate",
+                                        title: "{title}",
+                                        onclick: move |_: MouseEvent| on_open.call(obj.path.clone()),
+                                    }
+                                    "{title}"
                                 }
-                                "{title}"
+                            })
+                            .collect();
+                        rsx! {
+                            div { class: "col-span-1 bg-gray-800 rounded border border-gray-700 p-2 min-h-[80px]" }
+                            div { class: "text-xs text-gray-400 mb-1", "{key}" }
+                            div { class: "text-xs text-gray-500", "{count} items" }
+                            div { class: "mt-1 space-y-1" }
+                            for item in items {
+                                {item}
                             }
-                        })
-                        .collect();
-                    rsx! {
-                        div { class: "col-span-1 bg-gray-800 rounded border border-gray-700 p-2 min-h-[80px]" }
-                        div { class: "text-xs text-gray-400 mb-1", "{key}" }
-                        div { class: "text-xs text-gray-500", "{count} items" }
-                        div { class: "mt-1 space-y-1" }
-                        for item in items {
-                            {item}
                         }
                     }
                 }
             }
-        }
+        }}
     }
 }
 

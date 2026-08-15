@@ -514,6 +514,23 @@ pub fn ReaderView() -> Element {
         None
     };
 
+    // Precompute class strings for buttons
+    let focus_btn_class = if focus_mode {
+        "px-2 py-1 text-xs rounded border bg-blue-900/50 border-blue-600 text-blue-300"
+    } else {
+        "px-2 py-1 text-xs rounded border border-gray-700 text-gray-400 hover:text-gray-200"
+    };
+    let settings_btn_class = if show_panel {
+        "px-2 py-1 text-xs rounded border bg-blue-900/50 border-blue-600 text-blue-300"
+    } else {
+        "px-2 py-1 text-xs rounded border border-gray-700 text-gray-400 hover:text-gray-200"
+    };
+    let settings_style = format!("max-width: {}px;", line_width);
+    let content_style = format!(
+        "max-width: {}px; font-size: {}px; line-height: 1.7;",
+        line_width, font_size
+    );
+
     // ── Setting handlers ──
     let on_font_size = {
         let settings_ref = settings;
@@ -567,37 +584,21 @@ pub fn ReaderView() -> Element {
 
             div {
                 class: "sticky top-0 z-10 flex items-center justify-between px-4 py-2 bg-gray-950/80 backdrop-blur border-b border-gray-800/50",
-
                 div { class: "flex items-center gap-3" }
                 span {
                     class: "text-sm text-gray-400 truncate max-w-xs",
                     "{active_path_str}",
                 }
-
                 div { class: "flex items-center gap-2" }
                 button {
-                    class: { format!(
-                        "px-2 py-1 text-xs rounded border {}",
-                        if focus_mode {
-                            "bg-blue-900/50 border-blue-600 text-blue-300"
-                        } else {
-                            "border-gray-700 text-gray-400 hover:text-gray-200"
-                        }
-                    ) },
+                    class: "{focus_btn_class}",
                     onclick: on_focus_toggle,
                     title: "Toggle focus mode",
                     {render_icon_view(Icon::Target) }
                     " Focus"
                 }
                 button {
-                    class: { format!(
-                        "px-2 py-1 text-xs rounded border {}",
-                        if show_panel {
-                            "bg-blue-900/50 border-blue-600 text-blue-300"
-                        } else {
-                            "border-gray-700 text-gray-400 hover:text-gray-200"
-                        }
-                    ) },
+                    class: "{settings_btn_class}",
                     onclick: move |_: MouseEvent| {
                         *show_settings.write_unchecked() = !*show_settings.peek();
                     },
@@ -607,76 +608,73 @@ pub fn ReaderView() -> Element {
             }
 
             // Settings panel
-            if show_panel {
-                div {
-                    class: "sticky top-12 z-10 mx-auto bg-gray-900 border border-gray-700 rounded-lg p-4 mb-4",
-                    style: "max-width: {line_width}px;",
+            {if show_panel {
+                rsx! {
+                    div {
+                        class: "sticky top-12 z-10 mx-auto bg-gray-900 border border-gray-700 rounded-lg p-4 mb-4",
+                        style: "{settings_style}",
 
-                    div { class: "space-y-3" }
-
-                    div {}
-                    label {
-                        class: "text-xs text-gray-500 uppercase tracking-wide",
-                        "Font Size"
-                    }
-                    div { class: "flex items-center gap-2 mt-1" }
-                    input {
-                        r#type: "range",
-                        min: "14",
-                        max: "28",
-                        value: "{font_size}",
-                        class: "flex-1",
-                        oninput: on_font_size,
-                    }
-                    span { class: "text-sm text-gray-400", "{font_size}px" }
-
-                    div {}
-                    label {
-                        class: "text-xs text-gray-500 uppercase tracking-wide",
-                        "Line Width"
-                    }
-                    div { class: "flex items-center gap-2 mt-1" }
-                    input {
-                        r#type: "range",
-                        min: "480",
-                        max: "960",
-                        step: "40",
-                        value: "{line_width}",
-                        class: "flex-1",
-                        oninput: on_line_width,
-                    }
-                    span { class: "text-sm text-gray-400", "{line_width}px" }
-
-                    div {}
-                    label {
-                        class: "text-xs text-gray-500 uppercase tracking-wide",
-                        "Theme"
-                    }
-                    div { class: "flex gap-2 mt-1" }
-                    {
-                        let themes = ["dark", "sepia", "light"];
-                        rsx! {
-                            for theme_name in themes {
-                                {
-                                    let t = (*theme_name).to_string();
-                                    let is_active = theme == t;
-                                    let settings_for_btn = settings;
-                                    rsx! {
-                                        button {
-                                            class: { format!(
-                                                "px-3 py-1 text-xs rounded border {}",
-                                                if is_active {
-                                                    "bg-blue-900/50 border-blue-600 text-blue-300"
-                                                } else {
-                                                    "border-gray-700 text-gray-400 hover:text-gray-200"
-                                                }
-                                            ) },
-                                            onclick: move |_: MouseEvent| {
-                                                settings_for_btn.write_unchecked().theme = t.clone();
-                                                let current = settings_for_btn.read().clone();
-                                                persist_reader_settings(&current);
-                                            },
-                                            "{t}"
+                        div { class: "space-y-3" }
+                        div {}
+                        label {
+                            class: "text-xs text-gray-500 uppercase tracking-wide",
+                            "Font Size"
+                        }
+                        div { class: "flex items-center gap-2 mt-1" }
+                        input {
+                            r#type: "range",
+                            min: "14",
+                            max: "28",
+                            value: "{font_size}",
+                            class: "flex-1",
+                            oninput: on_font_size,
+                        }
+                        span { class: "text-sm text-gray-400", "{font_size}px" }
+                        div {}
+                        label {
+                            class: "text-xs text-gray-500 uppercase tracking-wide",
+                            "Line Width"
+                        }
+                        div { class: "flex items-center gap-2 mt-1" }
+                        input {
+                            r#type: "range",
+                            min: "480",
+                            max: "960",
+                            step: "40",
+                            value: "{line_width}",
+                            class: "flex-1",
+                            oninput: on_line_width,
+                        }
+                        span { class: "text-sm text-gray-400", "{line_width}px" }
+                        div {}
+                        label {
+                            class: "text-xs text-gray-500 uppercase tracking-wide",
+                            "Theme"
+                        }
+                        div { class: "flex gap-2 mt-1" }
+                        {
+                            let themes = ["dark", "sepia", "light"];
+                            rsx! {
+                                for theme_name in themes {
+                                    {
+                                        let t = (*theme_name).to_string();
+                                        let is_active = theme == t;
+                                        let settings_for_btn = settings;
+                                        let btn_class = if is_active {
+                                            "px-3 py-1 text-xs rounded border bg-blue-900/50 border-blue-600 text-blue-300"
+                                        } else {
+                                            "px-3 py-1 text-xs rounded border border-gray-700 text-gray-400 hover:text-gray-200"
+                                        };
+                                        rsx! {
+                                            button {
+                                                class: "{btn_class}",
+                                                onclick: move |_: MouseEvent| {
+                                                    settings_for_btn.write_unchecked().theme = t.clone();
+                                                    let current = settings_for_btn.read().clone();
+                                                    persist_reader_settings(&current);
+                                                },
+                                                "{t}"
+                                            }
                                         }
                                     }
                                 }
@@ -684,14 +682,15 @@ pub fn ReaderView() -> Element {
                         }
                     }
                 }
-            }
+            } else {
+                rsx! {}
+            }}
 
             // Content area
             div {
                 class: "reader-content mx-auto px-8 py-8",
-                style: "max-width: {line_width}px; font-size: {font_size}px; line-height: 1.7;",
-
-                if active_path_str.is_empty() {
+                style: "{content_style}",
+                {if active_path_str.is_empty() {
                     rsx! {
                         div {
                             class: "flex h-full items-center justify-center py-20",
@@ -717,9 +716,9 @@ pub fn ReaderView() -> Element {
                         ErrorPanel {
                             title: "Couldn't open note".to_string(),
                             message: "The note content could not be loaded.".to_string(),
-                            details: has_error,
+                            details: load_error_opt,
                             recovery: "Make sure the note is accessible and the backend is running, then retry.".to_string(),
-                            on_retry: on_retry_load,
+                            on_retry: Some(on_retry_load),
                         }
                     }
                 } else if phase == ReaderPhase::Empty {
@@ -734,15 +733,14 @@ pub fn ReaderView() -> Element {
                         }
                     }
                 } else {
-                    // ReaderPhase::Loaded
                     let html = content_html.clone().unwrap_or_default();
                     rsx! {
                         div {
                             class: "{prose_class}",
-                            innerhtml: html,
+                            dangerous_inner_html: html,
                         }
                     }
-                }
+                }}
             }
         }
     }

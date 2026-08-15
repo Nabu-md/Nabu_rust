@@ -343,6 +343,9 @@ pub fn ComparisonView() -> Element {
     let sel_version_a = version_a.read().clone();
     let sel_version_b = version_b.read().clone();
 
+    let sel_version_a_val = sel_version_a.as_deref().unwrap_or("");
+    let sel_version_b_val = sel_version_b.as_deref().unwrap_or("");
+
     let diff_state_val = *diff_state.read();
     let diff_err_opt = diff_error.read().clone();
     let rows_opt = diff_rows.read().clone();
@@ -506,28 +509,30 @@ pub fn ComparisonView() -> Element {
                     }
                     select {
                         class: "w-full bg-gray-800 text-gray-100 rounded px-2 py-1.5 text-sm border border-gray-700",
-                        value: "{sel_version_a.as_deref().unwrap_or("")}",
+                        value: "{sel_version_a_val}",
                         onchange: move |ev: FormEvent| {
                             let val = ev.value();
                             version_a.set(if val.is_empty() { None } else { Some(val) });
                         },
                         option { value: "", "Current" }
-                        if vs == LoadState::Loading || vs == LoadState::Idle {
+                        {if vs == LoadState::Loading || vs == LoadState::Idle {
                             rsx! {}
                         } else {
-                            for v in versions_list.iter().rev() {
-                                {
-                                    let id = v.id.clone();
-                                    let label = format!(
-                                        "{} ({} chars)",
-                                        &v.created_at, v.char_count
-                                    );
-                                    rsx! {
-                                        option { value: "{id}", "{label}" }
+                            rsx! {
+                                for v in versions_list.iter().rev() {
+                                    {
+                                        let id = v.id.clone();
+                                        let label = format!(
+                                            "{} ({} chars)",
+                                            &v.created_at, v.char_count
+                                        );
+                                        rsx! {
+                                            option { value: "{id}", "{label}" }
+                                        }
                                     }
                                 }
                             }
-                        }
+                        }}
                     }
 
                     div {}
@@ -537,7 +542,7 @@ pub fn ComparisonView() -> Element {
                     }
                     select {
                         class: "w-full bg-gray-800 text-gray-100 rounded px-2 py-1.5 text-sm border border-gray-700",
-                        value: "{sel_version_b.as_deref().unwrap_or("")}",
+                        value: "{sel_version_b_val}",
                         onchange: move |ev: FormEvent| {
                             let val = ev.value();
                             version_b.set(if val.is_empty() { None } else { Some(val) });
@@ -566,15 +571,19 @@ pub fn ComparisonView() -> Element {
                     onclick: on_compare,
                     "Compare"
                 }
-                if diff_count > 0 {
-                    span { class: "text-xs text-gray-400", "{diff_count} differences" }
-                }
+                {if diff_count > 0 {
+                    rsx! {
+                        span { class: "text-xs text-gray-400", "{diff_count} differences" }
+                    }
+                } else {
+                    rsx! {}
+                }}
             }
 
             // ── Diff content ──
             div { class: "flex-1 overflow-hidden" }
 
-            if phase == ComparisonPhase::Idle {
+            {if phase == ComparisonPhase::Idle {
                 rsx! {
                     div {
                         class: "h-full flex items-center justify-center",
@@ -596,9 +605,9 @@ pub fn ComparisonView() -> Element {
                     ErrorPanel {
                         title: "Comparison failed".to_string(),
                         message: "Could not compute the diff.".to_string(),
-                        details: diff_err,
+                        details: diff_err_opt,
                         recovery: "Make sure both notes exist and are accessible.".to_string(),
-                        on_retry: on_retry,
+                        on_retry: Some(on_retry),
                     }
                 }
             } else if phase == ComparisonPhase::NoDiff {
@@ -613,18 +622,15 @@ pub fn ComparisonView() -> Element {
                     }
                 }
             } else {
-                // ComparisonPhase::Loaded
-                {
-                    let rows = rows_opt.clone().unwrap_or_default();
-                    rsx! {
-                        DiffView {
-                            rows: rows,
-                            old_label: label_a,
-                            new_label: label_b,
-                        }
+                let rows = rows_opt.clone().unwrap_or_default();
+                rsx! {
+                    DiffView {
+                        rows: rows,
+                        old_label: label_a,
+                        new_label: label_b,
                     }
                 }
-            }
+           }}
         }
     }
 }

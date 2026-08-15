@@ -307,10 +307,10 @@ fn mutate_single(
 
 #[component]
 pub fn ReadingQueue() -> Element {
-    let mut items = use_signal(|| Vec::<QueueItem>::new());
-    let mut loaded = use_signal(|| false);
-    let mut load_error = use_signal(|| None::<String>);
-    let mut filter = use_signal(QueueFilter::default);
+    let items = use_signal(|| Vec::<QueueItem>::new());
+    let loaded = use_signal(|| false);
+    let load_error = use_signal(|| None::<String>);
+    let filter = use_signal(QueueFilter::default);
     let toasts = use_toast();
 
     let mut initialized = use_signal(|| false);
@@ -332,9 +332,10 @@ pub fn ReadingQueue() -> Element {
     // ── Handlers ──
     let on_filter_change = move |ev: FormEvent| {
         let mut f = filter;
+        let current = f.read().clone();
         f.set(QueueFilter {
             search: ev.value(),
-            ..f.read().clone()
+            ..current
         });
     };
 
@@ -437,7 +438,7 @@ pub fn ReadingQueue() -> Element {
 
     let batch_set_status = move |status: QueueStatus| {
         let ids = {
-            let mut a = items.read().clone();
+            let a = items.read().clone();
             selected_ids(&a)
         };
         if ids.is_empty() {

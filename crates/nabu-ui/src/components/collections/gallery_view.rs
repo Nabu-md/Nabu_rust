@@ -87,17 +87,19 @@ pub fn GalleryView(props: GalleryViewProps) -> Element {
 
     rsx! {
         div { class: "gallery-view p-4 overflow-y-auto h-full" }
-        if filtered.is_empty() {
+        {if filtered.is_empty() {
             rsx! {
                 div { class: "flex items-center justify-center h-64 text-gray-500" }
                 "No items to display"
             }
         } else {
-            div { class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" }
-            for card in cards {
-                {card}
+            rsx! {
+                div { class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" }
+                for card in cards {
+                    {card}
+                }
             }
-        }
+        }}
     }
 }
 
