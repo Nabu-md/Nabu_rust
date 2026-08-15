@@ -105,7 +105,7 @@ fn basename(path: &str) -> String {
 }
 
 /// Opens a note: switch to editor, record the visit, open a tab.
-fn open_note(nav: NavContext, ws: WorkspaceContext, path: &str) {
+fn open_note(mut nav: NavContext, ws: WorkspaceContext, path: &str) {
     open_tab(ws, path);
     record_recent_note(nav, path);
     nav.view_mode.set(ViewMode::Editor);
@@ -152,13 +152,13 @@ fn load_dashboard(
 
 #[component]
 pub fn Dashboard() -> Element {
-    let nav = use_nav();
+    let mut nav = use_nav();
     let ws = use_workspace();
 
-    let stats = use_signal(|| None::<Stats>);
-    let stats_state = use_signal(LoadState::default);
-    let inbox_items = use_signal(Vec::<InboxRow>::new);
-    let inbox_state = use_signal(LoadState::default);
+    let mut stats = use_signal(|| None::<Stats>);
+    let mut stats_state = use_signal(LoadState::default);
+    let mut inbox_items = use_signal(Vec::<InboxRow>::new);
+    let mut inbox_state = use_signal(LoadState::default);
 
     // Initial load (runs once).
     {
@@ -267,21 +267,27 @@ fn render_section(
     }
 }
 
-fn render_quick_actions(nav: NavContext, ws: WorkspaceContext) -> Element {
-    let vm_search = nav.view_mode;
-    let vm_inbox = nav.view_mode;
-    let vm_stats = nav.view_mode;
+fn render_quick_actions(mut nav: NavContext, ws: WorkspaceContext) -> Element {
+    let mut vm_search = nav.view_mode;
+    let mut vm_inbox = nav.view_mode;
+    let mut vm_stats = nav.view_mode;
     rsx! {
         div { class: "grid grid-cols-2 md:grid-cols-4 gap-3" }
         button {
             class: "quick-action flex flex-col items-center gap-2 rounded-lg bg-gray-800/50 px-4 py-3 border border-gray-700 hover:bg-gray-700/50 transition-colors text-center",
-            onclick: move |_: MouseEvent| { open_today_note(nav, ws); },
+            onclick: move |_: MouseEvent| {
+                let mut nv = nav;
+                open_today_note(nv, ws);
+            },
             {render_icon_view(Icon::Clock)}
             span { class: "text-xs text-gray-300", "Today's Note" }
         }
         button {
             class: "quick-action flex flex-col items-center gap-2 rounded-lg bg-gray-800/50 px-4 py-3 border border-gray-700 hover:bg-gray-700/50 transition-colors text-center",
-            onclick: move |_: MouseEvent| { open_new_note(nav, ws); },
+            onclick: move |_: MouseEvent| {
+                let mut nv = nav;
+                open_new_note(nv, ws);
+            },
             {render_icon_view(Icon::FilePlus)}
             span { class: "text-xs text-gray-300", "New Note" }
         }
@@ -306,7 +312,7 @@ fn render_quick_actions(nav: NavContext, ws: WorkspaceContext) -> Element {
     }
 }
 
-fn open_today_note(nav: NavContext, ws: WorkspaceContext) {
+fn open_today_note(mut nav: NavContext, ws: WorkspaceContext) {
     let date = today_str();
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({ "date": date })).unwrap();
     spawn_local(async move {
@@ -320,7 +326,7 @@ fn open_today_note(nav: NavContext, ws: WorkspaceContext) {
     });
 }
 
-fn open_new_note(nav: NavContext, ws: WorkspaceContext) {
+fn open_new_note(mut nav: NavContext, ws: WorkspaceContext) {
     let path = "untitled.md".to_string();
     let args = serde_wasm_bindgen::to_value(&serde_json::json!({
         "path": path,
@@ -541,7 +547,7 @@ fn render_searches(searches: &[String], nav: NavContext, _ws: WorkspaceContext) 
     }
 }
 
-fn render_search_chip(q: &str, vm: Signal<ViewMode>, sq: Signal<String>) -> Element {
+fn render_search_chip(q: &str, mut vm: Signal<ViewMode>, mut sq: Signal<String>) -> Element {
     let query = q.to_string();
     rsx! {
         button {

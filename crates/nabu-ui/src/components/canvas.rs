@@ -430,7 +430,7 @@ fn save_canvas(s: CanvasState) {
 
 /// Creates a new canvas: optimistically selects it, then persists it in the
 /// background. On persistence failure it reverts the optimistic state.
-fn create_canvas(mut s: CanvasState, name: String) {
+fn create_canvas(s: CanvasState, name: String) {
     if name.trim().is_empty() {
         s.toasts.error("Invalid name", "Canvas name cannot be empty.");
         return;
@@ -561,7 +561,7 @@ pub fn CanvasView() -> Element {
     let save_state = use_signal(|| SaveState::Idle);
     let save_error = use_signal(|| None::<String>);
 
-    let mut show_new_dialog = use_signal(|| false);
+    let show_new_dialog = use_signal(|| false);
 
     let s = CanvasState {
         list_data,
@@ -577,7 +577,7 @@ pub fn CanvasView() -> Element {
     };
 
     // Initial list load on mount (mirrors `GraphView`'s mount pattern).
-    let mut initialized = use_signal(|| false);
+    let initialized = use_signal(|| false);
     if !*initialized.read() {
         *initialized.write_unchecked() = true;
         load_list(s);
@@ -592,8 +592,6 @@ pub fn CanvasView() -> Element {
     let canvas_phase =
         classify_canvas(*canvas_state.read(), sel_canvas.as_ref(), active.as_deref());
     let canvas_err = canvas_error.read().clone();
-    let save_st = *save_state.read();
-    let save_err_val = save_error.read().clone();
     let notes_index = nav.notes_index.read().clone();
 
     let on_list_retry = move |_: ()| {
@@ -675,11 +673,10 @@ pub fn CanvasView() -> Element {
             for entry in &notes_index {
                 {
                     let title = entry.title.clone();
-                    let path = entry.path.clone();
                     let entry_clone = entry.clone();
                     rsx! {
                         div {
-                            key: path.clone(),
+                            key: entry.path.clone(),
                             class: "px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-800 truncate",
                             title: "Double-click to add to canvas",
                             ondoubleclick: move |_: MouseEvent| {
@@ -937,10 +934,9 @@ fn CanvasSurface(
         // Groups (rendered behind nodes).
         for g in &c.groups {
             {
-                let gid = g.id.clone();
                 rsx! {
                     div {
-                        key: gid,
+                        key: g.id.clone(),
                         class: "absolute border-2 border-dashed border-gray-700 rounded-lg bg-gray-800/20",
                         style: "left: {g.x}px; top: {g.y}px; width: {g.width}px; height: {g.height}px;",
                     }
@@ -955,10 +951,13 @@ fn CanvasSurface(
             key: c.edges.len(),
             for seg in &edge_segs {
                 {
-                    let (eid, x1, y1, x2, y2) = (seg.0.clone(), seg.1, seg.2, seg.3, seg.4);
+                    let x1 = seg.1;
+                    let y1 = seg.2;
+                    let x2 = seg.3;
+                    let y2 = seg.4;
                     rsx! {
                         line {
-                            key: eid,
+                            key: seg.0.clone(),
                             x1: "{x1}",
                             y1: "{y1}",
                             x2: "{x2}",
