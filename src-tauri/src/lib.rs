@@ -433,7 +433,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(settings_store)
-        .manage(crate::dictation::DictationService::new())
+        .manage(crate::dictation::DictationService::default())
         .invoke_handler(tauri::generate_handler![
             crate::commands::check_vault_exists,
             crate::commands::get_current_vault,

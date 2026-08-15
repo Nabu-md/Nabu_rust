@@ -37,6 +37,25 @@ pub struct DictationResult {
     pub text: Option<String>,
 }
 
+impl std::fmt::Display for DictationState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DictationState::Idle => write!(f, "idle"),
+            DictationState::Recording => write!(f, "recording"),
+            DictationState::Processing => write!(f, "processing"),
+            DictationState::Completed { text } => {
+                write!(f, "completed")?;
+                if !text.is_empty() {
+                    write!(f, ": {text}")?;
+                }
+                Ok(())
+            }
+            DictationState::Failed { error } => write!(f, "failed: {error}"),
+            DictationState::Cancelled => write!(f, "cancelled"),
+        }
+    }
+}
+
 struct ActiveSession {
     mic: Box<dyn Microphone>,
 }
