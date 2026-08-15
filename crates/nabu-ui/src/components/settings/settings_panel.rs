@@ -629,7 +629,7 @@ fn files_settings(settings: Signal<AppSettings>) -> Element {
     }
 }
 
-fn import_export_settings(settings: Signal<AppSettings>) -> Element {
+fn import_export_settings(settings: Signal<AppSettings>, toasts: ToastContext) -> Element {
     rsx! {
         h2 { class: "text-xl font-bold mb-4", "Import & Export" }
         div { class: "space-y-4" }
@@ -651,8 +651,35 @@ fn import_export_settings(settings: Signal<AppSettings>) -> Element {
         h3 { class: "text-lg font-semibold mb-2", "Settings Migration" }
         p { class: "text-sm text-gray-400 mb-4", "Export or import your settings between devices." }
         div { class: "flex gap-2" }
-        Button { {"Export Settings"} }
-        Button { {"Import Settings"} }
+        Button {
+            on_click: move |_: MouseEvent| {
+                let toasts_copy = toasts;
+                spawn_local(async move {
+                    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+                    match crate::ipc::tauri_invoke("settings_export", args).await {
+                        Ok(result) => {
+                            if let Ok(data) = serde_wasm_bindgen::from_value::<Vec<u8>>(result) {
+                                if let Ok(text) = String::from_utf8(data.clone()) {
+                                    download_json("nabu-settings.json", &text);
+                                    toasts_copy.success("Settings exported", "Downloaded nabu-settings.json.");
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            toasts_copy.error("Export failed", e.message());
+                        }
+                    }
+                });
+            },
+            variant: ButtonVariant::Secondary,
+            {"Export Settings"}
+        }
+        Button {
+            on_click: move |_: MouseEvent| {
+                open_file_import(settings, toasts);
+            },
+            {"Import Settings"}
+        }
     }
 }
 
@@ -735,7 +762,15 @@ fn keyboard_shortcuts_settings(settings: Signal<AppSettings>) -> Element {
     }
 }
 
-fn advanced_settings(settings: Signal<AppSettings>) -> Element {
+fn diagnostics_settings(_settings: Signal<AppSettings>) -> Element {
+    rsx! {
+        crate::components::diagnostics::DiagnosticsPanel {
+            resource_id: "".to_string(),
+        }
+    }
+}
+
+fn advanced_settings(settings: Signal<AppSettings>, toasts: ToastContext, confirm_reset: Signal<bool>) -> Element {
     rsx! {
         h2 { class: "text-xl font-bold mb-4", "Advanced" }
         div { class: "space-y-4" }
@@ -750,7 +785,13 @@ fn advanced_settings(settings: Signal<AppSettings>) -> Element {
             |s| s.experimental_features, |s, v| s.experimental_features = v)}
 
         div { class: "mt-6 pt-4 border-t border-gray-700" }
-        Button { {"Reset to Defaults"} }
+        Button {
+            on_click: move |_: MouseEvent| {
+                confirm_reset.set(true);
+            },
+            variant: ButtonVariant::Danger,
+            {"Reset to Defaults"}
+        }
     }
 }
 
