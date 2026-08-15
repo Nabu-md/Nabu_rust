@@ -1,178 +1,318 @@
-//! Collection Container component.
+//! Collection Container component (Dioxus).
 //!
-//! Production-ready collection container that manages view state,
-//! filtering, sorting, and data projection for all collection views.
-//! Views are projections of existing KnowledgeObjects — views never own data.
+//! Manages view state, filtering, and data projection for all four collection
+//! views. Data is loaded via the `notes_index` Tauri command and projected
+//! into the active view (Table, Board, Gallery, Calendar).
+//!
+//! Views are projections of existing notes — the container never owns data.
 
-use leptos::prelude::*;
-use crate::components::collections::shared::types::CollectionView;
+use crate::components::collections::board_view::{BoardColumn, BoardFilter, BoardView};
+use crate::components::collections::calendar_view::{CalendarFilter, CalendarView, CalendarViewMode};
+use crate::components::collections::gallery_view::{GalleryFilter, GalleryView};
+use crate::components::collections::shared::types::{CollectionItem, CollectionView};
 use crate::components::collections::shared::context::SearchState;
+use crate::components::collections::table_view::{ColumnConfig, TableFilter, TableView};
 use crate::components::collections::view_switcher::ViewSwitcher;
-use crate::components::collections::table_view::{TableView, TableFilter, ColumnConfig};
-use crate::components::collections::board_view::{BoardView, BoardFilter, BoardColumn};
-use crate::components::collections::gallery_view::{GalleryView, GalleryFilter};
-use crate::components::collections::calendar_view::{CalendarView, CalendarFilter};
-use crate::models::knowledge_object::KnowledgeObject;
+use crate::components::contexts::{open_tab, use_workspace};
+use crate::components::ui::feedback::{use_toast, ErrorPanel, SkeletonList, ToastContext};
+use crate::components::ui::icons::{render_icon_view, Icon};
+use crate::components::ui::info::EmptyState;
+use dioxus::prelude::*;
+use serde_wasm_bindgen;
+use wasm_bindgen_futures::spawn_local;
 
-#[component]
-pub fn CollectionContainer() -> impl IntoView {
-    let (view, set_view) = signal(CollectionView::Table);
-    let (search_state, set_search_state) = signal(SearchState::default());
-    let (objects, set_objects) = signal(vec![]);
-    let (loaded, set_loaded) = signal(false);
-    let (load_error, set_load_error) = signal(None::<String>);
-    let toasts = crate::components::ui::feedback::use_toast();
+/// Container-level load state classification (mirrors reading_queue's pattern).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum LoadPhase {
+    Loading,
+    Error,
+    Empty,
+    Ready,
+}
 
-    // Load objects on mount. `retry` is a plain fn so it can be re-run from
-    // the error panel's Retry button.
-    fn fetch_objects() -> Vec<crate::models::knowledge_object::KnowledgeObject> {
-        vec![]
+fn classify(loaded: bool, had_error: bool, items: &[CollectionItem]) -> LoadPhase {
+    if !loaded {
+        return LoadPhase::Loading;
     }
-    let do_load = {
-        let set_objects = set_objects;
-        let set_loaded = set_loaded;
-        let set_load_error = set_load_error;
-        let toasts = toasts;
-        Callback::new(move |_| {
-            set_loaded.set(false);
-            set_load_error.set(None);
-            let set_objects = set_objects;
-            let set_loaded = set_loaded;
-            let set_load_error = set_load_error;
-            let toasts = toasts;
-            spawn_local(async move {
-                let res = crate::ipc::tauri_invoke(
-                    "fetch_objects",
-                    serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap(),
-                )
-                .await;
-                match serde_wasm_bindgen::from_value::<Vec<crate::models::knowledge_object::KnowledgeObject>>(res) {
-                    Ok(objs) => set_objects.set(objs),
+    if had_error {
+        return LoadPhase::Error;
+    }
+    if items.is_empty() {
+        LoadPhase::Empty
+    } else {
+        LoadPhase::Ready
+    }
+}
+
+/// Loads the note index from the backend via `notes_index`.
+fn load_items(
+    items: Signal<Vec<CollectionItem>>,
+    loaded: Signal<bool>,
+    had_error: Signal<bool>,
+    toasts: ToastContext,
+) {
+    loaded.set(false);
+    had_error.set(false);
+
+    let mut items = items;
+    let mut loaded = loaded;
+    let mut had_error = had_error;
+
+    spawn_local(async move {
+        let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap_or_default();
+        match crate::ipc::tauri_invoke_safe("notes_index", args).await {
+            Ok(Some(val)) => {
+                match serde_wasm_bindgen::from_value::<Vec<CollectionItem>>(val) {
+                    Ok(notes) => {
+                        items.set(notes);
+                    }
                     Err(e) => {
-                        set_load_error.set(Some(e.to_string()));
-                        toasts.error("Couldn't load collections", "Your collections could not be loaded — try again.");
+                        had_error.set(true);
+                        toasts.error(
+                            "Couldn't load collections",
+                            &format!("The note index could not be parsed: {}", e),
+                        );
                     }
                 }
-                set_loaded.set(true);
-            });
-        })
-    };
-    do_load.run(());
+            }
+            Ok(None) => {
+                had_error.set(true);
+                toasts.error("Couldn't load collections", "The note index returned no data.");
+            }
+            Err(e) => {
+                had_error.set(true);
+                toasts.error("Couldn't load collections", &e.message());
+            }
+        }
+        loaded.set(true);
+    });
+}
 
-    let on_view_change = {
-        let view = view.clone();
-        Callback::from(move |new_view| view.set(new_view))
-    };
+#[component]
+pub fn CollectionContainer() -> Element {
+    let ws = use_workspace();
+    let toasts = use_toast();
 
-    let table_filter = move || TableFilter {
-        query: search_state.get().query.clone(),
-        object_type: None,
-        sort_by: "modified".to_string(),
-        sort_ascending: false,
-    };
+    let mut view = use_signal(|| CollectionView::Table);
+    let mut search_state = use_signal(|| SearchState::default());
+    let mut items = use_signal(Vec::<CollectionItem>::new);
+    let mut loaded = use_signal(|| false);
+    let mut had_error = use_signal(|| false);
 
-    let board_filter = move || BoardFilter {
-        query: search_state.get().query.clone(),
-        object_type: None,
-        group_by: "status".to_string(),
-    };
+    let mut initialized = use_signal(|| false);
+    if !*initialized.read() {
+        initialized.set(true);
+        load_items(items, loaded, had_error, toasts);
+    }
 
-    let gallery_filter = move || GalleryFilter {
-        query: search_state.get().query.clone(),
-        object_type: None,
-        sort_by: "modified".to_string(),
-        sort_ascending: false,
-    };
-
-    let calendar_filter = move || CalendarFilter {
-        query: search_state.get().query.clone(),
-        object_type: None,
-        view_mode: crate::components::collections::calendar_view::CalendarViewMode::Month,
+    let on_view_change = move |new_view: CollectionView| {
+        view.set(new_view);
     };
 
-    let table_columns = move || vec![
-        ColumnConfig { key: "title".to_string(), label: "Title".to_string(), visible: true, sortable: true, width: Some("flex-1".to_string()) },
-        ColumnConfig { key: "type".to_string(), label: "Type".to_string(), visible: true, sortable: true, width: Some("w-24".to_string()) },
-        ColumnConfig { key: "modified".to_string(), label: "Modified".to_string(), visible: true, sortable: true, width: Some("w-32".to_string()) },
-        ColumnConfig { key: "author".to_string(), label: "Author".to_string(), visible: true, sortable: true, width: Some("w-24".to_string()) },
-        ColumnConfig { key: "words".to_string(), label: "Words".to_string(), visible: false, sortable: true, width: None },
-    ];
+    let on_query_change = move |ev: FormEvent| {
+        search_state.set(SearchState {
+            query: ev.value(),
+        });
+    };
 
-    let board_columns = move || vec![
-        BoardColumn { id: "reading".to_string(), title: "Reading".to_string(), items: vec![] },
-        BoardColumn { id: "completed".to_string(), title: "Completed".to_string(), items: vec![] },
-        BoardColumn { id: "archived".to_string(), title: "Archived".to_string(), items: vec![] },
-    ];
+    let on_retry = {
+        let items = items;
+        let loaded = loaded;
+        let had_error = had_error;
+        move |_: MouseEvent| {
+            load_items(items, loaded, had_error, toasts);
+        }
+    };
 
-    view! {
-        <div class="collection-container">
-            <ViewSwitcher current_view={*view} on_change={on_view_change} />
-            {move || if let Some(err) = load_error.get() {
-                view! {
-                    <crate::components::ui::feedback::ErrorPanel
-                        title="Couldn't load collections".to_string()
-                        message="Something went wrong while reading your knowledge objects.".to_string()
-                        details=Some(err)
-                        recovery=Some("Check that your vault is accessible, then try again.".to_string())
-                        on_retry=Some(do_load)
-                    />
-                }.into_any()
-            } else if !loaded.get() {
-                view! {
-                    <div class="p-6">
-                        <crate::components::ui::feedback::SkeletonList rows=Some(6) />
-                    </div>
-                }.into_any()
-            } else if objects.get().is_empty() {
-                view! {
-                    <div class="p-10 flex justify-center">
-                        <crate::components::ui::info::EmptyState
-                            icon=crate::components::ui::icons::Icon::FolderTree
-                            title="No knowledge objects yet".to_string()
-                            description="Collections show your structured knowledge once you start adding objects.".to_string()
-                        ></crate::components::ui::info::EmptyState>
-                    </div>
-                }.into_any()
-            } else {
-                view! {
-                    {
-                        match *view {
-                            CollectionView::Table => view! {
-                                <TableView
-                                    objects={objects.get()}
-                                    columns={table_columns()}
-                                    filter={table_filter()}
-                                    on_filter_change=Callback::new(|_| {})
-                                    on_sort=Callback::new(|_| {})
-                                />
-                            }.into_any(),
-                            CollectionView::Board => view! {
-                                <BoardView
-                                    objects={objects.get()}
-                                    columns={board_columns()}
-                                    filter={board_filter()}
-                                    on_filter_change=Callback::new(|_| {})
-                                    on_move_item=Callback::new(|_| {})
-                                />
-                            }.into_any(),
-                            CollectionView::Gallery => view! {
-                                <GalleryView
-                                    objects={objects.get()}
-                                    filter={gallery_filter()}
-                                    on_filter_change=Callback::new(|_| {})
-                                />
-                            }.into_any(),
-                            CollectionView::Calendar => view! {
-                                <CalendarView
-                                    objects={objects.get()}
-                                    filter={calendar_filter()}
-                                    on_filter_change=Callback::new(|_| {})
-                                />
-                            }.into_any(),
+    let on_open_tab = move |path: String| {
+        open_tab(ws, &path);
+    };
+
+    let phase = classify(
+        *loaded.read(),
+        *had_error.read(),
+        &items.read(),
+    );
+
+    let search_state_cloned = search_state.read().clone();
+
+    rsx! {
+        div { class: "collection-container flex h-full flex-col bg-gray-950 text-gray-100" }
+
+        ViewSwitcher {
+            current_view: *view.read(),
+            on_change: on_view_change,
+        }
+
+        div { class: "flex items-center gap-3 px-4 py-2 border-b border-gray-800" }
+        span { class: "text-xs text-gray-500 ml-2", "Search:" }
+        input {
+            r#type: "text",
+            placeholder: "Filter notes...",
+            class: "flex-1 bg-gray-800 text-gray-100 rounded px-3 py-1.5 text-sm border border-gray-700 focus:border-blue-500 focus:outline-none",
+            value: "{search_state_cloned.query}",
+            oninput: on_query_change,
+        }
+
+        div { class: "flex-1 overflow-hidden" }
+
+        {match phase {
+            LoadPhase::Loading => rsx! {
+                div { class: "p-4" }
+                SkeletonList { rows: 6 }
+            },
+            LoadPhase::Error => rsx! {
+                div { class: "p-4" }
+                ErrorPanel {
+                    title: "Couldn't load collections".to_string(),
+                    message: "Something went wrong while reading your knowledge objects.".to_string(),
+                    details: None,
+                    on_retry: Some(on_retry),
+                    recovery: "Check that your vault is accessible, then try again.".to_string(),
+                }
+            },
+            LoadPhase::Empty => rsx! {
+                div { class: "h-full flex items-center justify-center p-6" }
+                EmptyState {
+                    icon: Some(Icon::FolderTree),
+                    title: "No knowledge objects yet".to_string(),
+                    description: "Collections show your structured knowledge once you start adding objects.".to_string(),
+                }
+            },
+            LoadPhase::Ready => {
+                let current_view = *view.read();
+                let current_items = items.read().clone();
+                let current_search = search_state.read().clone();
+                let q = current_search.query.clone();
+
+                match current_view {
+                    CollectionView::Table => {
+                        let columns = vec![
+                            ColumnConfig {
+                                key: "title".to_string(),
+                                label: "Title".to_string(),
+                                visible: true,
+                                sortable: true,
+                                width: Some("flex-1".to_string()),
+                            },
+                            ColumnConfig {
+                                key: "folder".to_string(),
+                                label: "Folder".to_string(),
+                                visible: true,
+                                sortable: true,
+                                width: Some("w-40".to_string()),
+                            },
+                            ColumnConfig {
+                                key: "modified".to_string(),
+                                label: "Modified".to_string(),
+                                visible: true,
+                                sortable: true,
+                                width: Some("w-32".to_string()),
+                            },
+                            ColumnConfig {
+                                key: "path".to_string(),
+                                label: "Path".to_string(),
+                                visible: false,
+                                sortable: true,
+                                width: None,
+                            },
+                        ];
+                        let filter = TableFilter {
+                            query: q.clone(),
+                            object_type: None,
+                            sort_by: "modified".to_string(),
+                            sort_ascending: false,
+                        };
+                        rsx! {
+                            TableView {
+                                objects: current_items,
+                                columns: columns,
+                                filter: filter,
+                                on_filter_change: move |_: TableFilter| {},
+                                on_sort: move |_: (String, bool)| {},
+                                on_open: on_open_tab,
+                            }
                         }
                     }
-                }.into_any()
-            }}
-        </div>
+                    CollectionView::Board => {
+                        let columns = vec![
+                            BoardColumn {
+                                id: "root".to_string(),
+                                title: "Root".to_string(),
+                                items: current_items
+                                    .iter()
+                                    .filter(|i| i.folder.is_empty())
+                                    .cloned()
+                                    .collect(),
+                            },
+                            BoardColumn {
+                                id: "folder".to_string(),
+                                title: "Folders".to_string(),
+                                items: current_items
+                                    .iter()
+                                    .filter(|i| !i.folder.is_empty())
+                                    .cloned()
+                                    .collect(),
+                            },
+                            BoardColumn {
+                                id: "pinned".to_string(),
+                                title: "Pinned".to_string(),
+                                items: current_items
+                                    .iter()
+                                    .filter(|i| i.pinned)
+                                    .cloned()
+                                    .collect(),
+                            },
+                        ];
+                        let filter = BoardFilter {
+                            query: q.clone(),
+                            object_type: None,
+                            group_by: "folder".to_string(),
+                        };
+                        rsx! {
+                            BoardView {
+                                objects: current_items,
+                                columns: columns,
+                                filter: filter,
+                                on_filter_change: move |_: BoardFilter| {},
+                                on_move_item: move |_: (String, String)| {},
+                                on_open: on_open_tab,
+                            }
+                        }
+                    }
+                    CollectionView::Gallery => {
+                        let filter = GalleryFilter {
+                            query: q.clone(),
+                            object_type: None,
+                            sort_by: "modified".to_string(),
+                            sort_ascending: false,
+                        };
+                        rsx! {
+                            GalleryView {
+                                objects: current_items,
+                                filter: filter,
+                                on_filter_change: move |_: GalleryFilter| {},
+                                on_open: on_open_tab,
+                            }
+                        }
+                    }
+                    CollectionView::Calendar => {
+                        let filter = CalendarFilter {
+                            query: q.clone(),
+                            object_type: None,
+                            view_mode: CalendarViewMode::Month,
+                        };
+                        rsx! {
+                            CalendarView {
+                                objects: current_items,
+                                filter: filter,
+                                on_filter_change: move |_: CalendarFilter| {},
+                                on_open: on_open_tab,
+                            }
+                        }
+                    }
+                }
+            }
+        }}
     }
 }

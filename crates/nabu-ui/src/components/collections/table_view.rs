@@ -1,12 +1,13 @@
-//! Table View component.
+//! Table View component (Dioxus).
 //!
-//! Production-ready table view with filtering, sorting, grouping,
-//! column configuration, and saved views.
-//! Views are projections of existing KnowledgeObjects — views never own data.
+//! Column-based table view with filtering, sorting, and configurable columns.
+//! Projections operate over `Vec<CollectionItem>` — views never own data.
 
-use crate::models::knowledge_object::KnowledgeObject;
-use leptos::prelude::*;
+use crate::components::collections::shared::types::{CollectionItem, TableFilter};
+use crate::components::ui::icons::{render_icon_view, Icon};
+use dioxus::prelude::*;
 
+/// Column configuration for the table view.
 #[derive(Clone, PartialEq)]
 pub struct ColumnConfig {
     pub key: String,
@@ -16,47 +17,57 @@ pub struct ColumnConfig {
     pub width: Option<String>,
 }
 
-#[derive(Clone, PartialEq, Default)]
-pub struct TableFilter {
-    pub query: String,
-    pub object_type: Option<String>,
-    pub sort_by: String,
-    pub sort_ascending: bool,
-}
-
-#[derive(Properties, PartialEq)]
-pub struct Props {
-    pub objects: Vec<KnowledgeObject>,
+#[derive(Props, PartialEq)]
+pub struct TableViewProps {
+    pub objects: Vec<CollectionItem>,
     pub columns: Vec<ColumnConfig>,
     pub filter: TableFilter,
-    pub on_filter_change: Callback<TableFilter>,
-    pub on_sort: Callback<(String, bool)>,
+    pub on_filter_change: EventHandler<TableFilter>,
+    pub on_sort: EventHandler<(String, bool)>,
+    pub on_open: EventHandler<String>,
 }
 
-#[function_component(TableView)]
-pub fn table_view(props: &Props) -> Html {
-    let filtered = move || {
+/// Projects a sort value from a CollectionItem by column key.
+fn get_sort_value(obj: &CollectionItem, key: &str) -> String {
+    match key {
+        "title" => obj.title.clone(),
+        "folder" => obj.folder.clone(),
+        "modified" => obj.modified_at.clone(),
+        "path" => obj.path.clone(),
+        _ => obj.title.clone(),
+    }
+}
+
+/// Projects a display value from a CollectionItem by column key.
+fn get_column_value(obj: &CollectionItem, key: &str) -> String {
+    match key {
+        "title" => obj.title.clone(),
+        "folder" => obj.folder.clone(),
+        "modified" => obj.modified_at.clone(),
+        "path" => obj.path.clone(),
+        _ => obj.title.clone(),
+    }
+}
+
+#[component]
+pub fn TableView(props: &TableViewProps) -> Element {
+    let filtered: Vec<CollectionItem> = {
         let f = &props.filter;
         let mut result = props.objects.clone();
 
-        // Filter by search query
         if !f.query.is_empty() {
             let q = f.query.to_lowercase();
             result.retain(|obj| {
-                obj.metadata
-                    .title
-                    .as_ref()
-                    .map_or(false, |t| t.to_lowercase().contains(&q))
-                    || obj.object_type.to_string().to_lowercase().contains(&q)
+                obj.title.to_lowercase().contains(&q)
+                    || obj.folder.to_lowercase().contains(&q)
+                    || obj.path.to_lowercase().contains(&q)
             });
         }
 
-        // Filter by object type
         if let Some(ref ot) = f.object_type {
-            result.retain(|obj| obj.object_type.to_string() == *ot);
+            result.retain(|obj| obj.folder == *ot || obj.path.contains(ot));
         }
 
-        // Sort
         if !f.sort_by.is_empty() {
             let sort_key = f.sort_by.clone();
             let asc = f.sort_ascending;
@@ -64,131 +75,169 @@ pub fn table_view(props: &Props) -> Html {
                 let a_val = get_sort_value(a, &sort_key);
                 let b_val = get_sort_value(b, &sort_key);
                 let ord = a_val.cmp(&b_val);
-                if asc {
-                    ord
-                } else {
-                    ord.reverse()
-                }
+                if asc { ord } else { ord.reverse() }
             });
         }
 
         result
     };
 
-    let visible_columns = move || {
-        props
-            .columns
-            .iter()
-            .filter(|c| c.visible)
-            .cloned()
-            .collect::<Vec<_>>()
-    };
+    let visible_columns: Vec<ColumnConfig> = props
+        .columns
+        .iter()
+        .filter(|c| c.visible)
+        .cloned()
+        .collect();
 
-    let on_sort = move |key: String| {
-        let mut f = props.filter.get();
-        if f.sort_by == key {
-            f.sort_ascending = !f.sort_ascending;
-        } else {
-            f.sort_by = key;
-            f.sort_ascending = true;
+    let sort_by = props.filter.sort_by.clone();
+    let sort_ascending = props.filter.sort_ascending;
+    let on_sort = props.on_sort;
+    let on_open = props.on_open;
+
+    let header_cells: Vec<Element> = visible_columns
+        .iter()
+        .map(|col| {
+            let col = col.clone();
+            let sortable = col.sortable;
+            let sort_key = col.key.clone();
+            let is_sorted = sort_by == col.key;
+
+            let class_str = if sortable {
+                "px-4 py-3 cursor-pointer hover:text-gray-200".to_string()
+            } else {
+                "px-4 py-3".to_string()
+            };
+
+            let width_str = col.width.clone().unwrap_or_default();
+            let full_class = format!("{} {}", class_str, width_str);
+
+            let icon: Option<Element> = if sortable && is_sorted {
+                if sort_ascending {
+                    Some(rsx! { {render_icon_view(Icon::ChevronUp)} })
+                } else {
+                    Some(rsx! { {render_icon_view(Icon::ChevronDown)} })
+                }
+            } else {
+                None
+            };
+
+            let on_click = move |_: MouseEvent| {
+                if sortable {
+                    on_sort.call((sort_key.clone(), !is_sorted || !sort_ascending));
+                }
+            };
+
+            rsx! {
+                th { class: full_class, onclick: on_click }
+                div { class: "flex items-center gap-1" }
+                "{col.label}"
+                {icon}
+            }
+        })
+        .collect();
+
+    rsx! {
+        div { class: "table-view w-full overflow-auto h-full" }
+        table { class: "w-full text-sm text-left text-gray-300" }
+        thead { class: "text-xs text-gray-400 uppercase bg-gray-800 border-b border-gray-700" }
+        tr {}
+        for cell in header_cells {
+            {cell}
         }
-        props.on_sort.emit((key, f.sort_ascending));
-    };
-
-    view! {
-        <div class="table-view w-full overflow-auto">
-            <table class="w-full text-sm text-left text-gray-300">
-                <thead class="text-xs text-gray-400 uppercase bg-gray-800 border-b border-gray-700">
-                    <tr>
-                        { visible_columns().iter().map(|col| {
-                            let key = col.key.clone();
-                            let sortable = col.sortable;
-                            view! {
-                                <th
-                                    class=move || format!("px-4 py-3 {} {}",
-                                        if sortable { "cursor-pointer hover:text-gray-200" } else { "" },
-                                        col.width.clone().unwrap_or_default()
-                                    )
-                                    on:click=move |_| if sortable { on_sort(key.clone()) }
-                                >
-                                    <div class="flex items-center gap-1">
-                                        {&col.label}
-                                        {move || {
-                                            if sortable && props.filter.get().sort_by == key {
-                                                if props.filter.get().sort_ascending {
-                                                    view! { <span class="text-blue-400">{crate::components::ui::icons::render_icon_view(crate::components::ui::icons::Icon::ChevronUp)}</span> }.into_any()
-                                                } else {
-                                                    view! { <span class="text-blue-400">{crate::components::ui::icons::render_icon_view(crate::components::ui::icons::Icon::ChevronDown)}</span> }.into_any()
-                                                }
-                                            } else {
-                                                view! {}.into_any()
-                                            }
-                                        }}
-                                    </div>
-                                </th>
-                            }
-                        }).collect_view()}
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-800">
-                    {move || {
-                        let items = filtered();
-                        if items.is_empty() {
-                            view! {
-                                <tr>
-                                    <td colspan={visible_columns().len().to_string()} class="px-4 py-8 text-center text-gray-500">
-                                        "No items to display"
-                                    </td>
-                                </tr>
-                            }.into_any()
-                        } else {
-                            view! {
-                                { items.iter().map(|obj| {
-                                    view! {
-                                        <tr class="hover:bg-gray-800/50 transition-colors">
-                                            { visible_columns().iter().map(|col| {
-                                                let value = get_column_value(obj, &col.key);
-                                                view! {
-                                                    <td class="px-4 py-2 text-gray-300">{value}</td>
-                                                }
-                                            }).collect_view()}
-                                        </tr>
-                                    }
-                                }).collect_view()}
-                            }.into_any()
+        tbody { class: "divide-y divide-gray-800" }
+        if filtered.is_empty() {
+            rsx! {
+                tr {}
+                td { class: "px-4 py-8 text-center text-gray-500", colspan: "{visible_columns.len()}" }
+                "No items to display"
+                }
+            }
+        } else {
+            for obj in &filtered {
+                {
+                    let obj = obj.clone();
+                    let on_open = on_open;
+                    let cells: Vec<Element> = visible_columns
+                        .iter()
+                        .map(|col| {
+                            let value = get_column_value(&obj, &col.key);
+                            let class = if col.key == "title" {
+                                "px-4 py-2 text-gray-300 font-medium truncate max-w-xs"
+                            } else {
+                                "px-4 py-2 text-gray-300"
+                            };
+                            rsx! { td { class: class, "{value}" } }
+                        })
+                        .collect();
+                    rsx! {
+                        tr {
+                            class: "hover:bg-gray-800/50 transition-colors",
+                            onclick: move |_: MouseEvent| on_open.call(obj.path.clone()),
                         }
-                    }}
-                </tbody>
-            </table>
-        </div>
+                        for cell in cells {
+                            {cell}
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
-fn get_sort_value(obj: &KnowledgeObject, key: &str) -> String {
-    match key {
-        "title" => obj.metadata.title.clone().unwrap_or_default(),
-        "type" => obj.object_type.to_string(),
-        "modified" => obj.modified_at.clone(),
-        "created" => obj.created_at.clone(),
-        "author" => obj.metadata.author.clone().unwrap_or_default(),
-        "language" => obj.metadata.language.clone().unwrap_or_default(),
-        _ => obj.metadata.title.clone().unwrap_or_default(),
-    }
-}
+// ── Tests ──────────────────────────────────────────────────────────────────
 
-fn get_column_value(obj: &KnowledgeObject, key: &str) -> String {
-    match key {
-        "title" => obj.metadata.title.clone().unwrap_or_default(),
-        "type" => obj.object_type.to_string(),
-        "modified" => obj.modified_at.clone(),
-        "created" => obj.created_at.clone(),
-        "author" => obj.metadata.author.clone().unwrap_or_default(),
-        "language" => obj.metadata.language.clone().unwrap_or_default(),
-        "source" => obj.metadata.source_url.clone().unwrap_or_default(),
-        "words" => obj
-            .metadata
-            .word_count
-            .map_or_default(|| format!("{}", obj.metadata.word_count.unwrap_or(0))),
-        _ => obj.metadata.title.clone().unwrap_or_default(),
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(path: &str, title: &str, folder: &str, modified: &str) -> CollectionItem {
+        CollectionItem {
+            path: path.to_string(),
+            title: title.to_string(),
+            folder: folder.to_string(),
+            modified_at: modified.to_string(),
+            pinned: false,
+        }
+    }
+
+    #[test]
+    fn get_sort_value_by_key() {
+        let i = item("a/b.md", "Title", "a", "2024-01-01");
+        assert_eq!(get_sort_value(&i, "title"), "Title");
+        assert_eq!(get_sort_value(&i, "folder"), "a");
+        assert_eq!(get_sort_value(&i, "modified"), "2024-01-01");
+        assert_eq!(get_sort_value(&i, "path"), "a/b.md");
+        assert_eq!(get_sort_value(&i, "unknown"), "Title");
+    }
+
+    #[test]
+    fn get_column_value_matches_sort_value() {
+        let i = item("a/b.md", "Title", "a", "2024-01-01");
+        for key in ["title", "folder", "modified", "path"] {
+            assert_eq!(get_column_value(&i, key), get_sort_value(&i, key));
+        }
+    }
+
+    #[test]
+    fn column_config_defaults() {
+        let col = ColumnConfig {
+            key: "title".to_string(),
+            label: "Title".to_string(),
+            visible: true,
+            sortable: true,
+            width: Some("flex-1".to_string()),
+        };
+        assert!(col.visible);
+        assert!(col.sortable);
+        assert_eq!(col.width, Some("flex-1".to_string()));
+    }
+
+    #[test]
+    fn table_filter_default() {
+        let f = TableFilter::default();
+        assert!(f.query.is_empty());
+        assert!(f.object_type.is_none());
+        assert!(f.sort_by.is_empty());
+        assert!(!f.sort_ascending);
     }
 }
