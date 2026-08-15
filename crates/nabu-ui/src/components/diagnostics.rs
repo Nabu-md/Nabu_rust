@@ -27,13 +27,6 @@ struct DiagnosticResponse {
     style_map: DiagnosticStyleMap,
 }
 
-/// Component props.
-#[derive(Clone, PartialEq, Props)]
-pub struct DiagnosticsPanelProps {
-    /// Stable resource identifier such as `"vault:notes/example.md"`.
-    pub resource_id: String,
-}
-
 /// Severity → CSS colour class pair for the diagnostics panel.
 fn severity_class(sev: DiagnosticSeverity) -> &'static str {
     match sev {
@@ -60,12 +53,14 @@ fn diagnostic_item(diag: &Diagnostic) -> Element {
         .map(|c| format!("{:?}", c))
         .unwrap_or_default();
     let sev_class = severity_class(diag.severity);
+    let sev_lbl = severity_label(diag.severity);
+    let sev_combined = format!("{sev_class} text-sm font-medium");
 
     rsx! {
         li { class: "border-l-2 border-gray-700 pl-4 pb-3",
             div { class: "flex items-baseline gap-3",
                 span { class: "text-xs text-gray-500 w-16 shrink-0", "{range_str}" }
-                span { class: "{sev_class} text-sm font-medium", severity_label(diag.severity) }
+                span { class: "{sev_combined}", "{sev_lbl}" }
                 if !code_str.is_empty() {
                     span { class: "text-xs text-gray-600", "[{code_str}]" }
                 }
@@ -191,6 +186,7 @@ pub fn DiagnosticsPanel(resource_id: String) -> Element {
     };
 
     let diag_data = response.read().clone();
+    let btn_label = if *loading.read() { "Running..." } else { "Run Diagnostics" };
 
     rsx! {
         div { class: "diagnostics-panel h-full flex flex-col",
@@ -238,11 +234,7 @@ pub fn DiagnosticsPanel(resource_id: String) -> Element {
                     on_click: run_diagnostics,
                     disabled: *loading.read(),
                     variant: ButtonVariant::Primary,
-                    if *loading.read() {
-                        "Running..."
-                    } else {
-                        "Run Diagnostics"
-                    }
+                    {"{btn_label}"}
                 }
             }
 
@@ -260,7 +252,7 @@ pub fn DiagnosticsPanel(resource_id: String) -> Element {
                         "No diagnostics found."
                     }
                 } else {
-                    render_diagnostic_batch(data)
+                    {render_diagnostic_batch(data)}
                 }
             }
         }
@@ -269,23 +261,33 @@ pub fn DiagnosticsPanel(resource_id: String) -> Element {
 
 fn render_diagnostic_batch(data: &DiagnosticResponse) -> Element {
     let batch = &data.batch;
-    let severity_counts: [(DiagnosticSeverity, usize); 5] = [
-        (DiagnosticSeverity::Hint, 0),
-        (DiagnosticSeverity::Information, 0),
-        (DiagnosticSeverity::Warning, 0),
-        (DiagnosticSeverity::Error, 0),
-        (DiagnosticSeverity::Critical, 0),
-    ];
+    let mut counts: std::collections::HashMap<DiagnosticSeverity, usize> =
+        DiagnosticSeverity::ALL.iter().copied().map(|s| (s, 0)).collect();
 
-    let counts: std::collections::HashMap<DiagnosticSeverity, usize> =
-        DiagnosticSeverity::ALL.iter().map(|&s| (s, 0)).collect();
-
-    let mut counts = counts;
     for diag in &batch.diagnostics {
         *counts.entry(diag.severity).or_insert(0) += 1;
     }
 
     let total = batch.diagnostics.len();
+
+    // Pre-compute severity groups (descending order), skipping empty ones.
+    let groups: Vec<(DiagnosticSeverity, Vec<&Diagnostic>)> = DiagnosticSeverity::ALL
+        .iter()
+        .rev()
+        .copied()
+        .filter_map(|sev| {
+            let group: Vec<&Diagnostic> = batch
+                .diagnostics
+                .iter()
+                .filter(|d| d.severity == sev)
+                .collect();
+            if group.is_empty() {
+                None
+            } else {
+                Some((sev, group))
+            }
+        })
+        .collect();
 
     rsx! {
         div { class: "mt-6 border-t border-gray-700 pt-4",
@@ -297,10 +299,10 @@ fn render_diagnostic_batch(data: &DiagnosticResponse) -> Element {
             }
 
             div { class: "flex flex-wrap gap-2 mb-4",
-                for &sev in DiagnosticSeverity::ALL {
-                    let count = counts.get(&sev).copied().unwrap_or(0);
-                    let cls = severity_class(sev);
-                    let lbl = severity_label(sev);
+                for sev in DiagnosticSeverity::ALL {
+                    let count = *counts.get(&sev).unwrap_or(&0);
+                    let cls = severity_class(*sev);
+                    let lbl = severity_label(*sev);
                     rsx! {
                         span { class: "px-2 py-1 bg-gray-800 rounded text-xs",
                             span { class: "{cls}", "{lbl}" }
@@ -310,15 +312,9 @@ fn render_diagnostic_batch(data: &DiagnosticResponse) -> Element {
                 }
             }
 
-            for &sev in DiagnosticSeverity::ALL.iter().rev() {
-                let group: Vec<&Diagnostic> = batch.diagnostics.iter()
-                    .filter(|d| d.severity == sev)
-                    .collect();
-                if group.is_empty() {
-                    continue;
-                }
-                let cls = severity_class(sev);
-                let lbl = severity_label(sev);
+            for (sev, group) in &groups {
+                let cls = severity_class(*sev);
+                let lbl = severity_label(*sev);
                 let count = group.len();
                 rsx! {
                     div { class: "mb-4",
@@ -327,11 +323,11 @@ fn render_diagnostic_batch(data: &DiagnosticResponse) -> Element {
                         }
                         ul { class: "space-y-2",
                             for diag in group {
-                                diagnostic_item(diag)
-                            }
-                        }
+                                diagnostic_item(*diag)
                     }
-                }
+            }
+    }
+}
             }
         }
     }

@@ -4,6 +4,11 @@ pub mod dictation;
 pub mod event_bridge;
 pub mod history;
 pub mod native_messaging;
+// The native-messaging socket server is a UNIX-domain-socket transport
+// (see nabu-core::ipc_socket). It is wired up only on Unix; on Windows the
+// app compiles without the socket server (and the native-messaging-host binary
+// is likewise Unix-only) so no macOS/Windows-only frameworks are linked.
+#[cfg(unix)]
 pub mod native_messaging_socket;
 pub mod recovery;
 pub mod settings;
@@ -25,6 +30,7 @@ pub mod settings;
 //    command or subsystem constructs its own EventBus / StorageManager / queue.
 // ---------------------------------------------------------------------------
 
+#[cfg(unix)]
 use nabu_core::capture::CaptureEngine;
 use nabu_core::conversations::ConversationStore;
 use nabu_core::event_bus::kinds;
@@ -593,6 +599,7 @@ pub fn run() {
 
             // Resolve the CaptureEngine Arc for socket state before moving
             // ctx into Tauri managed state.
+            #[cfg(unix)]
             let engine: Arc<CaptureEngine> = ctx
                 .resolve("capture_engine")
                 .expect("CaptureEngine must be registered");
@@ -605,18 +612,21 @@ pub fn run() {
             // runtime. We block_on the startup so the handle is available before
             // the setup closure returns, then register it as Tauri managed state
             // so the Exit handler can shut it down gracefully.
-            let socket_state = Arc::new(crate::native_messaging_socket::SocketServerState {
-                engine: engine.clone(),
-            });
-            let socket_handle: crate::native_messaging_socket::SocketServerHandleState = {
-                let state_clone = socket_state.clone();
-                tauri::async_runtime::block_on(async move {
-                    crate::native_messaging_socket::start_socket_server(state_clone)
-                        .map(|handle| crate::native_messaging_socket::SocketServerHandleState(Some(handle)))
-                })
-                .unwrap_or(crate::native_messaging_socket::SocketServerHandleState(None))
-            };
-            app.manage(socket_handle);
+            #[cfg(unix)]
+            {
+                let socket_state = Arc::new(crate::native_messaging_socket::SocketServerState {
+                    engine: engine.clone(),
+                });
+                let socket_handle: crate::native_messaging_socket::SocketServerHandleState = {
+                    let state_clone = socket_state.clone();
+                    tauri::async_runtime::block_on(async move {
+                        crate::native_messaging_socket::start_socket_server(state_clone)
+                            .map(|handle| crate::native_messaging_socket::SocketServerHandleState(Some(handle)))
+                    })
+                    .unwrap_or(crate::native_messaging_socket::SocketServerHandleState(None))
+                };
+                app.manage(socket_handle);
+            }
 
             // Safety net: the main window starts hidden (visible: false) and is
             // shown by on_page_load once the webview finishes painting. If the
@@ -659,6 +669,7 @@ pub fn run() {
                 // stops accepting new connections, closes the listener,
                 // and removes the socket file. Done before core service
                 // shutdown so no new IPC requests can arrive during teardown.
+                #[cfg(unix)]
                 {
                     let socket_state =
                         app_handle.state::<crate::native_messaging_socket::SocketServerHandleState>();
