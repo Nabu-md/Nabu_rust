@@ -3,7 +3,7 @@
 //! Kanban-style board view with columns, filtering, and drag-and-drop
 //! reordering between columns. Views are projections of `Vec<CollectionItem>`.
 
-use crate::components::collections::shared::types::{CollectionItem, BoardFilter};
+use crate::components::collections::shared::types::{BoardFilter, CollectionItem};
 use crate::components::ui::icons::{render_icon_view, Icon};
 use dioxus::prelude::*;
 use dioxus::web::WebEventExt;
@@ -15,14 +15,7 @@ pub struct BoardColumn {
     pub items: Vec<CollectionItem>,
 }
 
-#[derive(Clone, PartialEq, Default)]
-pub struct BoardFilter {
-    pub query: String,
-    pub object_type: Option<String>,
-    pub group_by: String,
-}
-
-#[derive(Props, PartialEq)]
+#[derive(Props, PartialEq, Clone)]
 pub struct BoardViewProps {
     pub objects: Vec<CollectionItem>,
     pub columns: Vec<BoardColumn>,
@@ -80,7 +73,7 @@ fn group_items(items: &[CollectionItem], group_by: &str, query: &str) -> Vec<Boa
 }
 
 #[component]
-pub fn BoardView(props: &BoardViewProps) -> Element {
+pub fn BoardView(props: BoardViewProps) -> Element {
     let filter = props.filter.clone();
     let on_open = props.on_open;
     let on_move_item = props.on_move_item;
@@ -89,29 +82,6 @@ pub fn BoardView(props: &BoardViewProps) -> Element {
         group_items(&props.objects, &filter.group_by, &filter.query)
     } else {
         props.columns.clone()
-    };
-
-    let on_drag_start = move |ev: DragEvent, item_id: String| {
-        let web = ev.data().as_web_event();
-        if let Some(dt) = web.data_transfer() {
-            let _ = dt.set_data("text/plain", &item_id);
-        }
-    };
-
-    let on_drag_over = move |ev: DragEvent| {
-        ev.prevent_default();
-    };
-
-    let on_drop = move |ev: DragEvent, column_id: String| {
-        ev.prevent_default();
-        let web = ev.data().as_web_event();
-        if let Some(dt) = web.data_transfer() {
-            if let Ok(data) = dt.get_data("text/plain") {
-                if !data.is_empty() {
-                    on_move_item.call((data, column_id));
-                }
-            }
-        }
     };
 
     let column_elements: Vec<Element> = columns_data
@@ -128,15 +98,20 @@ pub fn BoardView(props: &BoardViewProps) -> Element {
                     let object_id = obj.path.clone();
                     let title = obj.title.clone();
                     let obj_type = obj.folder.clone();
+                    let obj_path = obj.path.clone();
                     let on_open = on_open;
-                    let on_drag_start = &on_drag_start;
 
                     rsx! {
                         div {
                             class: "bg-gray-700 rounded p-2 border border-gray-600 cursor-grab hover:border-gray-500 transition-colors",
                             draggable: "true",
-                            ondragstart: move |ev: DragEvent| on_drag_start(ev, object_id.clone()),
-                            onclick: move |_: MouseEvent| on_open.call(obj.path.clone()),
+                            ondragstart: move |ev: DragEvent| {
+                                let web = ev.data().as_web_event();
+                                if let Some(dt) = web.data_transfer() {
+                                    let _ = dt.set_data("text/plain", &object_id);
+                                }
+                            },
+                            onclick: move |_: MouseEvent| on_open.call(obj_path.clone()),
                         }
                         div { class: "text-sm font-medium text-gray-200", "{title}" }
                         div { class: "text-xs text-gray-500 mt-1", "{obj_type}" }
@@ -144,11 +119,22 @@ pub fn BoardView(props: &BoardViewProps) -> Element {
                 })
                 .collect();
 
+            let on_move_item = on_move_item;
             rsx! {
                 div {
                     class: "flex-none w-72 bg-gray-800 rounded-lg border border-gray-700 flex flex-col max-h-full",
-                    ondragover: on_drag_over,
-                    ondrop: move |ev: DragEvent| on_drop(ev, column_id.clone()),
+                    ondragover: move |ev: DragEvent| ev.prevent_default(),
+                    ondrop: move |ev: DragEvent| {
+                        ev.prevent_default();
+                        let web = ev.data().as_web_event();
+                        if let Some(dt) = web.data_transfer() {
+                            if let Ok(data) = dt.get_data("text/plain") {
+                                if !data.is_empty() {
+                                    on_move_item.call((data, column_id.clone()));
+                                }
+                            }
+                        }
+                    },
                 }
                 div { class: "px-3 py-2 border-b border-gray-700 flex items-center justify-between" }
                 span { class: "text-sm font-medium text-gray-300", "{col_title}" }

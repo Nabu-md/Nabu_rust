@@ -6,19 +6,18 @@
 use crate::components::collections::shared::types::CollectionView;
 use dioxus::prelude::*;
 
-#[derive(Props, PartialEq)]
+#[derive(Props, PartialEq, Clone)]
 pub struct ViewSwitcherProps {
     pub current_view: CollectionView,
     pub on_change: EventHandler<CollectionView>,
 }
 
 #[component]
-pub fn ViewSwitcher(props: &ViewSwitcherProps) -> Element {
+pub fn ViewSwitcher(props: ViewSwitcherProps) -> Element {
     rsx! {
         div { class: "view-switcher flex items-center gap-1 p-2 bg-gray-800 border-b border-gray-700" }
         for view in CollectionView::all() {
             {
-                let view = *view;
                 let active = props.current_view == view;
                 let label = view.label();
                 let class = if active {

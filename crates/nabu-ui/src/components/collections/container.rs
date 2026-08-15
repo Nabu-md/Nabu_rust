@@ -6,12 +6,15 @@
 //!
 //! Views are projections of existing notes — the container never owns data.
 
-use crate::components::collections::board_view::{BoardColumn, BoardFilter, BoardView};
-use crate::components::collections::calendar_view::{CalendarFilter, CalendarView, CalendarViewMode};
-use crate::components::collections::gallery_view::{GalleryFilter, GalleryView};
-use crate::components::collections::shared::types::{CollectionItem, CollectionView};
+use crate::components::collections::board_view::{BoardColumn, BoardView};
+use crate::components::collections::calendar_view::CalendarView;
+use crate::components::collections::gallery_view::GalleryView;
+use crate::components::collections::shared::types::{
+    BoardFilter, CalendarFilter, CalendarViewMode, CollectionItem, CollectionView, GalleryFilter,
+    TableFilter,
+};
 use crate::components::collections::shared::context::SearchState;
-use crate::components::collections::table_view::{ColumnConfig, TableFilter, TableView};
+use crate::components::collections::table_view::{ColumnConfig, TableView};
 use crate::components::collections::view_switcher::ViewSwitcher;
 use crate::components::contexts::{open_tab, use_workspace};
 use crate::components::ui::feedback::{use_toast, ErrorPanel, SkeletonList, ToastContext};
@@ -46,17 +49,11 @@ fn classify(loaded: bool, had_error: bool, items: &[CollectionItem]) -> LoadPhas
 
 /// Loads the note index from the backend via `notes_index`.
 fn load_items(
-    items: Signal<Vec<CollectionItem>>,
-    loaded: Signal<bool>,
-    had_error: Signal<bool>,
+    mut items: Signal<Vec<CollectionItem>>,
+    mut loaded: Signal<bool>,
+    mut had_error: Signal<bool>,
     toasts: ToastContext,
 ) {
-    loaded.set(false);
-    had_error.set(false);
-
-    let mut items = items;
-    let mut loaded = loaded;
-    let mut had_error = had_error;
 
     spawn_local(async move {
         let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap_or_default();
@@ -119,7 +116,7 @@ pub fn CollectionContainer() -> Element {
         let items = items;
         let loaded = loaded;
         let had_error = had_error;
-        move |_: MouseEvent| {
+        move |_| {
             load_items(items, loaded, had_error, toasts);
         }
     };
@@ -167,7 +164,7 @@ pub fn CollectionContainer() -> Element {
                     title: "Couldn't load collections".to_string(),
                     message: "Something went wrong while reading your knowledge objects.".to_string(),
                     details: None,
-                    on_retry: Some(on_retry),
+                    on_retry: on_retry,
                     recovery: "Check that your vault is accessible, then try again.".to_string(),
                 }
             },

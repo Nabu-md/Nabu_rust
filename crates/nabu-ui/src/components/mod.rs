@@ -26,6 +26,7 @@
 //! - [`settings`] — 15-tab settings panel with IPC persistence
 //! - [`recovery`] — crash-recovery banner, save-status indicator, diff view,
 //!   version history browser, and snapshot recovery manager
+//! - [`shipped`] — Reader and Comparison views (Phase 2A-4)
 
 pub mod activity;
 pub mod app;
@@ -42,8 +43,9 @@ pub mod note_editor;
 pub mod note_view;
 pub mod property_editor;
     pub mod recovery;
-    pub mod settings;
-    pub mod statistics;
+pub mod settings;
+pub mod shipped;
+pub mod statistics;
     pub mod streaming;
     pub mod template_editor;
     pub mod template_picker;

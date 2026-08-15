@@ -6,7 +6,7 @@
 use crate::components::collections::shared::types::{CalendarFilter, CalendarViewMode, CollectionItem};
 use dioxus::prelude::*;
 
-#[derive(Props, PartialEq)]
+#[derive(Props, PartialEq, Clone)]
 pub struct CalendarViewProps {
     pub objects: Vec<CollectionItem>,
     pub filter: CalendarFilter,
@@ -49,7 +49,7 @@ fn group_by_date(items: &[CollectionItem], query: &str) -> Vec<(String, Vec<Coll
 }
 
 #[component]
-pub fn CalendarView(props: &CalendarViewProps) -> Element {
+pub fn CalendarView(props: CalendarViewProps) -> Element {
     let filter = props.filter.clone();
     let on_filter_change = props.on_filter_change;
     let on_open = props.on_open;
