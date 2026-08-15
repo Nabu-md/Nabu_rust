@@ -13,7 +13,6 @@ use crate::components::contexts::{
 use crate::components::navigation::state::{
     load_smart_folders, remove_smart_folder, save_smart_folder, NoteIndexEntry,
 };
-use crate::components::ui::button::{Button, ButtonVariant};
 use crate::components::ui::dialog::ConfirmDialog;
 use crate::components::ui::feedback::{use_toast, ErrorPanel, LoadingBlock, SpinnerSize};
 use crate::components::ui::icons::{render_icon_view, Icon};
@@ -73,6 +72,13 @@ pub fn SmartFoldersPage() -> Element {
     let mut show_form = use_signal(|| false);
     let mut new_name = use_signal(String::new);
     let mut new_query = use_signal(String::new);
+    let mut confirm_open = use_signal(|| false);
+    let mut confirm_target = use_signal(|| None::<SmartFolder>);
+
+    // Load persisted smart folders from the backend on mount.
+    use_effect(move || {
+        load_smart_folders(nav);
+    });
 
     // Re-evaluate the selected folder after external edits.
     use_event_listener(FrontendEventKind::ItemStored, move |_ev: &FrontendEvent| {
@@ -88,6 +94,7 @@ pub fn SmartFoldersPage() -> Element {
     let sel = selected.read().clone();
     let show = show_form.read();
     let results_state_val = *results_state.read();
+    let del_target = confirm_target.read().clone();
 
     let heading: String = match sel.as_ref() {
         Some(f) => format!("\"{}\" — {} match(es)", f.name, results.read().len()),
@@ -147,6 +154,7 @@ pub fn SmartFoldersPage() -> Element {
                         nq.set(String::new());
                         let mut sf = show_form;
                         sf.set(false);
+                        toasts.success("Smart folder created", "Saved to the backend.");
                     }
                 },
                     "Create"
@@ -175,7 +183,7 @@ pub fn SmartFoldersPage() -> Element {
             rsx! {
                 div { class: "sf-list space-y-1" }
                 for f in &folders {
-                    {render_folder_row(f, nav, selected, results, results_state)}
+                    {render_folder_row(f, selected, results, results_state, confirm_open, confirm_target)}
                 }
             }
         }}
@@ -223,18 +231,38 @@ pub fn SmartFoldersPage() -> Element {
                 }}
             }
         }}
+
+        // Delete confirmation dialog.
+        {if let Some(f) = &del_target {
+            let folder_id = f.id.clone();
+            let folder_name = f.name.clone();
+            rsx! {
+                ConfirmDialog {
+                    open: confirm_open,
+                    title: "Delete Smart Folder".to_string(),
+                    message: format!("Remove \"{}\"? This cannot be undone.", folder_name),
+                    danger: true,
+                    confirm_label: Some("Delete"),
+                    on_confirm: move |_: MouseEvent| {
+                        let mut nv = nav;
+                        remove_smart_folder(nv, &folder_id);
+                        toasts.success("Smart folder deleted", "Removed from the backend.");
+                    },
+                }
+            }
+        }}
     }
 }
 
 fn render_folder_row(
     f: &SmartFolder,
-    nav: NavContext,
     mut selected: Signal<Option<SmartFolder>>,
     mut results: Signal<Vec<NoteIndexEntry>>,
     mut results_state: Signal<LoadState>,
+    mut confirm_open: Signal<bool>,
+    mut confirm_target: Signal<Option<SmartFolder>>,
 ) -> Element {
     let f_clone = f.clone();
-    let id = f.id.clone();
     rsx! {
         div {
             class: "sf-item flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-800/50 border border-gray-700 text-sm group",
@@ -256,8 +284,8 @@ fn render_folder_row(
         button {
             class: "sf-delete rounded px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-400",
             onclick: move |_: MouseEvent| {
-                let mut nv = nav;
-                remove_smart_folder(nv, &id);
+                confirm_target.set(Some(f_clone.clone()));
+                confirm_open.set(true);
             },
             title: "Delete smart folder",
             {render_icon_view(Icon::X)}
