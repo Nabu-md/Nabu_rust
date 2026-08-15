@@ -102,6 +102,21 @@ fn default_zoom() -> f64 {
 const DEFAULT_NODE_W: f64 = 240.0;
 const DEFAULT_NODE_H: f64 = 120.0;
 
+impl Default for CanvasDef {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            groups: Vec::new(),
+            pan_x: 0.0,
+            pan_y: 0.0,
+            zoom: default_zoom(),
+        }
+    }
+}
+
 // ── State enums & classification ──────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

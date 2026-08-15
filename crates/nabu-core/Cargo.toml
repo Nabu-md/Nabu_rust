@@ -47,3 +47,16 @@ whisper-rs = "0.14.4"
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["sync", "time", "rt", "macros", "test-util", "rt-multi-thread"] }
+criterion = "0.5"
+
+[[bench]]
+name = "search"
+harness = false
+
+[[bench]]
+name = "startup"
+harness = false
+
+[[bench]]
+name = "graph_rebuild"
+harness = false
