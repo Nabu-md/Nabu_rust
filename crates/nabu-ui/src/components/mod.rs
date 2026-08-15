@@ -47,4 +47,5 @@ pub mod statistics;
 pub mod streaming;
 pub mod template_editor;
 pub mod template_picker;
+pub mod trash;
 pub mod ui;

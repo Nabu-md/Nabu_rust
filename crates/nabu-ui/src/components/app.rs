@@ -201,10 +201,7 @@ pub fn ViewContent() -> Element {
         },
         ViewMode::Trash => rsx! {
             div { class: "max-w-7xl mx-auto h-full",
-                div { class: "text-sm text-gray-400",
-                    {render_icon(Icon::Trash2, Some("w-4 h-4 inline mr-1"))}
-                    "Trash placeholder — migrated in a later phase."
-                }
+                crate::components::trash::Trash {}
             }
         },
         ViewMode::History => rsx! {
