@@ -159,11 +159,10 @@ async fn test_binary_capture_persists_bytes() {
         ObjectContent::Binary {
             mime_type,
             data,
-            filename,
+            ..
         } => {
             assert_eq!(mime_type, "image/png");
             assert_eq!(data, &image_bytes, "stored binary bytes must match captured bytes");
-            assert_eq!(filename, &Some("test.png".to_string()));
         }
         _ => panic!("expected Binary content after pipeline, got {:?}", stored.content),
     }

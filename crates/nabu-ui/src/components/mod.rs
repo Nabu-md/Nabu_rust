@@ -33,6 +33,7 @@ pub mod app;
 pub mod canvas;
 pub mod contexts;
 pub mod dictation_pill;
+pub mod diagnostics;
 pub mod editor;
 pub mod file_tree;
 pub mod graph_layout;

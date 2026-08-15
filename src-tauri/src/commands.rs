@@ -2287,6 +2287,14 @@ pub fn note_links(
     min_title_len: Option<usize>,
     store: State<'_, SettingsStore>,
 ) -> Result<NoteLinks, String> {
+    note_links_impl(&store, &path, min_title_len)
+}
+
+pub(crate) fn note_links_impl(
+    store: &SettingsStore,
+    path: &str,
+    min_title_len: Option<usize>,
+) -> Result<NoteLinks, String> {
     let min_len = min_title_len.unwrap_or(3).max(2);
     if path.trim().is_empty() {
         return Ok(NoteLinks {
@@ -2904,6 +2912,13 @@ pub fn smart_folder_evaluate(
     query: String,
     store: State<'_, SettingsStore>,
 ) -> Result<Vec<NoteIndexEntry>, String> {
+    smart_folder_evaluate_impl(&store, query.trim())
+}
+
+pub(crate) fn smart_folder_evaluate_impl(
+    store: &SettingsStore,
+    query: &str,
+) -> Result<Vec<NoteIndexEntry>, String> {
     let settings = store.get();
     let vault_path = PathBuf::from(settings.last_vault_path.trim());
     if vault_path.as_os_str().is_empty() || !vault_path.is_dir() {
@@ -3016,6 +3031,10 @@ pub fn calendar_notes(
     month: String,
     store: State<'_, SettingsStore>,
 ) -> Result<Vec<CalendarEntry>, String> {
+    calendar_notes_impl(&store, &month)
+}
+
+pub(crate) fn calendar_notes_impl(store: &SettingsStore, month: &str) -> Result<Vec<CalendarEntry>, String> {
     let settings = store.get();
     let vault_path = PathBuf::from(settings.last_vault_path.trim());
     if vault_path.as_os_str().is_empty() || !vault_path.is_dir() {
@@ -3046,6 +3065,10 @@ pub fn calendar_notes(
 /// opening an existing one or creating it on first write.
 #[tauri::command]
 pub fn daily_note_for(date: String, store: State<'_, SettingsStore>) -> Result<String, String> {
+    daily_note_for_impl(&store, &date)
+}
+
+pub(crate) fn daily_note_for_impl(store: &SettingsStore, date: &str) -> Result<String, String> {
     let d = date.trim();
     if d.len() < 10 || d.chars().filter(|c| *c == '-').count() != 2 {
         return Err("Invalid date (expected YYYY-MM-DD)".to_string());
