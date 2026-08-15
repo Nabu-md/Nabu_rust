@@ -23,10 +23,11 @@ use dioxus::prelude::*;
 // gives callers everything they need (ViewMode, NavContext, NavProvider, …).
 pub use crate::components::navigation::state::{
     dashboard_section_label, fuzzy_score, load_all_nav_state, load_notes_index,
-    parse_view_mode, record_recent_note, record_recent_search, remove_saved_search,
-    save_search, set_dashboard_sections, toggle_favourite, toggle_favourite_command,
+    load_smart_folders, parse_view_mode, record_recent_note, record_recent_search,
+    remove_saved_search, save_search, save_smart_folder, set_dashboard_sections,
+    toggle_favourite, toggle_favourite_command,
     NoteIndexEntry, NavContext, NavProvider, SavedSearch, ViewMode, DASHBOARD_SECTIONS,
-    use_nav,
+    use_nav, remove_smart_folder,
 };
 
 // ── Theme ──────────────────────────────────────────────────────

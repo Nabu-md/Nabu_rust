@@ -434,7 +434,33 @@ pub fn remove_saved_search(mut nav: NavContext, name: &str) {
     settings_persist(K_SAVED_SEARCHES, serde_json::to_value(snapshot).unwrap());
 }
 
-/// Saves (creates or updates) a smart folder, deduped by id, and persists it.
+/// Loads all saved smart folders from the backend (`smart_folders_list`) and
+/// writes them into the NavContext.
+pub fn load_smart_folders(mut nav: NavContext) {
+    let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
+    spawn_local(async move {
+        match crate::ipc::tauri_invoke_safe("smart_folders_list", args).await {
+            Ok(Some(val)) => {
+                if let Ok(list) =
+                    serde_wasm_bindgen::from_value::<Vec<crate::models::organisation::SmartFolder>>(
+                        val,
+                    ) {
+                    nav.smart_folders.set(list);
+                }
+            }
+            Ok(None) => {
+                // No smart folders persisted yet — start empty.
+                nav.smart_folders.set(Vec::new());
+            }
+            Err(e) => {
+                tracing::warn!("smart_folders_list: {}", e.message());
+            }
+        }
+    });
+}
+
+/// Saves (creates or updates) a smart folder, deduped by id, and persists it
+/// both in the NavContext and to the backend via `smart_folder_save`.
 pub fn save_smart_folder(
     mut nav: NavContext,
     folder: crate::models::organisation::SmartFolder,
@@ -443,18 +469,34 @@ pub fn save_smart_folder(
         if let Some(existing) = l.iter_mut().find(|f| f.id == folder.id) {
             *existing = folder.clone();
         } else {
-            l.push(folder);
+            l.push(folder.clone());
         }
     });
     let snapshot = nav.smart_folders.read().clone();
     settings_persist(K_SMART_FOLDERS, serde_json::to_value(snapshot).unwrap());
+
+    let save_args =
+        serde_wasm_bindgen::to_value(&serde_json::json!({ "folder": folder })).unwrap();
+    spawn_local(async move {
+        if let Err(e) = crate::ipc::tauri_invoke("smart_folder_save", save_args).await {
+            tracing::warn!("smart_folder_save: {}", e.message());
+        }
+    });
 }
 
-/// Removes a smart folder by id and persists.
+/// Removes a smart folder by id, persists, and syncs to the backend
+/// `smart_folder_delete` command.
 pub fn remove_smart_folder(mut nav: NavContext, id: &str) {
     nav.smart_folders.with_mut(|l| l.retain(|f| f.id != id));
     let snapshot = nav.smart_folders.read().clone();
     settings_persist(K_SMART_FOLDERS, serde_json::to_value(snapshot).unwrap());
+
+    let del_args = serde_wasm_bindgen::to_value(&serde_json::json!({ "id": id })).unwrap();
+    spawn_local(async move {
+        if let Err(e) = crate::ipc::tauri_invoke("smart_folder_delete", del_args).await {
+            tracing::warn!("smart_folder_delete: {}", e.message());
+        }
+    });
 }
 
 /// Records a command id as recently run (deduped, capped at 12).

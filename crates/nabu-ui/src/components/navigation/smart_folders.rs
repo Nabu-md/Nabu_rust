@@ -11,8 +11,10 @@ use crate::components::contexts::{
     open_tab, record_recent_note, use_nav, use_workspace, NavContext, ViewMode, WorkspaceContext,
 };
 use crate::components::navigation::state::{
-    remove_smart_folder, save_smart_folder, NoteIndexEntry,
+    load_smart_folders, remove_smart_folder, save_smart_folder, NoteIndexEntry,
 };
+use crate::components::ui::button::{Button, ButtonVariant};
+use crate::components::ui::dialog::ConfirmDialog;
 use crate::components::ui::feedback::{use_toast, ErrorPanel, LoadingBlock, SpinnerSize};
 use crate::components::ui::icons::{render_icon_view, Icon};
 use crate::components::ui::info::EmptyState;
