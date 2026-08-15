@@ -23,6 +23,12 @@ pub trait Transcriber: Send + Sync {
     /// check in [`DictationService::start`](super::service::DictationService).
     fn model_available(&self) -> bool;
 
+    /// Filesystem path of the configured model, if any. Used to produce a
+    /// useful error message when the model is missing.
+    fn model_path(&self) -> Option<std::path::PathBuf> {
+        None
+    }
+
     /// Transcribe captured audio and return the text, or an explicit error.
     fn transcribe(&self, audio: &CapturedAudio) -> Result<String, DictationError>;
 }
@@ -75,6 +81,10 @@ impl Default for WhisperTranscriber {
 impl Transcriber for WhisperTranscriber {
     fn model_available(&self) -> bool {
         self.model_path.exists()
+    }
+
+    fn model_path(&self) -> Option<std::path::PathBuf> {
+        Some(self.model_path.clone())
     }
 
     fn transcribe(&self, audio: &CapturedAudio) -> Result<String, DictationError> {

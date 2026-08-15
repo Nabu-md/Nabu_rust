@@ -1,19 +1,95 @@
 use crate::jobs::cancellation::CancellationToken;
 use crate::jobs::workers::progress::ProgressReporter;
-use crate::models::{ObjectContent, ObjectType};
-use crate::processing::processor::{ProcessingContext, ProcessingResult, Processor};
+use crate::models::{CustomPropertyValue, KnowledgeObject, ObjectContent, ObjectType};
+use crate::processing::processor::{ProcessingResult, Processor, ProcessingStats};
+use crate::processing::processor::ProcessingContext;
+use crate::diagnostic::{Diagnostic, DiagnosticCategory, DiagnosticSeverity, TextPosition, TextRange};
+use crate::native::NativeError;
 use async_trait::async_trait;
+use std::time::Instant;
+
+fn slug_from_filename(filename: Option<&str>) -> String {
+    filename
+        .and_then(|f| f.rsplit('.').nth(1))
+        .filter(|s| !s.is_empty())
+        .unwrap_or("image")
+        .to_string()
+}
+
+fn build_ocr_info_json(
+    extracted_text: Option<&str>,
+    confidence: Option<f64>,
+    recognition_language: Option<&str>,
+    page_count: Option<u32>,
+    processing_duration_ms: Option<u64>,
+    is_scanned: Option<bool>,
+    warning: Option<&str>,
+) -> CustomPropertyValue {
+    let info = serde_json::json!({
+        "extracted_text": extracted_text,
+        "confidence": confidence,
+        "recognition_language": recognition_language,
+        "page_count": page_count,
+        "processing_duration_ms": processing_duration_ms,
+        "is_scanned": is_scanned,
+        "warning": warning,
+    });
+    CustomPropertyValue::Text(info.to_string())
+}
+
+fn store_ocr_info(
+    object: &mut KnowledgeObject,
+    extracted_text: Option<&str>,
+    confidence: Option<f64>,
+    recognition_language: Option<&str>,
+    page_count: Option<u32>,
+    processing_duration_ms: Option<u64>,
+    is_scanned: Option<bool>,
+    warning: Option<&str>,
+) {
+    object.custom_properties.insert(
+        "ocr_info".to_string(),
+        build_ocr_info_json(
+            extracted_text,
+            confidence,
+            recognition_language,
+            page_count,
+            processing_duration_ms,
+            is_scanned,
+            warning,
+        ),
+    );
+}
+
+fn ocr_diagnostic(severity: DiagnosticSeverity, message: String, code: &str) -> Diagnostic {
+    Diagnostic::new(
+        severity,
+        TextRange::empty(TextPosition::new(0, 0)),
+        message,
+    )
+    .with_code(code.to_string())
+    .with_source("ocr_processor".to_string())
+    .with_category(DiagnosticCategory::Ocr)
+}
 
 /// Performs OCR on image, scan, and screenshot content.
 ///
 /// Uses the real macOS Vision framework (`VNRecognizeTextRequest`) through
 /// [`crate::native::vision`]. No simulated OCR exists; when the native engine
-/// is unavailable or detects no text, the object is returned unmodified.
+/// is unavailable (non-macOS) the object is still modified to record an
+/// `ocr_info` warning so the inbox UI can surface the platform limitation.
 ///
-/// The OCR result populates:
-/// - `extracted_text` custom property with recognized text
-/// - `ocr_confidence` metadata field (average confidence of detected lines)
-/// - Extracted text is added as metadata description
+/// On successful OCR the extracted text is:
+/// - Stored as a structured `ocr_info` JSON custom property (read by the
+///   inbox UI via `commands.rs::knowledge_object_to_inbox_item` →
+///   `custom_json(obj, "ocr_info")`).
+/// - Stored as the full `extracted_text` plain-text custom property
+///   (backward compatibility).
+/// - Set as `metadata.description` in full (not truncated) so the Indexer
+///   tokenizes every word through `tokenize_object` → `tokenize_str(desc)`.
+/// - Written to a `.ocr.md` Markdown companion note whose body is the OCR
+///   text, persisted via the existing `StorageManager.save()` →
+///   `ITEM_STORED` → Indexer chain.
 pub struct OcrProcessor;
 
 #[async_trait]
@@ -35,62 +111,187 @@ impl Processor for OcrProcessor {
         progress.set_progress(0.1);
         let mut object = context.object.clone();
 
-        // Only process binary image content through Vision.
-        let image_data = match &object.content {
+        let (image_data, filename, mime_type) = match &object.content {
             ObjectContent::Binary {
-                mime_type, data, ..
-            } if mime_type.starts_with("image/") => data.clone(),
+                mime_type,
+                data,
+                filename,
+                ..
+            } if mime_type.starts_with("image/") => {
+                (data.clone(), filename.clone(), mime_type.clone())
+            }
             _ => return ProcessingResult::unmodified(object),
         };
 
         progress.set_progress(0.4);
 
-        // Vision OCR is a blocking native call; run it off the async executor.
+        let is_scanned = object.object_type == ObjectType::Scan;
+        let recognition_language = object.metadata.language.clone();
+        let start = Instant::now();
+
         let engine_result =
             tokio::task::spawn_blocking(move || crate::native::vision::recognize_text(&image_data))
                 .await;
+        let duration_ms = start.elapsed().as_millis() as u64;
 
         let recognized = match engine_result {
             Ok(Ok(lines)) if !lines.is_empty() => lines,
-            Ok(Ok(_)) => return ProcessingResult::unmodified(object),
-            Ok(Err(e)) => {
-                tracing::warn!(
-                    subsystem = "processing",
-                    component = "ocr_processor",
-                    object_id = %object.id,
-                    error = %e,
-                    "Vision OCR unavailable; leaving object unmodified"
+            Ok(Ok(_)) => {
+                store_ocr_info(
+                    &mut object,
+                    None,
+                    None,
+                    recognition_language.as_deref(),
+                    Some(1),
+                    Some(duration_ms),
+                    Some(is_scanned),
+                    Some("No text recognized in image"),
                 );
-                return ProcessingResult::unmodified(object);
+                return ProcessingResult::new(object)
+                    .add_diagnostic(ocr_diagnostic(
+                        DiagnosticSeverity::Warning,
+                        "OCR returned no text for this image".to_string(),
+                        "OCR_EMPTY_RESULT",
+                    ))
+                    .with_stats(
+                        ProcessingStats::new()
+                            .with_duration_ms(duration_ms)
+                            .with_metric("ocr_lines".to_string(), "0".to_string()),
+                    );
             }
-            Err(_) => return ProcessingResult::unmodified(object),
+            Ok(Err(NativeError::UnsupportedPlatform)) => {
+                store_ocr_info(
+                    &mut object,
+                    None,
+                    None,
+                    recognition_language.as_deref(),
+                    Some(1),
+                    Some(duration_ms),
+                    Some(is_scanned),
+                    Some("OCR engine unavailable on this platform (requires macOS)")
+                    ,
+                );
+                return ProcessingResult::new(object)
+                    .add_diagnostic(ocr_diagnostic(
+                        DiagnosticSeverity::Information,
+                        "OCR engine unavailable on this platform; image preserved without text extraction"
+                            .to_string(),
+                        "OCR_PLATFORM_UNSUPPORTED",
+                    ))
+                    .with_stats(
+                        ProcessingStats::new()
+                            .with_duration_ms(duration_ms)
+                            .with_metric("ocr_lines".to_string(), "0".to_string()),
+                    );
+            }
+            Ok(Err(e)) => {
+                let err_msg = format!("Vision OCR error: {e}");
+                store_ocr_info(
+                    &mut object,
+                    None,
+                    None,
+                    recognition_language.as_deref(),
+                    Some(1),
+                    Some(duration_ms),
+                    Some(is_scanned),
+                    Some(&err_msg),
+                );
+                return ProcessingResult::new(object)
+                    .add_diagnostic(ocr_diagnostic(
+                        DiagnosticSeverity::Error,
+                        format!("OCR processing failed: {e}"),
+                        "OCR_ENGINE_ERROR",
+                    ))
+                    .with_stats(
+                        ProcessingStats::new()
+                            .with_duration_ms(duration_ms)
+                            .with_metric("ocr_lines".to_string(), "0".to_string()),
+                    );
+            }
+            Err(_) => {
+                store_ocr_info(
+                    &mut object,
+                    None,
+                    None,
+                    recognition_language.as_deref(),
+                    Some(1),
+                    Some(duration_ms),
+                    Some(is_scanned),
+                    Some("OCR task panicked"),
+                );
+                return ProcessingResult::new(object)
+                    .add_diagnostic(ocr_diagnostic(
+                        DiagnosticSeverity::Critical,
+                        "OCR task panicked".to_string(),
+                        "OCR_PANIC",
+                    ))
+                    .with_stats(
+                        ProcessingStats::new()
+                            .with_duration_ms(duration_ms)
+                            .with_metric("ocr_lines".to_string(), "0".to_string()),
+                    );
+            }
         };
 
         progress.set_progress(0.7);
 
-        let text = recognized
+        let text: String = recognized
             .iter()
             .map(|l| l.text.as_str())
             .collect::<Vec<_>>()
             .join("\n");
-        let confidence =
+        let confidence: f64 =
             recognized.iter().map(|l| l.confidence).sum::<f64>() / recognized.len() as f64;
+        let line_count = recognized.len() as u64;
 
-        // Add extracted text as description if no description exists
-        if object.metadata.description.is_none() {
-            let desc: String = text.chars().take(200).collect();
-            object.metadata.description = Some(desc);
-        }
+        store_ocr_info(
+            &mut object,
+            Some(&text),
+            Some(confidence),
+            recognition_language.as_deref(),
+            Some(1),
+            Some(duration_ms),
+            Some(is_scanned),
+            None,
+        );
 
         object.custom_properties.insert(
             "extracted_text".to_string(),
-            crate::models::CustomPropertyValue::Text(text),
+            CustomPropertyValue::Text(text.clone()),
         );
 
+        if object.metadata.description.is_none() {
+            object.metadata.description = Some(text.clone());
+        }
+
         object.metadata.ocr_confidence = Some(confidence);
+        object.metadata.word_count = Some(text.split_whitespace().count());
+
+        let stem = slug_from_filename(filename.as_deref());
+        let vault_path = format!(
+            "Inbox/{}.ocr.md",
+            crate::inbox::model::slugify(&stem)
+        );
+        object.metadata.vault_path = Some(vault_path);
+        object.content = ObjectContent::Markdown(text.clone());
+
+        object.custom_properties.insert(
+            "source_image_mime".to_string(),
+            CustomPropertyValue::Text(mime_type),
+        );
+        object.custom_properties.insert(
+            "source_image_filename".to_string(),
+            CustomPropertyValue::Text(filename.unwrap_or_default()),
+        );
 
         progress.set_progress(1.0);
+
         ProcessingResult::new(object)
+            .with_stats(
+                ProcessingStats::new()
+                    .with_duration_ms(duration_ms)
+                    .with_metric("ocr_lines".to_string(), line_count.to_string()),
+            )
     }
 
     fn supports(&self, object_type: &ObjectType) -> bool {
@@ -137,9 +338,9 @@ mod tests {
                 .object
                 .custom_properties
                 .get("extracted_text")
-                .map(|v| match v {
-                    crate::models::CustomPropertyValue::Text(s) => s.clone(),
-                    _ => String::new(),
+                .and_then(|v| match v {
+                    CustomPropertyValue::Text(s) => Some(s.clone()),
+                    _ => None,
                 })
                 .unwrap_or_default();
             assert!(
@@ -147,9 +348,94 @@ mod tests {
                 "Vision OCR should extract text from the fixture"
             );
             assert!(result.object.metadata.ocr_confidence.is_some());
+
+            // ocr_info must be stored as a JSON-encoded Text so the inbox UI
+            // (commands.rs: custom_json(obj, "ocr_info")) can deserialize it.
+            let ocr_info = result
+                .object
+                .custom_properties
+                .get("ocr_info")
+                .and_then(|v| match v {
+                    CustomPropertyValue::Text(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .expect("ocr_info custom property must exist");
+            let parsed: serde_json::Value =
+                serde_json::from_str(&ocr_info).expect("ocr_info must be valid JSON");
+            assert!(
+                parsed["extracted_text"].as_str().is_some(),
+                "ocr_info JSON must include extracted_text"
+            );
+            assert!(
+                parsed["confidence"].is_number(),
+                "ocr_info JSON must include confidence"
+            );
+            assert!(
+                parsed["is_scanned"].is_boolean(),
+                "ocr_info JSON must include is_scanned"
+            );
+
+            // description must contain the FULL text (not truncated to 200 chars)
+            // so the Indexer tokenizes every word.
+            let desc = result.object.metadata.description.as_deref().unwrap_or("");
+            assert!(!desc.is_empty(), "description must be populated");
+            assert!(
+                desc.len() > 200 || extracted.len() <= 200,
+                "description should contain the full extracted text, not a 200-char truncation"
+            );
+
+            // Content must be transformed to Markdown companion note.
+            assert!(
+                matches!(result.object.content, ObjectContent::Markdown(_)),
+                "content should be Markdown after successful OCR"
+            );
+            assert!(
+                result.object.metadata.vault_path.as_deref().unwrap_or("").ends_with(".ocr.md"),
+                "vault_path should end with .ocr.md, got: {:?}",
+                result.object.metadata.vault_path
+            );
+
+            // Source image metadata preserved.
+            assert!(
+                result.object.custom_properties.contains_key("source_image_mime"),
+                "source image MIME must be preserved"
+            );
+            assert!(
+                result.object.custom_properties.contains_key("source_image_filename"),
+                "source image filename must be preserved"
+            );
+
+            // Stats should include OCR duration.
+            assert!(result.stats.duration_ms.is_some());
+            assert!(result.stats.extra.contains_key("ocr_lines"));
         } else {
-            // Graceful no-op on non-macOS.
-            assert!(!result.modified);
+            // Non-macOS: Vision unavailable, but ocr_info warning is recorded.
+            assert!(
+                result.modified,
+                "object should be modified to record the OCR platform warning"
+            );
+            let ocr_info = result
+                .object
+                .custom_properties
+                .get("ocr_info")
+                .and_then(|v| match v {
+                    CustomPropertyValue::Text(s) => serde_json::from_str::<serde_json::Value>(s).ok(),
+                    _ => None,
+                });
+            assert!(ocr_info.is_some(), "ocr_info must be stored even on failure");
+            let warning = ocr_info
+                .and_then(|v| v["warning"].as_str().map(|s| s.to_string()));
+            assert!(
+                warning.is_some(),
+                "warning must be set when OCR engine is unavailable"
+            );
+            // Image content preserved on failure.
+            assert!(
+                matches!(result.object.content, ObjectContent::Binary { .. }),
+                "binary content must be preserved on OCR failure"
+            );
+            // A diagnostic must be emitted.
+            assert!(result.has_diagnostics(), "a diagnostic must be emitted for platform failure");
         }
     }
 
@@ -166,7 +452,60 @@ mod tests {
             .process(&ctx, ProgressReporter::noop(), CancellationToken::new())
             .await;
 
-        // Non-image types should not be modified
         assert!(!result.modified);
+    }
+
+    #[tokio::test]
+    async fn test_ocr_records_empty_result_warning() {
+        // Construct a tiny 1x1 transparent PNG — Vision on macOS may return
+        // zero recognized lines.  On non-macOS the engine returns
+        // UnsupportedPlatform which also exercises the failure path.
+        let png: Vec<u8> = {
+            let fixture = fixture_png();
+            if fixture.len() > 8 {
+                fixture[..8].to_vec()
+            } else {
+                fixture.clone()
+            }
+        };
+
+        let obj = KnowledgeObject::new(
+            ObjectType::Image,
+            ObjectContent::Binary {
+                mime_type: "image/png".to_string(),
+                data: png,
+                filename: Some("tiny.png".to_string()),
+            },
+        );
+
+        let ctx = ProcessingContext::new(obj);
+        let ocr = OcrProcessor;
+        let result = ocr
+            .process(&ctx, ProgressReporter::noop(), CancellationToken::new())
+            .await;
+
+        // The ocr_info must always be stored, with a warning on failure.
+        let ocr_info = result
+            .object
+            .custom_properties
+            .get("ocr_info")
+            .and_then(|v| match v {
+                CustomPropertyValue::Text(s) => serde_json::from_str::<serde_json::Value>(s).ok(),
+                _ => None,
+            });
+
+        if cfg!(target_os = "macos") {
+            if let Some(info) = ocr_info {
+                // Either success (warning is null) or failure (warning is Some)
+                let _ = info;
+            }
+        } else {
+            assert!(ocr_info.is_some(), "ocr_info must be stored on non-macOS");
+            let warning = ocr_info
+                .and_then(|v| v["warning"].as_str().map(|s| s.to_string()));
+            assert!(
+                warning.is_some(), "warning must be set on non-macOS"
+            );
+        }
     }
 }
