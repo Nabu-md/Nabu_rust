@@ -8,10 +8,11 @@
 //! `remove_smart_folder`.
 
 use crate::components::contexts::{
-    open_tab, record_recent_note, remove_smart_folder, save_smart_folder, use_nav, use_workspace,
-    NavContext, ViewMode, WorkspaceContext,
+    open_tab, record_recent_note, use_nav, use_workspace, NavContext, ViewMode, WorkspaceContext,
 };
-use crate::components::navigation::state::NoteIndexEntry;
+use crate::components::navigation::state::{
+    remove_smart_folder, save_smart_folder, NoteIndexEntry,
+};
 use crate::components::ui::feedback::{use_toast, ErrorPanel, LoadingBlock, SpinnerSize};
 use crate::components::ui::icons::{render_icon_view, Icon};
 use crate::components::ui::info::EmptyState;
@@ -23,21 +24,13 @@ use wasm_bindgen_futures::spawn_local;
 
 /// Lifecycle of the `smart_folder_evaluate` IPC call.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum LoadState {
-    Loading,
-    Error,
-    Loaded,
-}
-impl Default for LoadState {
-    fn default() -> Self {
-        Self::Loading
-    }
-}
+enum LoadState { Loading, Error, Loaded }
+impl Default for LoadState { fn default() -> Self { Self::Loading } }
 
 fn fmt_date(rfc: &str) -> String {
     chrono::DateTime::parse_from_rfc3339(rfc)
         .map(|dt| dt.format("%b %e, %Y").to_string().replace("  ", " "))
-        .unwrap_or_else(|| rfc.chars().take(10).collect())
+        .unwrap_or_else(|_| rfc.chars().take(10).collect())
 }
 
 fn open_note(nav: NavContext, ws: WorkspaceContext, path: &str) {
@@ -57,25 +50,11 @@ fn evaluate_folder(
     spawn_local(async move {
         match ipc::tauri_invoke_safe("smart_folder_evaluate", args).await {
             Ok(Some(val)) => match serde_wasm_bindgen::from_value::<Vec<NoteIndexEntry>>(val) {
-                Ok(list) => {
-                    results.set(list);
-                    state.set(LoadState::Loaded);
-                }
-                Err(e) => {
-                    results.set(Vec::new());
-                    state.set(LoadState::Error);
-                    tracing::warn!("smart folder: {e}");
-                }
+                Ok(list) => { results.set(list); state.set(LoadState::Loaded); }
+                Err(e) => { results.set(Vec::new()); state.set(LoadState::Error); tracing::warn!("smart folder: {e}"); }
             },
-            Ok(None) => {
-                results.set(Vec::new());
-                state.set(LoadState::Error);
-            }
-            Err(e) => {
-                results.set(Vec::new());
-                state.set(LoadState::Error);
-                tracing::warn!("smart folder: {}", e.message());
-            }
+            Ok(None) => { results.set(Vec::new()); state.set(LoadState::Error); }
+            Err(e) => { results.set(Vec::new()); state.set(LoadState::Error); tracing::warn!("smart folder: {}", e.message()); }
         }
     });
 }
@@ -93,18 +72,25 @@ pub fn SmartFoldersPage() -> Element {
     let new_name = use_signal(String::new);
     let new_query = use_signal(String::new);
 
-    // Re-evaluate the selected folder after edits elsewhere.
+    // Re-evaluate the selected folder after external edits.
     use_event_listener(FrontendEventKind::ItemStored, move |_ev: &FrontendEvent| {
         let s = selected.read().clone();
+        let r = results;
+        let rst = results_state;
         if let Some(f) = s {
-            evaluate_folder(f, results, results_state);
+            evaluate_folder(f, r, rst);
         }
     });
 
     let folders = nav.smart_folders.read().clone();
     let sel = selected.read().clone();
     let show = show_form.read();
-    let sel_none = sel.is_none();
+    let results_state_val = *results_state.read();
+
+    let heading: String = match sel.as_ref() {
+        Some(f) => format!("\"{}\" — {} match(es)", f.name, results.read().len()),
+        None => "Select a smart folder".to_string(),
+    };
 
     rsx! {
         div { class: "smart-folders-page h-full overflow-y-auto" }
@@ -121,10 +107,9 @@ pub fn SmartFoldersPage() -> Element {
         div { class: "sf-body px-6 py-4" }
 
         // Create form.
-        if show {
+        {if show {
             rsx! {
                 div { class: "sf-form mb-4 flex items-end gap-3 rounded-lg bg-gray-800/50 px-4 py-3 border border-gray-700" }
-                div { class: "flex-1" }
                 input {
                     r#type: "text",
                     placeholder: "Folder name",
@@ -153,7 +138,6 @@ pub fn SmartFoldersPage() -> Element {
                             new_name.set(String::new());
                             new_query.set(String::new());
                             show_form.set(false);
-                            toasts.success("Smart Folder", format!("Created \"{}\"", new_name.read()));
                         }
                     },
                     "Create"
@@ -164,7 +148,7 @@ pub fn SmartFoldersPage() -> Element {
                     "Cancel"
                 }
             }
-        }
+        } else { rsx! {} }}
 
         // Folder list.
         {if folders.is_empty() {
@@ -179,47 +163,15 @@ pub fn SmartFoldersPage() -> Element {
             rsx! {
                 div { class: "sf-list space-y-1" }
                 for f in &folders {
-                    let f_clone = f.clone();
-                    let id = f.id.clone();
-                    let ws = ws;
-                    rsx! {
-                        div {
-                            class: "sf-item flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-800/50 border border-gray-700 text-sm group",
-                            onclick: move |_: MouseEvent| {
-                                let s = selected;
-                                let r = results;
-                                let rst = results_state;
-                                s.set(Some(f_clone.clone()));
-                                evaluate_folder(f_clone, r, rst);
-                            },
-                        }
-                        div { class: "flex items-center gap-2" }
-                        {render_icon_view(Icon::FolderTree)}
-                        div { class: "flex-1 min-w-0" }
-                        div { class: "text-sm text-gray-200 truncate", "{f.name}" }
-                        if f.pinned { span { class: "text-xs text-yellow-400", "★" } }
-                        div { class: "text-xs text-gray-500 truncate", "query: {f.query}" }
-                        div { class: "sf-actions ml-auto opacity-0 group-hover:opacity-100" }
-                        button {
-                            class: "sf-delete rounded px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-400",
-                            onclick: move |_: MouseEvent| { remove_smart_folder(nav, id.clone()); toasts.success("Smart Folder", "Deleted.".to_string()); },
-                            title: "Delete smart folder",
-                            "{render_icon_view(Icon::X)}"
-                        }
-                    }
+                    {render_folder_row(f, nav, selected, results, results_state)}
                 }
             }
         }}
 
         // Results.
         div { class: "sf-results mt-6" }
-        h2 { class: "text-sm font-semibold text-gray-200 mb-3",
-            if let Some(f) = sel.as_ref() {
-                let n = results.read().len();
-                format!("\"{name}\" — {n} match(es)", name = f.name)
-            } else { "Select a smart folder".to_string() }
-        }
-        {if sel_none {
+        h2 { class: "text-sm font-semibold text-gray-200 mb-3", "{heading}" }
+        {if sel.is_none() {
             rsx! {
                 EmptyState {
                     icon: Some(Icon::Search),
@@ -229,8 +181,8 @@ pub fn SmartFoldersPage() -> Element {
             }
         } else {
             rsx! {
-                {match *results_state.read() {
-                    LoadState::Loading => rsx! { LoadingBlock { spinner_size: SpinnerSize::Sm } },
+                {match results_state_val {
+                    LoadState::Loading => rsx! { LoadingBlock { size: SpinnerSize::Sm } },
                     LoadState::Error => rsx! {
                         ErrorPanel {
                             title: "Smart folder".to_string(),
@@ -251,21 +203,7 @@ pub fn SmartFoldersPage() -> Element {
                             rsx! {
                                 div { class: "space-y-1" }
                                 for n in &res {
-                                    let path = n.path.clone();
-                                    let title = n.title.clone();
-                                    let folder = n.folder.clone();
-                                    let modified = n.modified_at.clone();
-                                    let nav_copy = nav;
-                                    rsx! {
-                                        div {
-                                            class: "sf-result flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800/50 cursor-pointer text-sm",
-                                            onclick: move |_: MouseEvent| { open_note(nav_copy, ws, &path); },
-                                            div { class: "flex-1 min-w-0" }
-                                            div { class: "text-sm text-gray-200 truncate", "{title}" }
-                                            if !folder.is_empty() { span { class: "text-xs text-gray-500", "{folder}/" } }
-                                            div { class: "ml-auto text-xs text-gray-500", "{fmt_date(&modified)}" }
-                                        }
-                                    }
+                                    {render_result_row(n, nav, ws)}
                                 }
                             }
                         }
@@ -273,5 +211,55 @@ pub fn SmartFoldersPage() -> Element {
                 }}
             }
         }}
+    }
+}
+
+fn render_folder_row(
+    f: &SmartFolder,
+    nav: NavContext,
+    selected: Signal<Option<SmartFolder>>,
+    results: Signal<Vec<NoteIndexEntry>>,
+    results_state: Signal<LoadState>,
+) -> Element {
+    let f_clone = f.clone();
+    let id = f.id.clone();
+    rsx! {
+        div {
+            class: "sf-item flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-800/50 border border-gray-700 text-sm group",
+            onclick: move |_: MouseEvent| {
+                selected.set(Some(f_clone.clone()));
+                evaluate_folder(f_clone, results, results_state);
+            },
+        }
+        div { class: "flex items-center gap-2" }
+        {render_icon_view(Icon::FolderTree)}
+        div { class: "flex-1 min-w-0" }
+        div { class: "text-sm text-gray-200 truncate", "{f.name}" }
+        if f.pinned { span { class: "text-xs text-yellow-400", "★" } }
+        div { class: "text-xs text-gray-500 truncate", "query: {f.query}" }
+        div { class: "sf-actions ml-auto opacity-0 group-hover:opacity-100" }
+        button {
+            class: "sf-delete rounded px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-400",
+            onclick: move |_: MouseEvent| { remove_smart_folder(nav, &id); },
+            title: "Delete smart folder",
+            "{render_icon_view(Icon::X)}"
+        }
+    }
+}
+
+fn render_result_row(n: &NoteIndexEntry, nav: NavContext, ws: WorkspaceContext) -> Element {
+    let path = n.path.clone();
+    let title = n.title.clone();
+    let folder = n.folder.clone();
+    let modified = n.modified_at.clone();
+    rsx! {
+        div {
+            class: "sf-result flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-800/50 cursor-pointer text-sm",
+            onclick: move |_: MouseEvent| { open_note(nav, ws, &path); },
+            div { class: "flex-1 min-w-0" }
+            div { class: "text-sm text-gray-200 truncate", "{title}" }
+            if !folder.is_empty() { span { class: "text-xs text-gray-500", "{folder}/" } }
+            div { class: "ml-auto text-xs text-gray-500", "{fmt_date(&modified)}" }
+        }
     }
 }
