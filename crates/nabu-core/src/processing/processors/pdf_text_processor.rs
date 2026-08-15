@@ -23,7 +23,7 @@ fn pdf_diagnostic(severity: DiagnosticSeverity, message: String, code: &str) -> 
 ///
 /// On success the extracted text is:
 /// - Stored as `pdf_extracted_text` plain-text custom property.
-/// - Stored as a structured `pdf_info` JSON custom property (for future UI).
+/// - Stored as a structured `pdf_text_info` JSON custom property (for future UI).
 /// - Set as `metadata.description` in full (not truncated to 200 chars) so
 ///   the Indexer tokenizes every word via `tokenize_str(desc)`.
 pub struct PdfTextProcessor;
@@ -243,17 +243,17 @@ mod tests {
             assert!(desc.contains("QUICK BROWN FOX"), "description must contain the full extracted text");
             assert_eq!(desc, &extracted, "description should be the full extracted text, not truncated");
         } else {
-            // Non-macOS: PDFKit unavailable, pdf_info must be stored with warning.
+            // Non-macOS: PDFKit unavailable, pdf_text_info must be stored with warning.
             assert!(result.modified, "object should be modified to record PDF platform warning");
             let pdf_info = result
                 .object
                 .custom_properties
-                .get("pdf_info")
+                .get("pdf_text_info")
                 .and_then(|v| match v {
                     CustomPropertyValue::Text(s) => serde_json::from_str::<serde_json::Value>(s).ok(),
                     _ => None,
                 });
-            assert!(pdf_info.is_some(), "pdf_info must be stored even on failure");
+            assert!(pdf_info.is_some(), "pdf_text_info must be stored even on failure");
             let warning = pdf_info.and_then(|v| v["warning"].as_str().map(|s| s.to_string()));
             assert!(warning.is_some(), "warning must be set on non-macOS");
         }

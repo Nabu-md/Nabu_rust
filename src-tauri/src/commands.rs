@@ -567,15 +567,19 @@ pub fn toggle_dictation_pill(app: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub fn start_dictation(dictation: State<'_, crate::dictation::DictationService>) -> Result<String, String> {
+pub fn start_dictation(
+    dictation: State<'_, crate::dictation::DictationService>,
+) -> Result<String, String> {
     dictation
         .start()
-        .map(|_| "Dictation started".to_string())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(dictation.status().to_string())
 }
 
 #[tauri::command]
-pub async fn stop_dictation(dictation: State<'_, crate::dictation::DictationService>) -> Result<String, String> {
+pub async fn stop_dictation(
+    dictation: State<'_, crate::dictation::DictationService>,
+) -> Result<String, String> {
     dictation.stop().await.map_err(|e| e.to_string())
 }
 

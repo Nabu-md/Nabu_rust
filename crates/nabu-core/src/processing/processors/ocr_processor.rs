@@ -501,10 +501,124 @@ mod tests {
             }
         } else {
             assert!(ocr_info.is_some(), "ocr_info must be stored on non-macOS");
+        } else {
+            assert!(ocr_info.is_some(), "ocr_info must be stored on non-macOS");
             let warning = ocr_info
                 .and_then(|v| v["warning"].as_str().map(|s| s.to_string()));
             assert!(
                 warning.is_some(), "warning must be set on non-macOS"
+            );
+        }
+    }
+
+    /// Proves the full chain: the JSON stored by the processor under the
+    /// `ocr_info` custom property can be deserialized into the same
+    /// `OcrInfo` struct that `commands.rs::knowledge_object_to_inbox_item`
+    /// expects (via `custom_json(obj, "ocr_info")` → `serde_json::from_value::<OcrInfo>`).
+    #[tokio::test]
+    async fn test_ocr_info_json_compatible_with_inbox_ui() {
+        #[derive(serde::Deserialize, Debug)]
+        struct OcrInfo {
+            extracted_text: Option<String>,
+            confidence: Option<f64>,
+            recognition_language: Option<String>,
+            page_count: Option<u32>,
+            processing_duration_ms: Option<u64>,
+            is_scanned: Option<bool>,
+            warning: Option<String>,
+        }
+
+        let obj = KnowledgeObject::new(
+            ObjectType::Screenshot,
+            ObjectContent::Binary {
+                mime_type: "image/png".to_string(),
+                data: fixture_png(),
+                filename: Some("screenshot.png".to_string()),
+            },
+        );
+
+        let ctx = ProcessingContext::new(obj);
+        let ocr = OcrProcessor;
+        let result = ocr
+            .process(&ctx, ProgressReporter::noop(), CancellationToken::new())
+            .await;
+
+        // Simulate commands.rs::custom_json(obj, "ocr_info")
+        let raw = result
+            .object
+            .custom_properties
+            .get("ocr_info")
+            .and_then(|v| match v {
+                CustomPropertyValue::Text(s) => Some(s.clone()),
+                _ => None,
+            });
+        assert!(raw.is_some(), "ocr_info must be stored as Text");
+        let json_value: serde_json::Value =
+            serde_json::from_str(&raw.unwrap()).expect("ocr_info must be valid JSON");
+
+        // Simulate the deserialization step from knowledge_object_to_inbox_item
+        let parsed: OcrInfo =
+            serde_json::from_value(json_value).expect("ocr_info JSON must deserialize into OcrInfo");
+
+        if cfg!(target_os = "macos") {
+            assert!(
+                parsed.extracted_text.is_some(),
+                "extracted_text must be populated on macOS"
+            );
+            assert!(
+                parsed.confidence.is_some(),
+                "confidence must be populated on macOS"
+            );
+            assert!(parsed.warning.is_none(), "no warning on success");
+        } else {
+            assert!(
+                parsed.warning.is_some(),
+                "warning must be populated on non-macOS"
+            );
+        }
+    }
+
+    /// Proves the indexer can tokenize the OCR text — the full text must be
+    /// in description (which the indexer tokenizes via tokenize_str) and the
+    /// Markdown body (which the indexer tokenizes via tokenize_content).
+    #[tokio::test]
+    async fn test_ocr_text_is_indexable() {
+        let obj = KnowledgeObject::new(
+            ObjectType::Screenshot,
+            ObjectContent::Binary {
+                mime_type: "image/png".to_string(),
+                data: fixture_png(),
+                filename: Some("screenshot.png".to_string()),
+            },
+        );
+
+        let ctx = ProcessingContext::new(obj);
+        let ocr = OcrProcessor;
+        let result = ocr
+            .process(&ctx, ProgressReporter::noop(), CancellationToken::new())
+            .await;
+
+        if cfg!(target_os = "macos") {
+            // The description contains the full OCR text
+            let desc = result.object.metadata.description.as_deref().unwrap_or("");
+            assert!(!desc.is_empty(), "description must contain OCR text");
+
+            // The Markdown body (content) contains the full OCR text
+            let body = match &result.object.content {
+                ObjectContent::Markdown(s) => s.clone(),
+                _ => String::new(),
+            };
+            assert!(!body.is_empty(), "Markdown content must contain OCR text");
+            assert_eq!(desc, &body, "description should match the OCR text body");
+
+            // The vault_path produces a .ocr.md file
+            let vp = result.object.metadata.vault_path.as_deref().unwrap_or("");
+            assert!(vp.ends_with(".ocr.md"), "vault_path must end with .ocr.md");
+
+            // The vault_path includes the source filename stem
+            assert!(
+                vp.contains("screenshot"),
+                "vault_path should contain the source filename stem"
             );
         }
     }
