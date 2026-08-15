@@ -683,3 +683,99 @@ pub fn VersionHistory() -> Element {
         }
     }
 }
+
+// ── Tests ────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn epoch_ms(rfc3339: &str) -> i64 {
+        chrono::DateTime::parse_from_rfc3339(rfc3339)
+            .unwrap()
+            .timestamp_millis()
+    }
+
+    #[test]
+    fn relative_time_seconds() {
+        let then = epoch_ms("2024-01-01T00:00:00Z");
+        assert_eq!(relative_time_at("2024-01-01T00:00:00Z", then + 30_000), "30s ago");
+    }
+
+    #[test]
+    fn relative_time_minutes() {
+        let then = epoch_ms("2024-01-01T00:00:00Z");
+        assert_eq!(relative_time_at("2024-01-01T00:00:00Z", then + 5 * 60_000), "5m ago");
+    }
+
+    #[test]
+    fn relative_time_hours() {
+        let then = epoch_ms("2024-01-01T00:00:00Z");
+        assert_eq!(relative_time_at("2024-01-01T00:00:00Z", then + 3 * 3600_000), "3h ago");
+    }
+
+    #[test]
+    fn relative_time_days() {
+        let then = epoch_ms("2024-01-01T00:00:00Z");
+        assert_eq!(relative_time_at("2024-01-01T00:00:00Z", then + 7 * 86_400_000), "7d ago");
+    }
+
+    #[test]
+    fn relative_time_invalid_returns_recently() {
+        assert_eq!(relative_time_at("garbage", 0), "recently");
+    }
+
+    #[test]
+    fn human_size_formats_bytes() {
+        assert_eq!(human_size(500), "500 B");
+    }
+
+    #[test]
+    fn human_size_formats_kilobytes() {
+        assert_eq!(human_size(2048), "2.0 KB");
+    }
+
+    #[test]
+    fn human_size_formats_megabytes() {
+        assert_eq!(human_size(2_097_152), "2.0 MB");
+    }
+
+    #[test]
+    fn absolute_time_parses_rfc3339() {
+        let result = absolute_time("2024-01-15T14:30:00Z");
+        assert!(result.contains("Jan"));
+        assert!(result.contains("15"));
+    }
+
+    #[test]
+    fn absolute_time_invalid_falls_back_to_input() {
+        assert_eq!(absolute_time("not-a-date"), "not-a-date");
+    }
+
+    #[test]
+    fn version_meta_deserializes_with_defaults() {
+        let json = r#"{
+            "id": "v1",
+            "created_at": "2024-01-01T00:00:00Z",
+            "size": 1024,
+            "char_count": 100
+        }"#;
+        let parsed: VersionMeta = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.id, "v1");
+        assert_eq!(parsed.size, 1024);
+        assert_eq!(parsed.char_count, 100);
+        assert!(!parsed.manual);
+    }
+
+    #[test]
+    fn note_summary_deserializes() {
+        let json = r#"{
+            "path": "notes/test.md",
+            "version_count": 3,
+            "last_snapshot_at": "2024-01-01T00:00:00Z"
+        }"#;
+        let parsed: NoteSummary = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.path, "notes/test.md");
+        assert_eq!(parsed.version_count, 3);
+    }
+}

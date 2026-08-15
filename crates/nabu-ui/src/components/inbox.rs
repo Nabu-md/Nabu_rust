@@ -316,6 +316,41 @@ fn capture_file_drop(file: web_sys::File, toasts: crate::components::ui::feedbac
 
 // ── Inbox Component ──────────────────────────────────────────────────────────
 
+/// Pure filter + sort of inbox items by a search query, sort field, and
+/// direction.  Extracted from the [`Inbox`] component so it can be unit-tested
+/// on native without a DOM or IPC boundary.
+pub fn filter_and_sort(
+    items: &[InboxItem],
+    filter: &str,
+    sort_by: SortField,
+    sort_ascending: bool,
+) -> Vec<InboxItem> {
+    let mut items = items.to_vec();
+    if !filter.is_empty() {
+        let f = filter.to_lowercase();
+        items.retain(|i| {
+            i.title.to_lowercase().contains(&f)
+                || i.source.to_lowercase().contains(&f)
+                || i.object_type.to_lowercase().contains(&f)
+        });
+    }
+    items.sort_by(|a, b| {
+        let ord = match sort_by {
+            SortField::Timestamp => a.id.cmp(&b.id),
+            SortField::Title => a.title.cmp(&b.title),
+            SortField::Source => a.source.cmp(&b.source),
+            SortField::Status => a.status.cmp(&b.status),
+            SortField::ObjectType => a.object_type.cmp(&b.object_type),
+        };
+        if sort_ascending {
+            ord
+        } else {
+            ord.reverse()
+        }
+    });
+    items
+}
+
 #[component]
 pub fn Inbox() -> Element {
     let mut state = use_signal(|| InboxState::default());
@@ -612,26 +647,7 @@ pub fn Inbox() -> Element {
     // Compute filtered + sorted items during render.
     let filtered_items: Vec<InboxItem> = {
         let s = state.read();
-        let mut items = s.items.clone();
-        if !s.filter.is_empty() {
-            let f = s.filter.to_lowercase();
-            items.retain(|i| {
-                i.title.to_lowercase().contains(&f)
-                    || i.source.to_lowercase().contains(&f)
-                    || i.object_type.to_lowercase().contains(&f)
-            });
-        }
-        items.sort_by(|a, b| {
-            let ord = match s.sort_by {
-                SortField::Timestamp => a.id.cmp(&b.id),
-                SortField::Title => a.title.cmp(&b.title),
-                SortField::Source => a.source.cmp(&b.source),
-                SortField::Status => a.status.cmp(&b.status),
-                SortField::ObjectType => a.object_type.cmp(&b.object_type),
-            };
-            if s.sort_ascending { ord } else { ord.reverse() }
-        });
-        items
+        filter_and_sort(&s.items, &s.filter, s.sort_by, s.sort_ascending)
     };
 
     // Read state values needed for rendering.
@@ -776,9 +792,160 @@ pub fn Inbox() -> Element {
                                         span { class: "{colour} text-xs", "{pct}% confidence" }
                                     }
                                 })}
-                            }
-                        }
-                    }
+        }
+    }
+}
+
+// ── Tests ────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(
+        id: &str,
+        title: &str,
+        source: &str,
+        object_type: &str,
+        status: InboxStatus,
+    ) -> InboxItem {
+        InboxItem {
+            id: id.to_string(),
+            title: title.to_string(),
+            object_type: object_type.to_string(),
+            source: source.to_string(),
+            status,
+            mime_type: None,
+            source_file: None,
+            thumbnail: None,
+            confidence: None,
+            suggested_folder: None,
+            metadata: InboxMetadata::default(),
+            duplicate_info: None,
+            timeline_info: None,
+            ocr_info: None,
+            processing_history: Vec::new(),
+            warnings: Vec::new(),
+            selected: false,
+        }
+    }
+
+    #[test]
+    fn inbox_status_default_is_pending() {
+        assert_eq!(InboxStatus::default(), InboxStatus::Pending);
+    }
+
+    #[test]
+    fn sort_field_default_is_timestamp() {
+        assert_eq!(SortField::default(), SortField::Timestamp);
+    }
+
+    #[test]
+    fn filter_and_sort_empty_filter_keeps_all() {
+        let items = vec![
+            item("2", "B", "src1", "note", InboxStatus::Pending),
+            item("1", "A", "src2", "note", InboxStatus::Pending),
+        ];
+        let result = filter_and_sort(&items, "", SortField::Title, true);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].title, "A");
+        assert_eq!(result[1].title, "B");
+    }
+
+    #[test]
+    fn filter_and_sort_search_matches_title() {
+        let items = vec![
+            item("1", "Apple", "src1", "note", InboxStatus::Pending),
+            item("2", "Banana", "src2", "note", InboxStatus::Pending),
+            item("3", "Cherry", "src1", "image", InboxStatus::Pending),
+        ];
+        let result = filter_and_sort(&items, "app", SortField::Title, true);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].title, "Apple");
+    }
+
+    #[test]
+    fn filter_and_sort_search_matches_source() {
+        let items = vec![
+            item("1", "Note A", "src1", "note", InboxStatus::Pending),
+            item("2", "Note B", "src2", "note", InboxStatus::Pending),
+        ];
+        let result = filter_and_sort(&items, "src2", SortField::Title, true);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].source, "src2");
+    }
+
+    #[test]
+    fn filter_and_sort_search_matches_object_type() {
+        let items = vec![
+            item("1", "Note A", "src1", "note", InboxStatus::Pending),
+            item("2", "Image B", "src2", "image", InboxStatus::Pending),
+        ];
+        let result = filter_and_sort(&items, "im", SortField::Title, true);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].object_type, "image");
+    }
+
+    #[test]
+    fn filter_and_sort_case_insensitive() {
+        let items = vec![
+            item("1", "apple", "src", "note", InboxStatus::Pending),
+            item("2", "BANANA", "src", "note", InboxStatus::Pending),
+        ];
+        let result = filter_and_sort(&items, "APPLE", SortField::Title, true);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].title, "apple");
+    }
+
+    #[test]
+    fn filter_and_sort_by_status_ascending() {
+        let items = vec![
+            item("1", "A", "src", "note", InboxStatus::Pending),
+            item("2", "B", "src", "note", InboxStatus::Approved),
+            item("3", "C", "src", "note", InboxStatus::Failed),
+        ];
+        let result = filter_and_sort(&items, "", SortField::Status, true);
+        // Pending < Processing < Ready < Approved < Rejected < Failed
+        assert_eq!(result[0].status, InboxStatus::Pending);
+        assert_eq!(result[1].status, InboxStatus::Approved);
+        assert_eq!(result[2].status, InboxStatus::Failed);
+    }
+
+    #[test]
+    fn filter_and_sort_descending() {
+        let items = vec![
+            item("1", "A", "src", "note", InboxStatus::Pending),
+            item("2", "B", "src", "note", InboxStatus::Pending),
+            item("3", "C", "src", "note", InboxStatus::Pending),
+        ];
+        let result = filter_and_sort(&items, "", SortField::Title, false);
+        assert_eq!(result[0].title, "C");
+        assert_eq!(result[2].title, "A");
+    }
+
+    #[test]
+    fn filter_and_sort_no_match_returns_empty() {
+        let items = vec![item("1", "Apple", "src", "note", InboxStatus::Pending)];
+        let result = filter_and_sort(&items, "xyz", SortField::Title, true);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn thumbnail_to_icon_maps_common_names() {
+        assert_eq!(thumbnail_to_icon("image"), Icon::Image);
+        assert_eq!(thumbnail_to_icon("music-3"), Icon::Music);
+        assert_eq!(thumbnail_to_icon("code-block"), Icon::CodeBlock);
+        assert_eq!(thumbnail_to_icon("mail"), Icon::Mail);
+        assert_eq!(thumbnail_to_icon("unknown-thumb"), Icon::File);
+    }
+
+    #[test]
+    fn confidence_color_thresholds() {
+        assert_eq!(confidence_color(0.95), "text-green-400");
+        assert_eq!(confidence_color(0.7), "text-amber-400");
+        assert_eq!(confidence_color(0.4), "text-orange-400");
+        assert_eq!(confidence_color(0.1), "text-red-400");
+    }
                 }
             }}
 
