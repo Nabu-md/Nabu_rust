@@ -6,7 +6,9 @@
 //! them through the canonical [`CaptureEngine::ingest`] flow.
 //!
 //! The wire protocol matches the shared `native_messaging::Message` type used
-//! by the Safari extension host — nothing custom, no side paths.
+//! by the browser extension host — the JSON uses camelCase field names
+//! (`captureType`, `requestId`) as defined by `#[serde(rename_all = "camelCase")]`.
+//! Nothing custom, no side paths.
 //!
 //! ## Lifecycle & Security
 //!
@@ -37,6 +39,10 @@ use crate::native_messaging::Message;
 /// This constant is shared between the socket server (this module) and the
 /// native messaging host binary (`bin/native_messaging_host.rs`) to ensure
 /// both agree on the IPC endpoint location.
+///
+/// The path lives under the OS temp directory and is independent of the
+/// repository checkout or Cargo target directories, so it resolves correctly
+/// for both development builds and installed bundles.
 pub const SOCKET_PATH: &str = "/tmp/nabu-native-messaging.sock";
 
 /// Maximum message size: 10 MB.
@@ -85,6 +91,12 @@ pub type SocketResult<T> = Result<T, SocketError>;
 ///
 /// Ensures the message is a `capture` command with a known capture type and a
 /// non-empty payload within size limits.
+///
+/// This is the **second** validation point in the pipeline.  The native
+/// messaging host (`native_messaging_host.rs`) validates on the stdin side
+/// before forwarding over the socket; this function re-validates on the socket
+/// server side so that the Tauri application never trusts data that came from
+/// an unauthenticated subprocess.
 fn validate_capture_message(message: &Message) -> SocketResult<()> {
     if message.command != "capture" {
         return Err(SocketError::ValidationError(format!(
@@ -454,6 +466,240 @@ mod tests {
         assert_eq!(SOCKET_PATH, "/tmp/nabu-native-messaging.sock");
     }
 
+    // ---- Test 1: Canonical payload (camelCase wire format) ----
+
+    /// Verify that a browser-style payload using camelCase field names
+    /// (`captureType`, `requestId`) deserializes correctly into the Rust
+    /// `Message` and then routes through validation + CaptureRequest conversion.
+    #[test]
+    fn test_camel_case_payload_routes_to_capture_request() {
+        let json = r#"{
+            "requestId": 42,
+            "command": "capture",
+            "captureType": "bookmark",
+            "payload": {
+                "url": "https://example.com",
+                "title": "Example Domain"
+            }
+        }"#;
+
+        let message: Message = serde_json::from_str(json)
+            .expect("camelCase payload must deserialize");
+        assert_eq!(message.request_id, Some(42));
+        assert_eq!(message.capture_type.as_deref(), Some("bookmark"));
+
+        // Validate through the socket layer
+        validate_capture_message(&message)
+            .expect("valid bookmark capture should pass validation");
+
+        // Convert to CaptureRequest
+        let request = message_to_capture_request(&message);
+        assert!(
+            matches!(request.data, CaptureData::Uri(ref u) if u == "https://example.com"),
+            "expected Uri capture data, got {:?}",
+            request.data
+        );
+        assert_eq!(request.title.as_deref(), Some("Example Domain"));
+        assert_eq!(request.source_url.as_deref(), Some("https://example.com"));
+    }
+
+    /// Same flow but for a `note` capture type — verifies the text path.
+    #[test]
+    fn test_note_capture_routes_to_text_capture_request() {
+        let json = r#"{
+            "requestId": 1,
+            "command": "capture",
+            "captureType": "note",
+            "payload": {
+                "text": "Selected text from the page",
+                "title": "My Note",
+                "url": "https://example.com/article"
+            }
+        }"#;
+
+        let message: Message = serde_json::from_str(json)
+            .expect("camelCase note payload must deserialize");
+
+        validate_capture_message(&message)
+            .expect("valid note capture should pass validation");
+
+        let request = message_to_capture_request(&message);
+        assert!(
+            matches!(request.data, CaptureData::Text(ref t) if t == "Selected text from the page"),
+            "expected Text capture data, got {:?}",
+            request.data
+        );
+    }
+
+    /// Verify that snake_case wire format (the old, mismatched format) is
+    /// NOT silently accepted — the field becomes `None` and validation
+    /// rejects with an explicit error.
+    #[test]
+    fn test_snake_case_capture_type_is_rejected() {
+        let json = r#"{
+            "command": "capture",
+            "capture_type": "bookmark",
+            "payload": {}
+        }"#;
+
+        let message: Message = serde_json::from_str(json)
+            .expect("JSON is syntactically valid");
+        assert!(
+            message.capture_type.is_none(),
+            "snake_case field should not map to capture_type"
+        );
+
+        let err = validate_capture_message(&message).unwrap_err();
+        assert!(
+            err.to_string().contains("Capture type is required"),
+            "expected explicit validation error, got: {}", err
+        );
+    }
+
+    // ---- Test 2: Invalid payloads are rejected ----
+
+    #[test]
+    fn test_reject_missing_capture_type_field() {
+        let json = r#"{
+            "command": "capture",
+            "payload": {}
+        }"#;
+
+        let message: Message = serde_json::from_str(json)
+            .expect("JSON is syntactically valid");
+        let err = validate_capture_message(&message).unwrap_err();
+        assert!(err.to_string().contains("Capture type is required"));
+    }
+
+    #[test]
+    fn test_reject_invalid_capture_type_value() {
+        let json = r#"{
+            "command": "capture",
+            "captureType": "bogus",
+            "payload": {}
+        }"#;
+
+        let message: Message = serde_json::from_str(json)
+            .expect("JSON is syntactically valid");
+        let err = validate_capture_message(&message).unwrap_err();
+        assert!(err.to_string().contains("Invalid capture type"));
+    }
+
+    #[test]
+    fn test_reject_unknown_command() {
+        let json = r#"{
+            "command": "delete",
+            "captureType": "bookmark",
+            "payload": {}
+        }"#;
+
+        let message: Message = serde_json::from_str(json)
+            .expect("JSON is syntactically valid");
+        let err = validate_capture_message(&message).unwrap_err();
+        assert!(err.to_string().contains("Unknown command"));
+    }
+
+    #[test]
+    fn test_reject_missing_payload() {
+        let json = r#"{
+            "command": "capture",
+            "captureType": "bookmark"
+        }"#;
+
+        let message: Message = serde_json::from_str(json)
+            .expect("JSON is syntactically valid");
+        let err = validate_capture_message(&message).unwrap_err();
+        assert!(err.to_string().contains("Payload is required"));
+    }
+
+    #[test]
+    fn test_reject_malformed_json() {
+        let bad_json = r#"{"command":"capture","captureType":"bookmark""#;
+        let result: Result<Message, _> = serde_json::from_str(bad_json);
+        assert!(result.is_err(), "malformed JSON must fail to deserialize");
+    }
+
+    // ---- Test 3: Native host routing (message → CaptureRequest) ----
+
+    #[test]
+    fn test_message_to_capture_request_bookmark() {
+        let bookmark = Message {
+            request_id: Some(1),
+            command: "capture".to_string(),
+            capture_type: Some("bookmark".to_string()),
+            payload: Some(serde_json::json!({ "url": "https://example.com", "title": "Example" })),
+            success: None,
+            error: None,
+            result: None,
+        };
+        let request = message_to_capture_request(&bookmark);
+        assert!(matches!(request.data, CaptureData::Uri(ref u) if u == "https://example.com"));
+        assert_eq!(request.title.as_deref(), Some("Example"));
+    }
+
+    #[test]
+    fn test_message_to_capture_request_note() {
+        let note = Message {
+            request_id: Some(2),
+            command: "capture".to_string(),
+            capture_type: Some("note".to_string()),
+            payload: Some(serde_json::json!({ "text": "Hello world", "title": "Note" })),
+            success: None,
+            error: None,
+            result: None,
+        };
+        let request = message_to_capture_request(&note);
+        assert!(matches!(request.data, CaptureData::Text(ref t) if t == "Hello world"));
+    }
+
+    /// Verify that a reader_mode capture with HTML falls through to
+    /// `message_to_capture_request` as `CaptureData::Text`.
+    #[test]
+    fn test_message_to_capture_request_reader_mode() {
+        let reader = Message {
+            request_id: Some(3),
+            command: "capture".to_string(),
+            capture_type: Some("reader_mode".to_string()),
+            payload: Some(serde_json::json!({
+                "html": "<article>Readable content</article>",
+                "title": "Article Title",
+                "url": "https://example.com/article"
+            })),
+            success: None,
+            error: None,
+            result: None,
+        };
+        let request = message_to_capture_request(&reader);
+        assert!(
+            matches!(request.data, CaptureData::Text(ref t) if t == "<article>Readable content</article>"),
+            "expected Text capture data for reader_mode, got {:?}",
+            request.data
+        );
+        assert_eq!(request.title.as_deref(), Some("Article Title"));
+    }
+
+    #[test]
+    fn test_message_to_capture_request_falls_back_to_note() {
+        // When no url/text/html in payload, falls back to full payload string.
+        let msg = Message {
+            request_id: Some(4),
+            command: "capture".to_string(),
+            capture_type: Some("note".to_string()),
+            payload: Some(serde_json::json!({ "unexpected": "data" })),
+            success: None,
+            error: None,
+            result: None,
+        };
+        let request = message_to_capture_request(&msg);
+        assert!(
+            matches!(request.data, CaptureData::Text(ref t) if t.contains("unexpected")),
+            "expected fallback Text capture data, got {:?}",
+            request.data
+        );
+    }
+
+    // ---- Test 4: Existing socket/framing behavior (regression) ----
+
     #[test]
     fn test_validate_capture_message() {
         let valid = Message {
@@ -488,34 +734,6 @@ mod tests {
             result: None,
         };
         assert!(validate_capture_message(&no_payload).is_err());
-    }
-
-    #[test]
-    fn test_message_to_capture_request() {
-        let bookmark = Message {
-            request_id: Some(1),
-            command: "capture".to_string(),
-            capture_type: Some("bookmark".to_string()),
-            payload: Some(serde_json::json!({ "url": "https://example.com", "title": "Example" })),
-            success: None,
-            error: None,
-            result: None,
-        };
-        let request = message_to_capture_request(&bookmark);
-        assert!(matches!(request.data, CaptureData::Uri(ref u) if u == "https://example.com"));
-        assert_eq!(request.title.as_deref(), Some("Example"));
-
-        let note = Message {
-            request_id: Some(2),
-            command: "capture".to_string(),
-            capture_type: Some("note".to_string()),
-            payload: Some(serde_json::json!({ "text": "Hello world", "title": "Note" })),
-            success: None,
-            error: None,
-            result: None,
-        };
-        let request = message_to_capture_request(&note);
-        assert!(matches!(request.data, CaptureData::Text(ref t) if t == "Hello world"));
     }
 
     #[test]
