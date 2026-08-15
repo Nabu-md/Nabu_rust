@@ -8,12 +8,14 @@
 //! that the service holds only owns an `mpsc` sender and a `JoinHandle`, both
 //! of which are `Send`.
 
-use super::{CapturedAudio, DictationError, Microphone};
-
 #[cfg(target_os = "macos")]
 mod mac;
 
 #[cfg(not(target_os = "macos"))]
 mod fallback;
 
+#[cfg(target_os = "macos")]
 pub use mac::PlatformMicrophone;
+
+#[cfg(not(target_os = "macos"))]
+pub use fallback::PlatformMicrophone;
