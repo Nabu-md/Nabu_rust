@@ -3782,6 +3782,7 @@ dependencies = [
  "chrono",
  "console_error_panic_hook",
  "dioxus",
+ "futures",
  "getrandom 0.2.17",
  "js-sys",
  "nabu-core",

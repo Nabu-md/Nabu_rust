@@ -37,3 +37,7 @@ console_error_panic_hook = "0.1.7"
 # the webview console via a wasm subscriber installed once by the event provider.
 tracing = "0.1"
 tracing-wasm = "0.2"
+
+[dev-dependencies]
+# `block_on` for driving async IPC mock tests on the host target.
+futures = { version = "0.3", default-features = false, features = ["executor", "std"] }

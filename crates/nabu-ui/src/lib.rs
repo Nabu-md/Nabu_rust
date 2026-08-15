@@ -34,15 +34,45 @@ extern crate self as serde_wasm_bindgen;
 // extern crate name, preventing direct access to the upstream crate.
 // The behavior is equivalent for all types used in this codebase
 // (serde_json::Value, String, Vec<T>, Option<T>, and simple structs).
+//
+// On non-wasm targets, `js_sys::JSON` panics, so we bridge via
+// `JsValue::from_str` / `JsValue::as_string` — the JSON round-trip is
+// identical to the wasm path, just without JS engine involvement.
 pub type Error = serde_json::Error;
+
+/// Parse a JSON string into a `JsValue`.
+#[cfg(target_arch = "wasm32")]
+fn js_json_parse(json_str: &str) -> Result<wasm_bindgen::JsValue, Error> {
+    js_sys::JSON::parse(json_str).map_err(|e| {
+        let msg = e.as_string().unwrap_or_else(|| "JSON parse error".to_string());
+        serde::de::Error::custom(msg)
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn js_json_parse(json_str: &str) -> Result<wasm_bindgen::JsValue, Error> {
+    Ok(wasm_bindgen::JsValue::from_str(json_str))
+}
 
 /// Serializes a Rust value to a `JsValue` via JSON round-trip.
 pub fn to_value<T: serde::Serialize>(val: &T) -> Result<wasm_bindgen::JsValue, Error> {
     let json_str = serde_json::to_string(val)?;
-    js_sys::JSON::parse(&json_str).map_err(|e| {
-        let msg = e.as_string().unwrap_or_else(|| "JSON parse error".to_string());
+    js_json_parse(&json_str)
+}
+
+/// Serializes a `JsValue` back to a JSON string.
+#[cfg(target_arch = "wasm32")]
+fn js_json_stringify(jsval: &wasm_bindgen::JsValue) -> Result<String, Error> {
+    let json = js_sys::JSON::stringify(jsval).map_err(|e| {
+        let msg = e.as_string().unwrap_or_else(|| "JSON stringify error".to_string());
         serde::de::Error::custom(msg)
-    })
+    })?;
+    Ok(json.as_string().unwrap_or_else(|| "null".to_string()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn js_json_stringify(jsval: &wasm_bindgen::JsValue) -> Result<String, Error> {
+    Ok(jsval.as_string().unwrap_or_else(|| "null".to_string()))
 }
 
 /// Widened `from_value` that accepts `impl [crate::ipc::IntoJsValue]`.
@@ -56,12 +86,7 @@ pub fn from_value<T: serde::de::DeserializeOwned>(
 ) -> Result<T, Error> {
     match value.into_js_value() {
         Some(jsval) => {
-            let json = js_sys::JSON::stringify(&jsval)
-                .map_err(|e| {
-                    let msg = e.as_string().unwrap_or_else(|| "JSON stringify error".to_string());
-                    serde::de::Error::custom(msg)
-                })?;
-            let json_str = json.as_string().unwrap_or_else(|| "null".to_string());
+            let json_str = js_json_stringify(&jsval)?;
             serde_json::from_str(&json_str)
         }
         None => Err(serde::de::Error::custom("IPC request failed")),

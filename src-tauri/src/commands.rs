@@ -609,38 +609,46 @@ pub fn note_create_file(
     store: State<'_, SettingsStore>,
     ctx: State<'_, ApplicationContext>,
 ) -> Result<(), String> {
-    let content = content.unwrap_or_default();
+    note_create_file_impl(&ctx, &store, &path, content.as_deref().unwrap_or_default())
+}
+
+pub(crate) fn note_create_file_impl(
+    ctx: &ApplicationContext,
+    store: &SettingsStore,
+    path: &str,
+    content: &str,
+) -> Result<(), String> {
     let settings = store.get();
     let vault_path = PathBuf::from(&settings.last_vault_path);
 
     // Validate path is within vault
-    let safe_path = validate_path_within_vault(&vault_path, &path)?;
+    let safe_path = validate_path_within_vault(&vault_path, path)?;
 
     // Validate input safety
-    validate_input_safe(&path, 500)?;
-    validate_input_safe(&content, 1_000_000)?; // 1MB max content
+    validate_input_safe(path, 500)?;
+    validate_input_safe(content, 1_000_000)?; // 1MB max content
 
     // Phase 11.3: if this write overwrites an existing note (import / bulk
     // edit), snapshot the previous content first so it is never lost.
-    let _ = crate::recovery::snapshot_note(&vault_path, &path);
+    let _ = crate::recovery::snapshot_note(&vault_path, path);
 
     // Route through the canonical StorageManager -- the single persistence
     // gateway. This publishes ITEM_STORED, which drives the Indexer and
     // VaultGraph subscribers downstream via the Capability Platform.
-    let manager = get_storage_manager(&ctx)?;
+    let manager = get_storage_manager(ctx)?;
     manager
-        .save_note_content(&path, &content)
+        .save_note_content(path, content)
         .map_err(|e| e.to_string())?;
 
     // Register an undoable history entry so creation can be reversed.
     let undo_path = safe_path.clone();
     let redo_path = safe_path.clone();
-    let redo_content = content.clone();
+    let redo_content = content.to_string();
     crate::history::push_history(
-        &ctx,
+        ctx,
         nabu_core::history::HistoryOp::NoteCreate,
         format!("Create Note '{}'", path),
-        vec![path.clone()],
+        vec![path.to_string()],
         serde_json::json!({ "path": path, "exists": false }),
         serde_json::json!({ "path": path, "exists": true }),
         std::sync::Arc::new(move || {
@@ -1028,7 +1036,11 @@ pub fn inbox_subscribe(ctx: State<'_, ApplicationContext>) -> Result<Vec<InboxIt
 
 #[tauri::command]
 pub fn inbox_get_queue(ctx: State<'_, ApplicationContext>) -> Result<Vec<InboxItem>, String> {
-    let manager = get_storage_manager(&ctx)?;
+    inbox_get_queue_impl(&ctx)
+}
+
+fn inbox_get_queue_impl(ctx: &ApplicationContext) -> Result<Vec<InboxItem>, String> {
+    let manager = get_storage_manager(ctx)?;
     let objects = manager
         .list_objects("", None, 1000)
         .map_err(|e| e.to_string())?;
@@ -1108,8 +1120,12 @@ pub fn inbox_reject(
     id: String,
     reason: String,
 ) -> Result<(), String> {
-    let manager = get_storage_manager(&ctx)?;
-    let object_id = uuid::Uuid::parse_str(&id).map_err(|e| format!("Invalid object id: {}", e))?;
+    inbox_reject_impl(&ctx, &id, &reason)
+}
+
+fn inbox_reject_impl(ctx: &ApplicationContext, id: &str, reason: &str) -> Result<(), String> {
+    let manager = get_storage_manager(ctx)?;
+    let object_id = uuid::Uuid::parse_str(id).map_err(|e| format!("Invalid object id: {}", e))?;
     let mut obj = manager
         .load(object_id)
         .ok_or_else(|| format!("Inbox item not found: {}", id))?;
@@ -1118,16 +1134,16 @@ pub fn inbox_reject(
         custom_text(&obj, "inbox_status").unwrap_or_else(|| "pending".to_string());
     let previous_reason = custom_text(&obj, "rejection_reason").unwrap_or_default();
     set_custom_text(&mut obj, "inbox_status", "rejected");
-    set_custom_text(&mut obj, "rejection_reason", &reason);
+    set_custom_text(&mut obj, "rejection_reason", reason);
     manager.save(&obj).map_err(|e| e.to_string())?;
 
     let manager_undo = manager.clone();
     let manager_redo = manager.clone();
     crate::history::push_history(
-        &ctx,
+        ctx,
         nabu_core::history::HistoryOp::Metadata,
         "Reject Inbox Item".to_string(),
-        vec![id.clone()],
+        vec![id.to_string()],
         serde_json::json!({ "inbox_status": previous_status }),
         serde_json::json!({ "inbox_status": "rejected", "rejection_reason": reason }),
         std::sync::Arc::new(move || {
@@ -1153,8 +1169,12 @@ pub fn inbox_reject(
 
 #[tauri::command]
 pub fn inbox_retry(ctx: State<'_, ApplicationContext>, id: String) -> Result<(), String> {
-    let manager = get_storage_manager(&ctx)?;
-    let object_id = uuid::Uuid::parse_str(&id).map_err(|e| format!("Invalid object id: {}", e))?;
+    inbox_retry_impl(&ctx, &id)
+}
+
+fn inbox_retry_impl(ctx: &ApplicationContext, id: &str) -> Result<(), String> {
+    let manager = get_storage_manager(ctx)?;
+    let object_id = uuid::Uuid::parse_str(id).map_err(|e| format!("Invalid object id: {}", e))?;
     let mut obj = manager
         .load(object_id)
         .ok_or_else(|| format!("Inbox item not found: {}", id))?;
@@ -1166,8 +1186,12 @@ pub fn inbox_retry(ctx: State<'_, ApplicationContext>, id: String) -> Result<(),
 
 #[tauri::command]
 pub fn inbox_delete(ctx: State<'_, ApplicationContext>, id: String) -> Result<(), String> {
-    let manager = get_storage_manager(&ctx)?;
-    let object_id = uuid::Uuid::parse_str(&id).map_err(|e| format!("Invalid object id: {}", e))?;
+    inbox_delete_impl(&ctx, &id)
+}
+
+fn inbox_delete_impl(ctx: &ApplicationContext, id: &str) -> Result<(), String> {
+    let manager = get_storage_manager(ctx)?;
+    let object_id = uuid::Uuid::parse_str(id).map_err(|e| format!("Invalid object id: {}", e))?;
     manager.delete(object_id).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -1195,8 +1219,12 @@ pub fn inbox_batch_reject(
     ids: Vec<String>,
     reason: String,
 ) -> Result<(), String> {
+    inbox_batch_reject_impl(&ctx, &ids, &reason)
+}
+
+fn inbox_batch_reject_impl(ctx: &ApplicationContext, ids: &[String], reason: &str) -> Result<(), String> {
     for id in ids {
-        inbox_reject(ctx.clone(), id, reason.clone())?;
+        inbox_reject_impl(ctx, id, reason)?;
     }
     Ok(())
 }
@@ -1206,8 +1234,12 @@ pub fn inbox_batch_delete(
     ctx: State<'_, ApplicationContext>,
     ids: Vec<String>,
 ) -> Result<(), String> {
+    inbox_batch_delete_impl(&ctx, &ids)
+}
+
+fn inbox_batch_delete_impl(ctx: &ApplicationContext, ids: &[String]) -> Result<(), String> {
     for id in ids {
-        inbox_delete(ctx.clone(), id)?;
+        inbox_delete_impl(ctx, id)?;
     }
     Ok(())
 }
@@ -1217,8 +1249,12 @@ pub fn inbox_batch_retry(
     ctx: State<'_, ApplicationContext>,
     ids: Vec<String>,
 ) -> Result<(), String> {
+    inbox_batch_retry_impl(&ctx, &ids)
+}
+
+fn inbox_batch_retry_impl(ctx: &ApplicationContext, ids: &[String]) -> Result<(), String> {
     for id in ids {
-        inbox_retry(ctx.clone(), id)?;
+        inbox_retry_impl(ctx, id)?;
     }
     Ok(())
 }
@@ -1233,8 +1269,20 @@ pub fn inbox_edit_metadata(
     tags: Vec<String>,
     custom: std::collections::HashMap<String, serde_json::Value>,
 ) -> Result<(), String> {
-    let manager = get_storage_manager(&ctx)?;
-    let object_id = uuid::Uuid::parse_str(&id).map_err(|e| format!("Invalid object id: {}", e))?;
+    inbox_edit_metadata_impl(&ctx, &id, title, author, language, tags, custom)
+}
+
+fn inbox_edit_metadata_impl(
+    ctx: &ApplicationContext,
+    id: &str,
+    title: Option<String>,
+    author: Option<String>,
+    language: Option<String>,
+    tags: Vec<String>,
+    custom: std::collections::HashMap<String, serde_json::Value>,
+) -> Result<(), String> {
+    let manager = get_storage_manager(ctx)?;
+    let object_id = uuid::Uuid::parse_str(id).map_err(|e| format!("Invalid object id: {}", e))?;
     let mut obj = manager
         .load(object_id)
         .ok_or_else(|| format!("Inbox item not found: {}", id))?;
@@ -1265,13 +1313,17 @@ pub fn inbox_move(
     id: String,
     destination: String,
 ) -> Result<(), String> {
-    let manager = get_storage_manager(&ctx)?;
-    let object_id = uuid::Uuid::parse_str(&id).map_err(|e| format!("Invalid object id: {}", e))?;
+    inbox_move_impl(&ctx, &id, &destination)
+}
+
+fn inbox_move_impl(ctx: &ApplicationContext, id: &str, destination: &str) -> Result<(), String> {
+    let manager = get_storage_manager(ctx)?;
+    let object_id = uuid::Uuid::parse_str(id).map_err(|e| format!("Invalid object id: {}", e))?;
     let mut obj = manager
         .load(object_id)
         .ok_or_else(|| format!("Inbox item not found: {}", id))?;
 
-    set_custom_text(&mut obj, "destination_folder", &destination);
+    set_custom_text(&mut obj, "destination_folder", destination);
     manager.save(&obj).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -1338,7 +1390,11 @@ fn knowledge_object_to_queue_item(obj: &KnowledgeObject) -> QueueItem {
 
 #[tauri::command]
 pub fn queue_get_all(ctx: State<'_, ApplicationContext>) -> Result<Vec<QueueItem>, String> {
-    let manager = get_storage_manager(&ctx)?;
+    queue_get_all_impl(&ctx)
+}
+
+fn queue_get_all_impl(ctx: &ApplicationContext) -> Result<Vec<QueueItem>, String> {
+    let manager = get_storage_manager(ctx)?;
     let objects = manager
         .list_objects("", None, 1000)
         .map_err(|e| e.to_string())?;
@@ -1357,13 +1413,17 @@ pub fn queue_set_status(
     id: String,
     status: String,
 ) -> Result<(), String> {
-    let manager = get_storage_manager(&ctx)?;
-    let object_id = uuid::Uuid::parse_str(&id).map_err(|e| format!("Invalid object id: {}", e))?;
+    queue_set_status_impl(&ctx, &id, &status)
+}
+
+fn queue_set_status_impl(ctx: &ApplicationContext, id: &str, status: &str) -> Result<(), String> {
+    let manager = get_storage_manager(ctx)?;
+    let object_id = uuid::Uuid::parse_str(id).map_err(|e| format!("Invalid object id: {}", e))?;
     let mut obj = manager
         .load(object_id)
         .ok_or_else(|| format!("Object not found: {}", id))?;
 
-    let status = QueueStatus::from_label(&status);
+    let status = QueueStatus::from_label(status);
     let previous =
         custom_text(&obj, "reading_status").unwrap_or_else(|| QueueStatus::Unread.label().to_string());
     let new_label = status.label().to_string();
@@ -1373,10 +1433,10 @@ pub fn queue_set_status(
     let manager_undo = manager.clone();
     let manager_redo = manager.clone();
     crate::history::push_history(
-        &ctx,
+        ctx,
         nabu_core::history::HistoryOp::Metadata,
         format!("Mark '{}' {}", obj.metadata.title.as_deref().unwrap_or("item"), new_label),
-        vec![id.clone()],
+        vec![id.to_string()],
         serde_json::json!({ "reading_status": previous }),
         serde_json::json!({ "reading_status": new_label }),
         std::sync::Arc::new(move || {
@@ -1405,13 +1465,17 @@ pub fn queue_set_priority(
     id: String,
     priority: String,
 ) -> Result<(), String> {
-    let manager = get_storage_manager(&ctx)?;
-    let object_id = uuid::Uuid::parse_str(&id).map_err(|e| format!("Invalid object id: {}", e))?;
+    queue_set_priority_impl(&ctx, &id, &priority)
+}
+
+fn queue_set_priority_impl(ctx: &ApplicationContext, id: &str, priority: &str) -> Result<(), String> {
+    let manager = get_storage_manager(ctx)?;
+    let object_id = uuid::Uuid::parse_str(id).map_err(|e| format!("Invalid object id: {}", e))?;
     let mut obj = manager
         .load(object_id)
         .ok_or_else(|| format!("Object not found: {}", id))?;
 
-    let priority = QueuePriority::from_label(&priority);
+    let priority = QueuePriority::from_label(priority);
     set_custom_text(&mut obj, "reading_priority", priority.label());
     manager.save(&obj).map_err(|e| e.to_string())?;
     Ok(())
@@ -1423,8 +1487,12 @@ pub fn queue_set_progress(
     id: String,
     progress: f32,
 ) -> Result<(), String> {
-    let manager = get_storage_manager(&ctx)?;
-    let object_id = uuid::Uuid::parse_str(&id).map_err(|e| format!("Invalid object id: {}", e))?;
+    queue_set_progress_impl(&ctx, &id, progress)
+}
+
+fn queue_set_progress_impl(ctx: &ApplicationContext, id: &str, progress: f32) -> Result<(), String> {
+    let manager = get_storage_manager(ctx)?;
+    let object_id = uuid::Uuid::parse_str(id).map_err(|e| format!("Invalid object id: {}", e))?;
     let mut obj = manager
         .load(object_id)
         .ok_or_else(|| format!("Object not found: {}", id))?;
@@ -1443,10 +1511,40 @@ pub fn queue_batch_set_status(
     ids: Vec<String>,
     status: String,
 ) -> Result<(), String> {
+    queue_batch_set_status_impl(&ctx, &ids, &status)
+}
+
+fn queue_batch_set_status_impl(ctx: &ApplicationContext, ids: &[String], status: &str) -> Result<(), String> {
     for id in ids {
-        queue_set_status(ctx.clone(), id, status.clone())?;
+        queue_set_status_impl(ctx, id, status)?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn queue_archive_completed(ctx: State<'_, ApplicationContext>) -> Result<usize, String> {
+    queue_archive_completed_impl(&ctx)
+}
+
+fn queue_archive_completed_impl(ctx: &ApplicationContext) -> Result<usize, String> {
+    let manager = get_storage_manager(ctx)?;
+    let objects = manager
+        .list_objects("", None, 1000)
+        .map_err(|e| e.to_string())?;
+
+    let mut archived = 0;
+    for mut obj in objects {
+        let status = custom_text(&obj, "reading_status")
+            .map(|s| QueueStatus::from_label(&s))
+            .unwrap_or_default();
+        if status == QueueStatus::Completed {
+            set_custom_text(&mut obj, "reading_status", "archived");
+            if manager.save(&obj).is_ok() {
+                archived += 1;
+            }
+        }
+    }
+    Ok(archived)
 }
 
 // ── Navigation & Discovery Commands ────────────────────────────────
@@ -3000,14 +3098,18 @@ pub fn inbox_quick_capture(
     title: String,
     content: String,
 ) -> Result<(), String> {
+    inbox_quick_capture_impl(&ctx, &title, &content)
+}
+
+fn inbox_quick_capture_impl(ctx: &ApplicationContext, title: &str, content: &str) -> Result<(), String> {
     use nabu_core::models::knowledge_object::{KnowledgeObject, ObjectContent, ObjectMetadata, ObjectType};
-    let manager = get_storage_manager(&ctx)?;
-    let mut obj = KnowledgeObject::new(ObjectType::Note, ObjectContent::Markdown(content));
+    let manager = get_storage_manager(ctx)?;
+    let mut obj = KnowledgeObject::new(ObjectType::Note, ObjectContent::Markdown(content.to_string()));
     let mut metadata = ObjectMetadata::default();
     metadata.title = Some(if title.trim().is_empty() {
         "Quick capture".to_string()
     } else {
-        title
+        title.to_string()
     });
     metadata.description = Some("Captured via Quick Capture".to_string());
     obj.metadata = metadata;
