@@ -129,10 +129,16 @@ impl TrashSort {
 
 /// Human-readable relative time ("5m ago", "3d ago").
 fn relative_time(rfc3339: &str) -> String {
+    let now_ms = js_sys::Date::now() as i64;
+    relative_time_at(rfc3339, now_ms)
+}
+
+/// Pure version of [`relative_time`] that accepts an explicit `now_ms`
+/// (epoch millis). Extracted so tests can run on native without `js_sys`.
+fn relative_time_at(rfc3339: &str, now_ms: i64) -> String {
     let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(rfc3339) else {
         return "recently".to_string();
     };
-    let now_ms = js_sys::Date::now() as i64;
     let then_ms = parsed.timestamp_millis();
     let secs = ((now_ms - then_ms) / 1000).max(0);
     if secs < 60 {
@@ -1492,12 +1498,93 @@ mod tests {
 
     #[test]
     fn relative_time_formats_seconds() {
-        let secs = 30;
-        let result = if secs < 60 {
-            format!("{secs}s ago")
-        } else {
-            "other".to_string()
-        };
-        assert!(result.contains("30s"));
+        let now_ms = 1_000_000_000_000i64;
+        // 30 seconds before "now".
+        let ts = "2024-01-01T00:00:30Z"; // not relevant, we pass now_ms explicitly
+        let parsed = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z").unwrap();
+        let then_ms = parsed.timestamp_millis();
+        let now_ms = then_ms + 30_000;
+        assert_eq!(relative_time_at("2024-01-01T00:00:00Z", now_ms), "30s ago");
+    }
+
+    #[test]
+    fn relative_time_minutes() {
+        let parsed = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z").unwrap();
+        let then_ms = parsed.timestamp_millis();
+        // 5 minutes ago.
+        let now_ms = then_ms + 5 * 60_000;
+        assert_eq!(relative_time_at("2024-01-01T00:00:00Z", now_ms), "5m ago");
+    }
+
+    #[test]
+    fn relative_time_hours() {
+        let parsed = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z").unwrap();
+        let then_ms = parsed.timestamp_millis();
+        // 3 hours ago.
+        let now_ms = then_ms + 3 * 3600_000;
+        assert_eq!(relative_time_at("2024-01-01T00:00:00Z", now_ms), "3h ago");
+    }
+
+    #[test]
+    fn relative_time_days() {
+        let parsed = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z").unwrap();
+        let then_ms = parsed.timestamp_millis();
+        // 7 days ago.
+        let now_ms = then_ms + 7 * 86_400_000;
+        assert_eq!(relative_time_at("2024-01-01T00:00:00Z", now_ms), "7d ago");
+    }
+
+    #[test]
+    fn relative_time_invalid_returns_recently() {
+        assert_eq!(relative_time_at("not-a-date", 1_000_000_000_000), "recently");
+    }
+
+    #[test]
+    fn relative_time_zero_delta_shows_seconds() {
+        let parsed = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z").unwrap();
+        let now_ms = parsed.timestamp_millis();
+        assert_eq!(relative_time_at("2024-01-01T00:00:00Z", now_ms), "0s ago");
+    }
+
+    #[test]
+    fn display_name_extracts_basename() {
+        let r = make_record("t/a.md", "notes/sub/a.md", None, false, 1, None);
+        assert_eq!(r.display_name(), "a.md");
+        let r2 = make_record("t/b", "notes/folder", None, true, 3, None);
+        assert_eq!(r2.display_name(), "folder");
+    }
+
+    #[test]
+    fn icon_reflects_folder_and_type() {
+        let md = make_record("t/a.md", "notes/a.md", None, false, 1, None);
+        assert_eq!(md.icon(), Icon::FileText);
+        let folder = make_record("t/b", "notes/b", None, true, 1, None);
+        assert_eq!(folder.icon(), Icon::Folder);
+        let other = make_record("t/c.png", "assets/c.png", None, false, 1, None);
+        assert_eq!(other.icon(), Icon::File);
+    }
+
+    #[test]
+    fn sorted_view_sorts_by_file_count_ascending() {
+        let records = vec![
+            make_record("t/l", "notes/large.md", Some("2024-01-01T00:00:00Z"), false, 10, None),
+            make_record("t/s", "notes/small.md", Some("2024-01-02T00:00:00Z"), false, 1, None),
+            make_record("t/m", "notes/mid.md", Some("2024-01-03T00:00:00Z"), false, 5, None),
+        ];
+        let sorted = sorted_view(&records, &TrashFilter::All, &TrashSort::Size, true, "");
+        assert_eq!(sorted[0].file_count, 1);
+        assert_eq!(sorted[1].file_count, 5);
+        assert_eq!(sorted[2].file_count, 10);
+    }
+
+    #[test]
+    fn sorted_view_sorts_descending() {
+        let records = vec![
+            make_record("t/l.md", "notes/l.md", Some("2024-01-01T00:00:00Z"), false, 10, None),
+            make_record("t/s.md", "notes/s.md", Some("2024-01-02T00:00:00Z"), false, 1, None),
+        ];
+        let sorted = sorted_view(&records, &TrashFilter::All, &TrashSort::Name, false, "");
+        assert_eq!(sorted[0].display_name(), "s.md");
+        assert_eq!(sorted[1].display_name(), "l.md");
     }
 }

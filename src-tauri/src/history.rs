@@ -63,7 +63,11 @@ pub struct HistoryStatus {
 
 #[tauri::command]
 pub fn history_status(ctx: State<'_, ApplicationContext>) -> Result<HistoryStatus, String> {
-    let manager = get_history_manager(&ctx)?;
+    history_status_impl(&ctx)
+}
+
+pub(crate) fn history_status_impl(ctx: &ApplicationContext) -> Result<HistoryStatus, String> {
+    let manager = get_history_manager(ctx)?;
     let manager = manager.read().map_err(|e| e.to_string())?;
     Ok(HistoryStatus {
         can_undo: manager.can_undo(),
@@ -80,7 +84,11 @@ pub fn history_status(ctx: State<'_, ApplicationContext>) -> Result<HistoryStatu
 /// or `None` when there is nothing to undo.
 #[tauri::command]
 pub fn history_undo(ctx: State<'_, ApplicationContext>) -> Result<Option<String>, String> {
-    let manager = get_history_manager(&ctx)?;
+    history_undo_impl(&ctx)
+}
+
+pub(crate) fn history_undo_impl(ctx: &ApplicationContext) -> Result<Option<String>, String> {
+    let manager = get_history_manager(ctx)?;
     manager.write().map_err(|e| e.to_string())?.undo()
 }
 
@@ -88,14 +96,22 @@ pub fn history_undo(ctx: State<'_, ApplicationContext>) -> Result<Option<String>
 /// redone, or `None` when there is nothing to redo.
 #[tauri::command]
 pub fn history_redo(ctx: State<'_, ApplicationContext>) -> Result<Option<String>, String> {
-    let manager = get_history_manager(&ctx)?;
+    history_redo_impl(&ctx)
+}
+
+pub(crate) fn history_redo_impl(ctx: &ApplicationContext) -> Result<Option<String>, String> {
+    let manager = get_history_manager(ctx)?;
     manager.write().map_err(|e| e.to_string())?.redo()
 }
 
 /// Clears all history (used on vault switch / workspace invalidation).
 #[tauri::command]
 pub fn history_clear(ctx: State<'_, ApplicationContext>) -> Result<(), String> {
-    let manager = get_history_manager(&ctx)?;
+    history_clear_impl(&ctx)
+}
+
+pub(crate) fn history_clear_impl(ctx: &ApplicationContext) -> Result<(), String> {
+    let manager = get_history_manager(ctx)?;
     manager.write().map_err(|e| e.to_string())?.clear();
     Ok(())
 }
@@ -106,7 +122,11 @@ pub fn history_set_depth(
     ctx: State<'_, ApplicationContext>,
     depth: usize,
 ) -> Result<(), String> {
-    let manager = get_history_manager(&ctx)?;
+    history_set_depth_impl(&ctx, depth)
+}
+
+pub(crate) fn history_set_depth_impl(ctx: &ApplicationContext, depth: usize) -> Result<(), String> {
+    let manager = get_history_manager(ctx)?;
     manager
         .write()
         .map_err(|e| e.to_string())?
@@ -427,10 +447,19 @@ pub fn note_rename(
     ctx: State<'_, ApplicationContext>,
     store: State<'_, SettingsStore>,
 ) -> Result<(), String> {
+    note_rename_impl(&ctx, &store, &from, &to)
+}
+
+pub(crate) fn note_rename_impl(
+    ctx: &ApplicationContext,
+    store: &SettingsStore,
+    from: &str,
+    to: &str,
+) -> Result<(), String> {
     let settings = store.get();
     let vault_path = PathBuf::from(&settings.last_vault_path);
-    let from_path = validate_path_within_vault(&vault_path, &from)?;
-    let to_path = validate_path_within_vault(&vault_path, &to)?;
+    let from_path = validate_path_within_vault(&vault_path, from)?;
+    let to_path = validate_path_within_vault(&vault_path, to)?;
 
     if !from_path.exists() {
         return Err(format!("Source file does not exist: {}", from));
@@ -440,14 +469,14 @@ pub fn note_rename(
     }
     // Phase 11.3: snapshot the note before it is renamed so its history is
     // preserved under the pre-rename content.
-    let _ = crate::recovery::snapshot_note(&vault_path, &from);
+    let _ = crate::recovery::snapshot_note(&vault_path, from);
     // Route tracked objects through the canonical StorageManager so the rename
     // propagates to the index/graph via the ITEM_STORED pipeline. Untracked
     // files and folders fall back to a direct filesystem rename.
     let manager = ctx.storage_manager();
     let moved_through_manager = if let Some(manager) = &manager {
-        if let Some(obj) = manager.find_by_path(&from) {
-            manager.move_object(obj.id, &to).map_err(|e| e.to_string())?;
+        if let Some(obj) = manager.find_by_path(from) {
+            manager.move_object(obj.id, to).map_err(|e| e.to_string())?;
             true
         } else {
             if let Some(parent) = to_path.parent() {
@@ -476,10 +505,10 @@ pub fn note_rename(
     let redo_manager = manager;
 
     push_history(
-        &ctx,
+        ctx,
         HistoryOp::NoteRename,
         format!("Rename Note to '{}'", to),
-        vec![from.clone(), to.clone()],
+        vec![from.to_string(), to.to_string()],
         serde_json::json!({ "from": from }),
         serde_json::json!({ "to": to }),
         // Undo: rename back. Objects routed through the StorageManager are
@@ -521,16 +550,24 @@ pub fn note_delete(
     ctx: State<'_, ApplicationContext>,
     store: State<'_, SettingsStore>,
 ) -> Result<(), String> {
+    note_delete_impl(&ctx, &store, &path)
+}
+
+pub(crate) fn note_delete_impl(
+    ctx: &ApplicationContext,
+    store: &SettingsStore,
+    path: &str,
+) -> Result<(), String> {
     let settings = store.get();
     let vault_path = PathBuf::from(&settings.last_vault_path);
-    let safe_path = validate_path_within_vault(&vault_path, &path)?;
+    let safe_path = validate_path_within_vault(&vault_path, path)?;
     if !safe_path.exists() {
         return Err(format!("File does not exist: {}", path));
     }
 
     // Phase 11.3: snapshot before the note is moved to trash so its content
     // survives in version history even after permanent deletion.
-    let _ = crate::recovery::snapshot_note(&vault_path, &path);
+    let _ = crate::recovery::snapshot_note(&vault_path, path);
     let _trash = trash_file(&vault_path, &safe_path)?;
     let undo_vault = vault_path.clone();
     let redo_vault = vault_path;
@@ -538,10 +575,10 @@ pub fn note_delete(
     let redo_path = safe_path;
 
     push_history(
-        &ctx,
+        ctx,
         HistoryOp::NoteDelete,
         format!("Delete Note '{}'", path),
-        vec![path.clone()],
+        vec![path.to_string()],
         serde_json::json!({ "path": path, "trashed": false }),
         serde_json::json!({ "path": path, "trashed": true }),
         // Undo: restore the note from trash (resolved by original path).
@@ -566,9 +603,17 @@ pub fn note_restore(
     ctx: State<'_, ApplicationContext>,
     store: State<'_, SettingsStore>,
 ) -> Result<(), String> {
+    note_restore_impl(&ctx, &store, &trash_path)
+}
+
+pub(crate) fn note_restore_impl(
+    ctx: &ApplicationContext,
+    store: &SettingsStore,
+    trash_path: &str,
+) -> Result<(), String> {
     let settings = store.get();
     let vault_path = PathBuf::from(&settings.last_vault_path);
-    let trash = PathBuf::from(&trash_path);
+    let trash = PathBuf::from(trash_path);
     if !trash.exists() {
         return Err(format!("Trash item does not exist: {}", trash_path));
     }
@@ -587,10 +632,10 @@ pub fn note_restore(
     let redo_original = original;
 
     push_history(
-        &ctx,
+        ctx,
         HistoryOp::NoteRestore,
         label,
-        vec![trash_path.clone()],
+        vec![trash_path.to_string()],
         serde_json::json!({ "restored": false }),
         serde_json::json!({ "restored": true }),
         // Undo: trash it again (fresh timestamped name).
@@ -612,6 +657,10 @@ pub fn note_restore(
 /// the live state.
 #[tauri::command]
 pub fn trash_list(store: State<'_, SettingsStore>) -> Result<Vec<TrashRecord>, String> {
+    trash_list_impl(&store)
+}
+
+pub(crate) fn trash_list_impl(store: &SettingsStore) -> Result<Vec<TrashRecord>, String> {
     let settings = store.get();
     let vault_path = PathBuf::from(&settings.last_vault_path);
     let _ = purge_expired(&vault_path, &settings.trash_retention_policy);
@@ -626,10 +675,14 @@ pub fn trash_delete(
     trash_paths: Vec<String>,
     store: State<'_, SettingsStore>,
 ) -> Result<usize, String> {
+    trash_delete_impl(&store, &trash_paths)
+}
+
+pub(crate) fn trash_delete_impl(store: &SettingsStore, trash_paths: &[String]) -> Result<usize, String> {
     let settings = store.get();
     let vault_path = PathBuf::from(&settings.last_vault_path);
     let mut deleted = 0;
-    for tp in &trash_paths {
+    for tp in trash_paths {
         if delete_from_trash(&vault_path, Path::new(tp)).is_ok() {
             deleted += 1;
         }

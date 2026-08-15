@@ -620,18 +620,27 @@ pub fn versions_diff(
     id_b: Option<String>,
     store: State<'_, SettingsStore>,
 ) -> Result<Vec<DiffRow>, String> {
-    let vault = vault_path(&store);
-    let read = |id: Option<String>| -> Result<String, String> {
+    versions_diff_impl(&store, &path, id_a.as_deref(), id_b.as_deref())
+}
+
+pub(crate) fn versions_diff_impl(
+    store: &SettingsStore,
+    path: &str,
+    id_a: Option<&str>,
+    id_b: Option<&str>,
+) -> Result<Vec<DiffRow>, String> {
+    let vault = vault_path(store);
+    let read = |id: Option<&str>| -> Result<String, String> {
         match id {
             Some(id) => {
-                let file = version_file(&vault, &path, &id);
+                let file = version_file(&vault, path, id);
                 if !file.is_file() {
                     return Err(format!("Snapshot {} not found", id));
                 }
                 std::fs::read_to_string(&file).map_err(|e| e.to_string())
             }
             None => {
-                let abs = resolve_in_vault(&vault, &path)?;
+                let abs = resolve_in_vault(&vault, path)?;
                 if abs.is_file() {
                     std::fs::read_to_string(&abs).map_err(|e| e.to_string())
                 } else {
@@ -651,13 +660,17 @@ pub fn snapshot_create(
     path: String,
     store: State<'_, SettingsStore>,
 ) -> Result<VersionMeta, String> {
-    let vault = vault_path(&store);
-    let abs = resolve_in_vault(&vault, &path)?;
+    snapshot_create_impl(&store, &path)
+}
+
+pub(crate) fn snapshot_create_impl(store: &SettingsStore, path: &str) -> Result<VersionMeta, String> {
+    let vault = vault_path(store);
+    let abs = resolve_in_vault(&vault, path)?;
     if !abs.is_file() {
         return Err(format!("Note does not exist: {}", path));
     }
     let content = std::fs::read_to_string(&abs).map_err(|e| e.to_string())?;
-    let mut manifest = read_manifest(&vault, &path);
+    let mut manifest = read_manifest(&vault, path);
 
     let id = chrono::Utc::now().timestamp_millis().to_string();
     let meta = VersionMeta {
@@ -675,14 +688,14 @@ pub fn snapshot_create(
         manual: true,
         author: None,
     };
-    if let Some(parent) = version_file(&vault, &path, &id).parent() {
+    if let Some(parent) = version_file(&vault, path, &id).parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(version_file(&vault, &path, &id), &content).map_err(|e| e.to_string())?;
+    std::fs::write(version_file(&vault, path, &id), &content).map_err(|e| e.to_string())?;
     manifest.versions.push(meta.clone());
     while manifest.versions.len() > MAX_VERSIONS_PER_NOTE {
         let old = manifest.versions.remove(0);
-        let _ = std::fs::remove_file(version_file(&vault, &path, &old.id));
+        let _ = std::fs::remove_file(version_file(&vault, path, &old.id));
     }
     write_manifest(&vault, &manifest)?;
     Ok(meta)
@@ -699,7 +712,11 @@ pub struct NoteSummary {
 /// Lists every note that has snapshots (Snapshot Browser).
 #[tauri::command]
 pub fn versions_all(store: State<'_, SettingsStore>) -> Result<Vec<NoteSummary>, String> {
-    let vault = vault_path(&store);
+    versions_all_impl(&store)
+}
+
+pub(crate) fn versions_all_impl(store: &SettingsStore) -> Result<Vec<NoteSummary>, String> {
+    let vault = vault_path(store);
     let root = versions_root(&vault);
     let Ok(entries) = std::fs::read_dir(&root) else {
         return Ok(vec![]);
@@ -731,13 +748,17 @@ pub fn versions_all(store: State<'_, SettingsStore>) -> Result<Vec<NoteSummary>,
 /// Persists the current workspace session.
 #[tauri::command]
 pub fn session_save(state: SessionState, store: State<'_, SettingsStore>) -> Result<(), String> {
-    let vault = vault_path(&store);
+    session_save_impl(&store, &state)
+}
+
+pub(crate) fn session_save_impl(store: &SettingsStore, state: &SessionState) -> Result<(), String> {
+    let vault = vault_path(store);
     if vault.as_os_str().is_empty() {
         return Ok(());
     }
     let nabu = nabu_dir(&vault);
     std::fs::create_dir_all(&nabu).map_err(|e| e.to_string())?;
-    let json = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
     std::fs::write(session_path(&vault), json).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -745,14 +766,22 @@ pub fn session_save(state: SessionState, store: State<'_, SettingsStore>) -> Res
 /// Loads the persisted session, if any.
 #[tauri::command]
 pub fn session_load(store: State<'_, SettingsStore>) -> Result<Option<SessionState>, String> {
-    let vault = vault_path(&store);
+    session_load_impl(&store)
+}
+
+pub(crate) fn session_load_impl(store: &SettingsStore) -> Result<Option<SessionState>, String> {
+    let vault = vault_path(store);
     Ok(read_session(&vault))
 }
 
 /// Clears the persisted session.
 #[tauri::command]
 pub fn session_clear(store: State<'_, SettingsStore>) -> Result<(), String> {
-    let vault = vault_path(&store);
+    session_clear_impl(&store)
+}
+
+pub(crate) fn session_clear_impl(store: &SettingsStore) -> Result<(), String> {
+    let vault = vault_path(store);
     let _ = std::fs::remove_file(session_path(&vault));
     Ok(())
 }
@@ -760,7 +789,11 @@ pub fn session_clear(store: State<'_, SettingsStore>) -> Result<(), String> {
 /// Reports whether the previous run crashed and whether a session is available.
 #[tauri::command]
 pub fn recovery_check(store: State<'_, SettingsStore>) -> Result<RecoveryStatus, String> {
-    let vault = vault_path(&store);
+    recovery_check_impl(&store)
+}
+
+pub(crate) fn recovery_check_impl(store: &SettingsStore) -> Result<RecoveryStatus, String> {
+    let vault = vault_path(store);
     let session = read_session(&vault);
     Ok(RecoveryStatus {
         crashed: pending_marker(&vault).exists(),
@@ -773,7 +806,11 @@ pub fn recovery_check(store: State<'_, SettingsStore>) -> Result<RecoveryStatus,
 /// the previous session.
 #[tauri::command]
 pub fn recovery_discard(store: State<'_, SettingsStore>) -> Result<(), String> {
-    let vault = vault_path(&store);
+    recovery_discard_impl(&store)
+}
+
+pub(crate) fn recovery_discard_impl(store: &SettingsStore) -> Result<(), String> {
+    let vault = vault_path(store);
     let _ = std::fs::remove_file(pending_marker(&vault));
     Ok(())
 }

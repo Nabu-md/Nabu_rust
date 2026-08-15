@@ -55,14 +55,20 @@ pub struct NoteSummary {
 
 /// Short relative timestamp for display ("5m ago", "3d ago").
 fn relative_time(rfc3339: &str) -> String {
+    let now_ms = js_sys::Date::now() as i64;
+    relative_time_at(rfc3339, now_ms)
+}
+
+/// Pure version of [`relative_time`] that accepts an explicit `now_ms`
+/// (epoch millis). Extracted so tests can run on native without `js_sys`.
+fn relative_time_at(rfc3339: &str, now_ms: i64) -> String {
     let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(rfc3339) else {
         return "recently".to_string();
     };
-    let now_ms = js_sys::Date::now() as i64;
     let then_ms = parsed.timestamp_millis();
     let secs = ((now_ms - then_ms) / 1000).max(0);
     if secs < 60 {
-        format!("{}s ago", secs)
+        format!("{secs}s ago")
     } else if secs < 3600 {
         format!("{}m ago", secs / 60)
     } else if secs < 86_400 {
