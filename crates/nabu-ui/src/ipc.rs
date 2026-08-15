@@ -147,7 +147,7 @@ mod tests {
     fn into_js_value_for_ok_result() {
         let val = JsValue::from_str("hello");
         let result: Result<JsValue, IpcError> = Ok(val);
-        let v = result.into_js_value();
+        let v = result.into_js_value().unwrap();
         assert_eq!(v.as_string(), Some("hello".to_string()));
     }
 
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn into_js_value_for_some_option() {
-        let v = Some(JsValue::from_str("hi")).into_js_value();
+        let v = Some(JsValue::from_str("hi")).into_js_value().unwrap();
         assert_eq!(v.as_string(), Some("hi".to_string()));
     }
 

@@ -30,6 +30,7 @@
 
 pub mod activity;
 pub mod app;
+pub mod canvas;
 pub mod contexts;
 pub mod dictation_pill;
 pub mod editor;
