@@ -23,7 +23,6 @@ use nabu_core::{build_graph_from_objects, VaultGraph};
 use tempfile::tempdir;
 
 mod common;
-use common::budgets;
 use common::generate_corpus;
 
 pub fn bench_graph_rebuild(c: &mut Criterion) {

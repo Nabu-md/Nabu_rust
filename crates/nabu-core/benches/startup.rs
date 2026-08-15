@@ -30,11 +30,10 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use nabu_core::{Indexer, StorageManager, VaultGraph};
-use std::path::PathBuf;
 use tempfile::tempdir;
 
 mod common;
-use common::{budgets, generate_corpus, stage_full_vault};
+use common::{generate_corpus, stage_full_vault};
 
 pub fn bench_startup(c: &mut Criterion) {
     let corpus = generate_corpus();
@@ -70,7 +69,9 @@ pub fn bench_startup(c: &mut Criterion) {
         b.iter(|| {
             let graph = VaultGraph::with_persistence(None, black_box(vault.clone()))
                 .expect("load graph from disk");
-            (graph, graph.node_count(), graph.edge_count())
+            let nodes = graph.node_count();
+            let edges = graph.edge_count();
+            (graph, nodes, edges)
         });
     });
 

@@ -1381,6 +1381,15 @@ pub async fn capture_file_drop(
     mime_type: String,
     data: Vec<u8>,
 ) -> Result<String, String> {
+    capture_file_drop_impl(&ctx, filename, mime_type, data).await
+}
+
+pub(crate) async fn capture_file_drop_impl(
+    ctx: &ApplicationContext,
+    filename: String,
+    mime_type: String,
+    data: Vec<u8>,
+) -> Result<String, String> {
     let engine = ctx
         .capture_engine()
         .ok_or_else(|| "CaptureEngine is not registered in the application context".to_string())?;
@@ -1786,28 +1795,6 @@ fn notes_search_impl(ctx: &ApplicationContext, query: &str) -> Result<Vec<Search
     }
 
     Ok(hits)
-}
-
-#[tauri::command]
-pub fn queue_archive_completed(ctx: State<'_, ApplicationContext>) -> Result<usize, String> {
-    let manager = get_storage_manager(&ctx)?;
-    let objects = manager
-        .list_objects("", None, 1000)
-        .map_err(|e| e.to_string())?;
-
-    let mut archived = 0;
-    for mut obj in objects {
-        let status = custom_text(&obj, "reading_status")
-            .map(|s| QueueStatus::from_label(&s))
-            .unwrap_or_default();
-        if status == QueueStatus::Completed {
-            set_custom_text(&mut obj, "reading_status", "archived");
-            if manager.save(&obj).is_ok() {
-                archived += 1;
-            }
-        }
-    }
-    Ok(archived)
 }
 
 // ── Knowledge Graph & Connected Knowledge ────────────────────────────
@@ -2511,14 +2498,20 @@ pub fn link_mention(
     title: String,
     store: State<'_, SettingsStore>,
 ) -> Result<String, String> {
+    link_mention_impl(&store, &path, &title)
+}
+
+pub(crate) fn link_mention_impl(
+    store: &SettingsStore,
+    path: &str,
+    title: &str,
+) -> Result<String, String> {
     let settings = store.get();
     let vault_path = PathBuf::from(settings.last_vault_path.trim());
-    let abs = validate_path_within_vault(&vault_path, &path)?;
+    let abs = validate_path_within_vault(&vault_path, path)?;
     let content = std::fs::read_to_string(&abs).map_err(|e| e.to_string())?;
-    // Char-safe word-boundary matching on the ORIGINAL bytes (no
-    // `to_lowercase()` length shift → slicing can never panic).
     let mut replacement: Option<(usize, usize)> = None;
-    for (start, end) in ci_word_ranges(&content, &title) {
+    for (start, end) in ci_word_ranges(&content, title) {
         let inside_link = content[..start]
             .rfind("[[")
             .map(|open| {
@@ -2536,21 +2529,19 @@ pub fn link_mention(
     let Some((idx, len)) = replacement else {
         return Err("No matching plain-text mention found".to_string());
     };
-    let new_content = format!(
-        "{}[[{}]]{}",
-        &content[..idx],
-        title,
-        &content[idx + len..]
-    );
+    let new_content =
+        format!("{}[[{}]]{}", &content[..idx], title, &content[idx + len..]);
     std::fs::write(&abs, &new_content).map_err(|e| e.to_string())?;
     Ok(new_content)
 }
 
 /// Reads the persisted list of mention titles the user chose to ignore.
 #[tauri::command]
-pub fn mention_ignore_list(
-    store: State<'_, SettingsStore>,
-) -> Result<Vec<String>, String> {
+pub fn mention_ignore_list(store: State<'_, SettingsStore>) -> Result<Vec<String>, String> {
+    mention_ignore_list_impl(&store)
+}
+
+pub(crate) fn mention_ignore_list_impl(store: &SettingsStore) -> Result<Vec<String>, String> {
     let value = store.get_value("nabu.mention_ignored");
     if value.is_null() {
         return Ok(Vec::new());
@@ -2561,10 +2552,11 @@ pub fn mention_ignore_list(
 /// Adds a mention title to the ignore list (it stops appearing in the
 /// unlinked-mentions panel).
 #[tauri::command]
-pub fn mention_ignore(
-    title: String,
-    store: State<'_, SettingsStore>,
-) -> Result<(), String> {
+pub fn mention_ignore(title: String, store: State<'_, SettingsStore>) -> Result<(), String> {
+    mention_ignore_impl(&store, &title)
+}
+
+pub(crate) fn mention_ignore_impl(store: &SettingsStore, title: &str) -> Result<(), String> {
     store
         .update(|s| {
             let mut list: Vec<String> = s
@@ -2573,7 +2565,7 @@ pub fn mention_ignore(
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default();
             if !list.contains(&title) {
-                list.push(title.clone());
+                list.push(title.to_string());
             }
             s.extra_settings
                 .insert("nabu.mention_ignored".to_string(), serde_json::json!(list));
@@ -3409,7 +3401,15 @@ pub fn notes_diff(
     path_b: String,
     store: State<'_, SettingsStore>,
 ) -> Result<Vec<crate::recovery::DiffRow>, String> {
-    let vault = crate::recovery::vault_path_pub(&store);
+    notes_diff_impl(&store, &path_a, &path_b)
+}
+
+pub(crate) fn notes_diff_impl(
+    store: &SettingsStore,
+    path_a: &str,
+    path_b: &str,
+) -> Result<Vec<crate::recovery::DiffRow>, String> {
+    let vault = crate::recovery::vault_path_pub(store);
     let read_note = |p: &str| -> Result<String, String> {
         let abs = crate::recovery::resolve_in_vault_pub(&vault, p)?;
         if !abs.is_file() {
@@ -3417,9 +3417,8 @@ pub fn notes_diff(
         }
         std::fs::read_to_string(&abs).map_err(|e| e.to_string())
     };
-    let a = read_note(&path_a)?;
-    let b = read_note(&path_b)?;
-    // Reuse the LCS diff from recovery.rs via the public re-export.
+    let a = read_note(path_a)?;
+    let b = read_note(path_b)?;
     Ok(crate::recovery::line_diff_pub(&a, &b))
 }
 
@@ -3597,6 +3596,13 @@ pub fn statistics_get(
     store: State<'_, SettingsStore>,
     ctx: State<'_, ApplicationContext>,
 ) -> Result<VaultStatistics, String> {
+    statistics_get_impl(&ctx, &store)
+}
+
+pub(crate) fn statistics_get_impl(
+    ctx: &ApplicationContext,
+    store: &SettingsStore,
+) -> Result<VaultStatistics, String> {
     let settings = store.get();
     let vault_path = PathBuf::from(settings.last_vault_path.trim());
     if vault_path.as_os_str().is_empty() || !vault_path.is_dir() {
@@ -3637,9 +3643,8 @@ pub fn statistics_get(
     let total_tags: usize = tags.iter().map(|t| t.count).sum();
     let tag_count = tags.len();
 
-    // Graph data from the real VaultGraph (via the shared context), not a
-    // reconstructed filesystem scan.
-    let graph = graph_data_impl(&ctx)?;
+    // Graph data from the real VaultGraph (via the shared context).
+    let graph = graph_data_impl(ctx)?;
 
     // Recently modified (top 10).
     let mut recent: Vec<RecentNoteStat> = notes
@@ -3651,15 +3656,14 @@ pub fn statistics_get(
                 title: n.title.clone(),
                 folder: n.folder.clone(),
                 modified_at: n.modified_at.clone(),
-                created_at: None, // creation time not tracked separately
+                created_at: None,
                 size,
             }
         })
         .collect();
     recent.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
     let recently_modified: Vec<RecentNoteStat> = recent.iter().take(10).cloned().collect();
-    // Recently "created" — approximated by the oldest modifications reversed
-    // (creation time is not stored separately in markdown files).
+    // Recently "created" — approximated by the oldest modifications reversed.
     let mut by_oldest = recent.clone();
     by_oldest.sort_by(|a, b| a.modified_at.cmp(&b.modified_at));
     let recently_created: Vec<RecentNoteStat> = by_oldest.into_iter().take(10).collect();
@@ -3693,13 +3697,14 @@ pub fn capability_enable(
     ctx: State<'_, ApplicationContext>,
     capability_id: String,
 ) -> Result<(), String> {
-    // Capability state is owned and validated by the CapabilityRegistry (the
-    // single source of truth); ApplicationContext provides the thread-safe
-    // access surface. An empty ID is rejected here as clearly invalid input.
+    capability_enable_impl(&ctx, &capability_id)
+}
+
+pub(crate) fn capability_enable_impl(ctx: &ApplicationContext, capability_id: &str) -> Result<(), String> {
     if capability_id.is_empty() {
         return Err("capability_id must not be empty".to_string());
     }
-    ctx.enable_capability(&capability_id)
+    ctx.enable_capability(capability_id)
 }
 
 #[tauri::command]
@@ -3707,10 +3712,14 @@ pub fn capability_disable(
     ctx: State<'_, ApplicationContext>,
     capability_id: String,
 ) -> Result<(), String> {
+    capability_disable_impl(&ctx, &capability_id)
+}
+
+pub(crate) fn capability_disable_impl(ctx: &ApplicationContext, capability_id: &str) -> Result<(), String> {
     if capability_id.is_empty() {
         return Err("capability_id must not be empty".to_string());
     }
-    ctx.disable_capability(&capability_id)
+    ctx.disable_capability(capability_id)
 }
 
 /// Returns every registered capability as a JSON array.
@@ -3729,8 +3738,12 @@ pub fn capability_disable(
 pub fn capability_list(
     ctx: State<'_, ApplicationContext>,
 ) -> Result<Vec<nabu_core::plugin::capability::Capability>, String> {
-    // Acquire the registry read-lock once and query it entirely within that
-    // guard scope — avoids repeated lock acquisition / registry traversal.
+    capability_list_impl(&ctx)
+}
+
+pub(crate) fn capability_list_impl(
+    ctx: &ApplicationContext,
+) -> Result<Vec<nabu_core::plugin::capability::Capability>, String> {
     let registry = ctx.capability_registry();
     let caps: Vec<nabu_core::plugin::capability::Capability> = registry
         .list()
@@ -3738,7 +3751,6 @@ pub fn capability_list(
         .filter_map(|id| registry.get(id))
         .cloned()
         .collect();
-
     let count = caps.len();
     tracing::info!(count, "Capabilities returned");
     Ok(caps)
@@ -3761,6 +3773,12 @@ pub fn capability_list(
 #[tauri::command]
 pub fn capability_list_with_state(
     ctx: State<'_, ApplicationContext>,
+) -> Result<Vec<crate::commands::CapabilitySummaryWithState>, String> {
+    capability_list_with_state_impl(&ctx)
+}
+
+pub(crate) fn capability_list_with_state_impl(
+    ctx: &ApplicationContext,
 ) -> Result<Vec<crate::commands::CapabilitySummaryWithState>, String> {
     let registry = ctx.capability_registry();
     let ids = registry.list();
@@ -3800,6 +3818,12 @@ pub fn capability_list_with_state(
 #[tauri::command]
 pub fn health_check(
     ctx: State<'_, ApplicationContext>,
+) -> Result<nabu_core::registry::ServiceHealth, String> {
+    health_check_impl(&ctx)
+}
+
+pub(crate) fn health_check_impl(
+    ctx: &ApplicationContext,
 ) -> Result<nabu_core::registry::ServiceHealth, String> {
     tracing::info!("Health check IPC requested");
     let health = ctx.health_check();
@@ -3854,6 +3878,12 @@ pub fn health_check(
 pub fn metrics(
     ctx: State<'_, ApplicationContext>,
 ) -> Result<nabu_core::registry::RuntimeMetrics, String> {
+    metrics_impl(&ctx)
+}
+
+pub(crate) fn metrics_impl(
+    ctx: &ApplicationContext,
+) -> Result<nabu_core::registry::RuntimeMetrics, String> {
     tracing::debug!("Metrics IPC requested");
     let metrics = ctx.metrics();
     tracing::debug!(
@@ -3874,6 +3904,12 @@ pub fn metrics(
 #[tauri::command]
 pub fn pool_health(
     ctx: State<'_, ApplicationContext>,
+) -> Result<nabu_core::jobs::workers::PoolHealth, String> {
+    pool_health_impl(&ctx)
+}
+
+pub(crate) fn pool_health_impl(
+    ctx: &ApplicationContext,
 ) -> Result<nabu_core::jobs::workers::PoolHealth, String> {
     tracing::debug!("Pool health IPC requested");
     let pool = ctx
@@ -3995,6 +4031,13 @@ pub async fn diagnostic_requested(
     ctx: State<'_, ApplicationContext>,
     request: DiagnosticRequest,
 ) -> Result<DiagnosticResponse, nabu_core::diagnostic::DiagnosticPlatformError> {
+    diagnostic_requested_impl(&ctx, request).await
+}
+
+pub(crate) async fn diagnostic_requested_impl(
+    ctx: &ApplicationContext,
+    request: DiagnosticRequest,
+) -> Result<DiagnosticResponse, nabu_core::diagnostic::DiagnosticPlatformError> {
     let origin = request.origin.as_ref().map(|s| s.as_str()).unwrap_or("harper");
 
     tracing::info!(
@@ -4071,6 +4114,13 @@ pub fn plugin_call(
     ctx: State<'_, ApplicationContext>,
     request: nabu_core::plugin::PluginInvocationRequest,
 ) -> Result<nabu_core::plugin::PluginInvocationResponse, String> {
+    plugin_call_impl(&ctx, request)
+}
+
+pub(crate) fn plugin_call_impl(
+    ctx: &ApplicationContext,
+    request: nabu_core::plugin::PluginInvocationRequest,
+) -> Result<nabu_core::plugin::PluginInvocationResponse, String> {
     tracing::debug!(
         plugin_id = %request.plugin_id,
         capability = %request.capability,
@@ -4089,15 +4139,13 @@ pub fn plugin_call(
             duration_ms = response.execution.as_ref().and_then(|e| e.duration_ms),
             "plugin_call IPC completed successfully"
         );
-    } else {
-        if let Some(err) = &response.error {
-            tracing::warn!(
-                plugin_id = %plugin_id,
-                capability = %capability,
-                error_code = %err.code,
-                "plugin_call IPC failed"
-            );
-        }
+    } else if let Some(err) = &response.error {
+        tracing::warn!(
+            plugin_id = %plugin_id,
+            capability = %capability,
+            error_code = %err.code,
+            "plugin_call IPC failed"
+        );
     }
 
     Ok(response)
@@ -4125,10 +4173,12 @@ pub fn thread_save(
     thread: Thread,
     ctx: State<'_, ApplicationContext>,
 ) -> Result<(), String> {
-    let store = get_conversation_store(&ctx)?;
-    store
-        .save(&thread)
-        .map_err(|e| e.to_string())
+    thread_save_impl(&ctx, thread)
+}
+
+pub(crate) fn thread_save_impl(ctx: &ApplicationContext, thread: Thread) -> Result<(), String> {
+    let store = get_conversation_store(ctx)?;
+    store.save(&thread).map_err(|e| e.to_string())
 }
 
 /// Loads a single thread by ID from persistent storage.
@@ -4137,9 +4187,12 @@ pub fn thread_load(
     id: String,
     ctx: State<'_, ApplicationContext>,
 ) -> Result<Option<Thread>, String> {
-    let store = get_conversation_store(&ctx)?;
-    let uuid = uuid::Uuid::parse_str(&id)
-        .map_err(|e| format!("Invalid thread ID: {}", e))?;
+    thread_load_impl(&ctx, &id)
+}
+
+pub(crate) fn thread_load_impl(ctx: &ApplicationContext, id: &str) -> Result<Option<Thread>, String> {
+    let store = get_conversation_store(ctx)?;
+    let uuid = uuid::Uuid::parse_str(id).map_err(|e| format!("Invalid thread ID: {}", e))?;
     match store.load(uuid) {
         Ok(thread) => Ok(Some(thread)),
         Err(e) => match &e {
@@ -4152,10 +4205,11 @@ pub fn thread_load(
 /// Loads all persisted threads from disk.
 #[tauri::command]
 pub fn thread_list(ctx: State<'_, ApplicationContext>) -> Result<Vec<Thread>, String> {
-    let store = get_conversation_store(&ctx)?;
-    // list() returns threads from the in-memory cache, which is populated
-    // during initialize(). If the cache is empty (e.g. store not yet
-    // initialized), fall back to loading from disk.
+    thread_list_impl(&ctx)
+}
+
+pub(crate) fn thread_list_impl(ctx: &ApplicationContext) -> Result<Vec<Thread>, String> {
+    let store = get_conversation_store(ctx)?;
     let threads = store.list();
     if threads.is_empty() {
         store.load_all().map_err(|e| e.to_string())
@@ -4170,22 +4224,26 @@ pub fn thread_delete(
     id: String,
     ctx: State<'_, ApplicationContext>,
 ) -> Result<(), String> {
-    let store = get_conversation_store(&ctx)?;
-    let uuid = uuid::Uuid::parse_str(&id)
-        .map_err(|e| format!("Invalid thread ID: {}", e))?;
+    thread_delete_impl(&ctx, &id)
+}
+
+pub(crate) fn thread_delete_impl(ctx: &ApplicationContext, id: &str) -> Result<(), String> {
+    let store = get_conversation_store(ctx)?;
+    let uuid = uuid::Uuid::parse_str(id).map_err(|e| format!("Invalid thread ID: {}", e))?;
     store.delete(uuid).map_err(|e| e.to_string())
 }
 
 /// Updates an existing thread in place.
-///
-/// The thread's `updated_at` timestamp is set to the current time before
-/// saving. Returns an error if the thread does not exist in storage.
 #[tauri::command]
 pub fn thread_update(
     mut thread: Thread,
     ctx: State<'_, ApplicationContext>,
 ) -> Result<(), String> {
-    let store = get_conversation_store(&ctx)?;
+    thread_update_impl(&ctx, thread)
+}
+
+pub(crate) fn thread_update_impl(ctx: &ApplicationContext, mut thread: Thread) -> Result<(), String> {
+    let store = get_conversation_store(ctx)?;
     store.update(&mut thread).map_err(|e| e.to_string())
 }
 
@@ -4502,11 +4560,19 @@ pub async fn stream_cancel(
     stream_id: String,
     reason: String,
 ) -> Result<bool, String> {
+    stream_cancel_impl(&ctx, &stream_id, reason).await
+}
+
+pub(crate) async fn stream_cancel_impl(
+    ctx: &ApplicationContext,
+    stream_id: &str,
+    reason: String,
+) -> Result<bool, String> {
     let manager: Arc<StreamManager> = ctx
         .resolve("stream_manager")
         .ok_or_else(|| "StreamManager is not registered in the application context".to_string())?;
 
-    let id = uuid::Uuid::parse_str(&stream_id)
+    let id = uuid::Uuid::parse_str(stream_id)
         .map_err(|e| format!("Invalid stream id: {e}"))?;
 
     match manager.cancel_stream(&id, reason) {
