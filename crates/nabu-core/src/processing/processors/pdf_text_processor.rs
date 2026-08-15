@@ -71,7 +71,7 @@ impl Processor for PdfTextProcessor {
                     "warning": "PDFKit unavailable on this platform (requires macOS)",
                 });
                 object.custom_properties.insert(
-                    "pdf_info".to_string(),
+                    "pdf_text_info".to_string(),
                     CustomPropertyValue::Text(info.to_string()),
                 );
                 return ProcessingResult::new(object)
@@ -95,7 +95,7 @@ impl Processor for PdfTextProcessor {
                     "warning": err_msg,
                 });
                 object.custom_properties.insert(
-                    "pdf_info".to_string(),
+                    "pdf_text_info".to_string(),
                     CustomPropertyValue::Text(info.to_string()),
                 );
                 return ProcessingResult::new(object)
@@ -118,7 +118,7 @@ impl Processor for PdfTextProcessor {
                     "warning": "PDF text extraction task panicked",
                 });
                 object.custom_properties.insert(
-                    "pdf_info".to_string(),
+                    "pdf_text_info".to_string(),
                     CustomPropertyValue::Text(info.to_string()),
                 );
                 return ProcessingResult::new(object)
@@ -150,7 +150,7 @@ impl Processor for PdfTextProcessor {
                 "warning": serde_json::Value::Null,
             });
             object.custom_properties.insert(
-                "pdf_info".to_string(),
+                "pdf_text_info".to_string(),
                 CustomPropertyValue::Text(info.to_string()),
             );
 
@@ -228,12 +228,12 @@ mod tests {
             let pdf_info = result
                 .object
                 .custom_properties
-                .get("pdf_info")
+                .get("pdf_text_info")
                 .and_then(|v| match v {
                     CustomPropertyValue::Text(s) => serde_json::from_str::<serde_json::Value>(s).ok(),
                     _ => None,
                 });
-            assert!(pdf_info.is_some(), "pdf_info must be stored");
+            assert!(pdf_info.is_some(), "pdf_text_info must be stored");
             let parsed = pdf_info.unwrap();
             assert!(parsed["extraction_succeeded"].as_bool().unwrap_or(false), "extraction_succeeded must be true");
             assert!(parsed["page_count"].is_number(), "page_count must be a number");

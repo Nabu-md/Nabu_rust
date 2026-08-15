@@ -111,13 +111,25 @@ impl DictationService {
             return Err(DictationError::ModelNotFound(msg));
         }
 
-        let mut mic = self.factory.create()?;
+        let mut mic = match self.factory.create() {
+            Ok(m) => m,
+            Err(e) => {
+                self.fail(e.to_string());
+                return Err(e);
+            }
+        };
         if !mic.permission_granted() {
             self.fail(DictationError::PermissionDenied.to_string());
             return Err(DictationError::PermissionDenied);
         }
-        mic.open()?;
-        mic.start()?;
+        if let Err(e) = mic.open() {
+            self.fail(e.to_string());
+            return Err(e);
+        }
+        if let Err(e) = mic.start() {
+            self.fail(e.to_string());
+            return Err(e);
+        }
 
         *self.active.lock().unwrap() = Some(ActiveSession { mic });
         self.set_state(DictationState::Recording);
@@ -198,6 +210,7 @@ impl DictationService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dictation::audio::CapturedAudio;
     use std::sync::Mutex;
 
     /// Mock microphone that hands back a pre-canned `CapturedAudio` (or an
@@ -370,8 +383,12 @@ mod tests {
     #[tokio::test]
     async fn capture_failure_enters_error_state() {
         let received = Arc::new(Mutex::new(Vec::new()));
-        let transcriber = mock_transcriber(true, Ok(String::new()));
-        transcriber.received = received;
+        let transcriber = Arc::new(MockTranscriber {
+            available: true,
+            path: Some(PathBuf::from("model.bin")),
+            text: Ok(String::new()),
+            received,
+        });
         let bad_mic = MockMicrophone {
             permission: true,
             open_ok: false,
