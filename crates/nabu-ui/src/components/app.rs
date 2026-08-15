@@ -216,10 +216,7 @@ pub fn ViewContent() -> Element {
         ViewMode::SmartFolders => rsx! { SmartFoldersPage {} },
         ViewMode::Canvas => rsx! {
             div { class: "w-full h-full",
-                div { class: "text-sm text-gray-400",
-                    {render_icon(Icon::Palette, Some("w-4 h-4 inline mr-1"))}
-                    "Canvas placeholder — migrated in a later phase."
-                }
+                crate::components::canvas::CanvasView {}
             }
         },
         ViewMode::Reader => rsx! {

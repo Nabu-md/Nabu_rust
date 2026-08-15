@@ -12,16 +12,16 @@
 //! - list saved canvases from the backend (`canvas_list`);
 //! - load the full definition of a canvas (`canvas_get`);
 //! - pan / zoom / drag nodes, mutating the in-memory `CanvasDef`;
-//! - persist edits through `canvas_save`, surfacing failures in-view via a
-//!   save-status indicator and a toast;
-//! - create / delete canvases through `canvas_save` / `canvas_delete`;
+//! - persist edits through `canvas_save`, surfacing failures in-view (save
+//!   status indicator + toast);
+//! - create / delete canvases (`canvas_save` / `canvas_delete`);
 //! - add notes from the vault index onto the canvas (double-click in the
 //!   sidebar palette) and open them through the existing workspace APIs.
 
 use crate::components::contexts::{open_tab, use_nav, use_workspace, NoteIndexEntry, ViewMode};
-use crate::components::ui::dialog::{ConfirmDialog, PromptDialog};
+use crate::components::ui::dialog::PromptDialog;
 use crate::components::ui::feedback::{
-    ErrorPanel, LoadingBlock, SaveStateIndicator, SpinnerSize, ToastContext, ToastKind,
+    ErrorPanel, LoadingBlock, Spinner, SpinnerSize, ToastContext, use_toast,
 };
 use crate::components::ui::icons::{render_icon_view, Icon};
 use crate::components::ui::info::EmptyState;
@@ -76,7 +76,7 @@ pub struct CanvasGroup {
     pub members: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CanvasDef {
     pub id: String,
     pub name: String,
@@ -86,7 +86,9 @@ pub struct CanvasDef {
     pub edges: Vec<CanvasEdge>,
     #[serde(default)]
     pub groups: Vec<CanvasGroup>,
+    #[serde(default)]
     pub pan_x: f64,
+    #[serde(default)]
     pub pan_y: f64,
     #[serde(default = "default_zoom")]
     pub zoom: f64,
@@ -248,7 +250,7 @@ pub fn node_view_rect(node: &CanvasNode) -> (f64, f64, f64, f64) {
     (node.x, node.y, w, h)
 }
 
-/// Compute the SVG line endpoints for an edge's two node centres.
+/// Compute the SVG line midpoints-of-sides endpoints for an edge's two nodes.
 pub fn edge_endpoints<'a>(
     canvas: &'a CanvasDef,
     edge: &CanvasEdge,
@@ -286,7 +288,7 @@ fn canvas_delete_args(id: &str) -> serde_json::Value {
 // ── Signal bundle ─────────────────────────────────────────────────────
 
 /// All reactive state owned by [`CanvasView`], bundled so the IPC helper
-/// functions stay single-argument and testable.
+/// functions stay concise.
 #[derive(Clone, Copy)]
 struct CanvasState {
     list_data: Signal<Vec<CanvasDef>>,
@@ -334,8 +336,10 @@ fn load_list(s: CanvasState) {
             Ok(None) => {
                 list_error.set("Canvas list request returned no value.".to_string());
                 list_state.set(ListState::Failed);
-                s.toasts
-                    .error("Canvas list failed", "No canvases were returned by the backend.".to_string());
+                s.toasts.error(
+                    "Canvas list failed",
+                    "No canvases were returned by the backend.".to_string(),
+                );
             }
             Err(e) => {
                 list_error.set(e.message());
@@ -391,8 +395,8 @@ fn select_canvas(s: CanvasState, id: String) {
     });
 }
 
-/// Persists the currently loaded canvas. Sets `save_state` to `Saving` while
-/// in flight, `Saved` on success, and `Error` (with `save_error`) on failure —
+/// Persists the currently loaded canvas. Sets `save_state` to `Saving` while in
+/// flight, `Saved` on success, and `Error` (with `save_error`) on failure —
 /// surfacing backend failures both in the workspace toolbar and as a toast.
 fn save_canvas(s: CanvasState) {
     let mut save_state = s.save_state;
@@ -403,6 +407,7 @@ fn save_canvas(s: CanvasState) {
     };
     save_state.set(SaveState::Saving);
     save_error.set(None);
+    let name = c.name.clone();
 
     spawn_local(async move {
         let args = serde_wasm_bindgen::to_value(&canvas_save_args(&c)).unwrap_or(JsValue::NULL);
@@ -411,7 +416,7 @@ fn save_canvas(s: CanvasState) {
                 Ok(()) => {
                     save_state.set(SaveState::Saved);
                     save_error.set(None);
-                    s.toasts.success("Canvas saved", c.name.clone());
+                    s.toasts.success("Canvas saved", name);
                 }
                 Err(e) => {
                     let msg = format!("Could not save canvas: {e}");
@@ -430,32 +435,26 @@ fn save_canvas(s: CanvasState) {
     });
 }
 
-/// Creates a new canvas: persists it, selects it, and refreshes the list.
+/// Creates a new canvas: optimistically selects it, then persists it in the
+/// background. On persistence failure it reverts the optimistic state.
 fn create_canvas(s: CanvasState, name: String) {
     if name.trim().is_empty() {
-        s.toasts
-            .error("Invalid name", "Canvas name cannot be empty.");
+        s.toasts.error("Invalid name", "Canvas name cannot be empty.");
         return;
     }
     let id = generate_canvas_id();
     let c = new_canvas_with_id(&name, &id);
     let mut list_data = s.list_data;
-    let mut list_state = s.list_state;
-    let mut active_id = s.active_id;
-    let mut canvas = s.canvas;
-    let mut canvas_state = s.canvas_state;
-    let mut canvas_error = s.canvas_error;
-    let mut save_state = s.save_state;
-    let mut save_error = s.save_error;
+    let list_state = s.list_state;
     let name_for_toast = name.clone();
+
     // Optimistically surface the new canvas while it persists in the background.
-    active_id.set(Some(id.clone()));
-    canvas.set(Some(c.clone()));
-    canvas_state.set(CanvasLoadState::Loaded);
-    canvas_error.set(String::new());
-    save_state.set(SaveState::Idle);
-    save_error.set(None);
-    // Keep the list in sync optimistically.
+    s.active_id.set(Some(id.clone()));
+    s.canvas.set(Some(c.clone()));
+    s.canvas_state.set(CanvasLoadState::Loaded);
+    s.canvas_error.set(String::new());
+    s.save_state.set(SaveState::Idle);
+    s.save_error.set(None);
     list_data.with_mut(|l| l.push(c.clone()));
 
     spawn_local(async move {
@@ -463,30 +462,27 @@ fn create_canvas(s: CanvasState, name: String) {
         match crate::ipc::tauri_invoke("canvas_save", args).await {
             Ok(val) => match serde_wasm_bindgen::from_value::<()>(val) {
                 Ok(()) => {
-                    save_state.set(SaveState::Saved);
+                    s.save_state.set(SaveState::Saved);
                     list_state.set(ListState::Loaded);
                     load_list(s);
-                    s.toasts
-                        .success("Canvas created", name_for_toast);
+                    s.toasts.success("Canvas created", name_for_toast);
                 }
                 Err(e) => {
-                    save_state.set(SaveState::Error);
+                    s.save_state.set(SaveState::Error);
                     s.toasts
                         .error("Create failed", format!("Could not create canvas: {e}"));
-                    // Revert optimistically-selected state on failure.
-                    active_id.set(None);
-                    canvas.set(None);
-                    canvas_state.set(CanvasLoadState::Failed);
+                    s.active_id.set(None);
+                    s.canvas.set(None);
+                    s.canvas_state.set(CanvasLoadState::Failed);
                     list_data.with_mut(|l| l.retain(|x| x.id != id));
                 }
             },
             Err(e) => {
-                save_state.set(SaveState::Error);
-                s.toasts
-                    .error("Create failed", e.message());
-                active_id.set(None);
-                canvas.set(None);
-                canvas_state.set(CanvasLoadState::Failed);
+                s.save_state.set(SaveState::Error);
+                s.toasts.error("Create failed", e.message());
+                s.active_id.set(None);
+                s.canvas.set(None);
+                s.canvas_state.set(CanvasLoadState::Failed);
                 list_data.with_mut(|l| l.retain(|x| x.id != id));
             }
         }
@@ -496,12 +492,12 @@ fn create_canvas(s: CanvasState, name: String) {
 /// Deletes a canvas by id, refreshing the list and switching the active canvas
 /// when the deleted one was the one being edited.
 fn delete_canvas(s: CanvasState, id: String) {
-    let mut list_data = s.list_data;
-    let mut list_state = s.list_state;
-    let mut active_id = s.active_id;
-    let mut canvas = s.canvas;
-    let mut canvas_state = s.canvas_state;
-    let mut canvas_error = s.canvas_error;
+    let list_data = s.list_data;
+    let list_state = s.list_state;
+    let active_id = s.active_id;
+    let canvas = s.canvas;
+    let canvas_state = s.canvas_state;
+    let canvas_error = s.canvas_error;
     let name = s
         .list_data
         .read()
@@ -546,8 +542,7 @@ fn delete_canvas(s: CanvasState, id: String) {
                 }
             },
             Err(e) => {
-                s.toasts
-                    .error("Delete failed", e.message());
+                s.toasts.error("Delete failed", e.message());
             }
         }
     });
@@ -574,7 +569,7 @@ pub fn CanvasView() -> Element {
     let save_state = use_signal(|| SaveState::Idle);
     let save_error = use_signal(|| None::<String>);
 
-    let new_name = use_signal(String::new);
+    let show_new_dialog = use_signal(|| false);
     let delete_target = use_signal(|| None::<String>);
 
     let s = CanvasState {
@@ -593,7 +588,7 @@ pub fn CanvasView() -> Element {
     // Initial list load on mount (mirrors `GraphView`'s mount pattern).
     let mut initialized = use_signal(|| false);
     if !*initialized.read() {
-        initialized.set(true);
+        *initialized.write_unchecked() = true;
         load_list(s);
     }
 
@@ -608,43 +603,7 @@ pub fn CanvasView() -> Element {
     let canvas_err = canvas_error.read().clone();
     let save_st = *save_state.read();
     let save_err_val = save_error.read().clone();
-
     let notes_index = nav.notes_index.read().clone();
-
-    // Callback: open a node's referenced note in the editor.
-    let on_open_note = move |path: String| {
-        open_tab(workspace, &path);
-        let mut nav = nav;
-        nav.view_mode.set(ViewMode::Editor);
-    };
-
-    // Callback: persist the working canvas (used by the surface + edits).
-    let on_save = move |_: ()| {
-        save_canvas(s);
-    };
-
-    // Callback: remove a node from the working canvas and persist.
-    let on_remove_node = move |node_id: String| {
-        let mut c = s.canvas.read().clone();
-        if let Some(c) = c.as_mut() {
-            remove_node(c, &node_id);
-        }
-        s.canvas.set(c);
-        on_save.call(());
-    };
-
-    // Callback: add a note from the palette to the working canvas and persist.
-    let on_add_note = {
-        let on_save = on_save;
-        move |entry: NoteIndexEntry| {
-            let mut c = s.canvas.read().clone();
-            if let Some(c) = c.as_mut() {
-                create_node(c, &entry);
-            }
-            s.canvas.set(c);
-            on_save.call(());
-        }
-    };
 
     rsx! {
         div { class: "canvas-view flex h-full bg-gray-950 text-gray-100 overflow-hidden" }
@@ -659,11 +618,9 @@ pub fn CanvasView() -> Element {
         button {
             class: "px-2 py-1 text-xs bg-blue-600 rounded hover:bg-blue-500",
             "aria-label": "New canvas",
-            onclick: move |_: MouseEvent| { new_name.set(String::new()); },
-            onclick: move |_: MouseEvent| {
-                // PromptDialog manages its own input; opening just flips the flag.
-                let _ = ();
-            },
+            onclick: move |_: MouseEvent| { *show_new_dialog.write_unchecked() = true; },
+            {render_icon_view(Icon::Plus)}
+            " New"
         }
 
         // Canvas list (loading / empty / error / loaded).
@@ -683,7 +640,7 @@ pub fn CanvasView() -> Element {
                 }
             },
             ListPhase::Empty => rsx! {
-                div { class: "px-3 py-2 text-xs text-gray-500", "No canvases yet — create one with the + button." }
+                div { class: "px-3 py-2 text-xs text-gray-500", "No canvases yet — create one with the + button above." }
             },
             ListPhase::Loaded => rsx! {
                 for c in &rows {
@@ -692,15 +649,12 @@ pub fn CanvasView() -> Element {
                         let name = c.name.clone();
                         let summary = canvas_summary(c);
                         let is_active = active.as_deref() == Some(id.as_str());
-                        let mut active_id = active_id;
-                        let mut canvas_state = canvas_state;
-                        let mut canvas_error = canvas_error;
-                        let s_for_select = s;
                         let class = if is_active {
                             "flex items-center justify-between px-3 py-1.5 cursor-pointer bg-gray-800 border-l-2 border-blue-500 rounded"
                         } else {
                             "flex items-center justify-between px-3 py-1.5 cursor-pointer hover:bg-gray-800 rounded"
                         };
+                        let s_for_select = s;
                         rsx! {
                             div {
                                 key: id.clone(),
@@ -710,14 +664,15 @@ pub fn CanvasView() -> Element {
                                 },
                             }
                             div { class: "flex-1 min-w-0" }
+                            div { class: "flex-1 min-w-0" }
                             div { class: "text-sm font-medium text-gray-200 truncate", "{name}" }
                             div { class: "text-xs text-gray-500 truncate", "{summary}" }
                             button {
-                                class: "text-xs text-gray-500 hover:text-red-400",
+                                class: "ml-2 text-xs text-gray-500 hover:text-red-400",
                                 "aria-label": format!("Delete canvas {name}"),
                                 onclick: move |ev: MouseEvent| {
                                     ev.stop_propagation();
-                                    *delete_target.write_unchecked() = Some(id.clone());
+                                    delete_canvas(s, id.clone());
                                 },
                                 {render_icon_view(Icon::Trash2)}
                             }
@@ -749,7 +704,12 @@ pub fn CanvasView() -> Element {
                                 title: "Double-click to add to canvas",
                                 ondblclick: move |_: MouseEvent| {
                                     if s.canvas.read().is_some() {
-                                        on_add_note(entry_clone.clone());
+                                        let mut c = s.canvas.read().clone();
+                                        if let Some(c) = c.as_mut() {
+                                            create_node(c, &entry_clone);
+                                        }
+                                        s.canvas.set(c);
+                                        save_canvas(s);
                                     } else {
                                         toasts.info(
                                             "No canvas selected",
@@ -771,7 +731,7 @@ pub fn CanvasView() -> Element {
 
         match canvas_phase {
             CanvasPhase::Select => rsx! {
-                div { class: "flex-1 flex items-center justify-center" }
+                div { class: "absolute inset-0 flex items-center justify-center" }
                 EmptyState {
                     icon: Some(Icon::Palette),
                     title: "No canvas selected".to_string(),
@@ -779,21 +739,21 @@ pub fn CanvasView() -> Element {
                 }
             },
             CanvasPhase::Loading => rsx! {
-                div { class: "flex-1 flex items-center justify-center" }
+                div { class: "absolute inset-0 flex items-center justify-center" }
                 LoadingBlock { label: Some("Loading canvas…"), size: SpinnerSize::Lg }
             },
             CanvasPhase::Error => rsx! {
-                div { class: "flex-1 flex items-center justify-center p-8" }
+                div { class: "absolute inset-0 flex items-center justify-center p-8" }
                 div { class: "w-full max-w-md" }
                 ErrorPanel {
                     title: "Couldn't load the canvas".to_string(),
                     message: "The selected canvas could not be retrieved from the backend.".to_string(),
                     details: Some(canvas_err),
                     on_retry: Some({
-                        let s_for_retry = s;
+                        let s_retry = s;
                         move |_: ()| {
-                            if let Some(id) = s_for_retry.active_id.read().clone() {
-                                select_canvas(s_for_retry, id);
+                            if let Some(id) = s_retry.active_id.read().clone() {
+                                select_canvas(s_retry, id);
                             }
                         }
                     }),
@@ -801,16 +761,25 @@ pub fn CanvasView() -> Element {
                 }
             },
             CanvasPhase::Empty | CanvasPhase::Ready => {
-                let canvas_def = sel_canvas.expect("Empty/Ready phase guarantees a loaded canvas");
                 rsx! {
                     CanvasSurface {
-                        canvas: canvas_def,
-                        canvas_signal: s.canvas,
+                        canvas: s.canvas,
                         save_state: save_state,
                         save_error: save_error,
-                        on_save: on_save,
-                        on_open_note: on_open_note,
-                        on_remove_node: on_remove_node,
+                        on_save: move |_: ()| { save_canvas(s); },
+                        on_open_note: move |path: String| {
+                            open_tab(workspace, &path);
+                            let mut nav = nav;
+                            nav.view_mode.set(ViewMode::Editor);
+                        },
+                        on_remove_node: move |node_id: String| {
+                            let mut c = s.canvas.read().clone();
+                            if let Some(c) = c.as_mut() {
+                                remove_node(c, &node_id);
+                            }
+                            s.canvas.set(c);
+                            save_canvas(s);
+                        },
                     }
                 }
             }
@@ -818,43 +787,472 @@ pub fn CanvasView() -> Element {
 
         // ── New canvas dialog ──
         PromptDialog {
-            open: use_signal(|| false),
+            open: show_new_dialog,
             title: "New Canvas".to_string(),
             message: "Name your canvas:".to_string(),
-            on_submit: Some({
-                let s_for_create = s;
-                move |name: String| {
-                    create_canvas(s_for_create, name);
+            confirm_label: Some("Create"),
+            on_submit: move |name: String| { create_canvas(s, name); },
+            on_cancel: move |_: ()| {},
+        }
+    }
+}
+
+/// The interactive canvas surface: a pannable/zoomable transform container with
+/// SVG edge connectors, positioned DOM node cards, and a screen-fixed toolbar.
+#[allow(clippy::too_many_arguments)]
+#[component]
+fn CanvasSurface(
+    canvas: Signal<Option<CanvasDef>>,
+    save_state: Signal<SaveState>,
+    save_error: Signal<Option<String>>,
+    on_save: EventHandler<()>,
+    on_open_note: EventHandler<String>,
+    on_remove_node: EventHandler<String>,
+) -> Element {
+    // Interaction state (owned by the surface; not persisted on its own).
+    let dragging = use_signal(|| None::<String>);
+    let drag_origin = use_signal(|| (0.0f64, 0.0f64, 0.0f64, 0.0f64));
+    let panning = use_signal(|| false);
+
+    let c = canvas.peek().clone().expect("CanvasSurface renders only when a canvas is loaded");
+    let nodes = c.nodes.clone();
+    let transform = format!("translate({}px, {}px) scale({})", c.pan_x, c.pan_y, c.zoom);
+    let zoom_pct = (c.zoom * 100.0).round();
+
+    // Precompute edge geometry once per render.
+    let edge_segs: Vec<(String, f64, f64, f64, f64)> = c
+        .edges
+        .iter()
+        .filter_map(|e| edge_endpoints(&c, e).map(|(x1, y1, x2, y2)| (e.id.clone(), x1, y1, x2, y2)))
+        .collect();
+
+    rsx! {
+        div {
+            class: "absolute inset-0",
+            onwheel: move |ev: WheelEvent| {
+                let web = ev.data().as_web_event();
+                web.prevent_default();
+                let delta = web.delta_y();
+                let factor = if delta > 0.0 { 0.9 } else { 1.1 };
+                let mut cc = canvas.peek().clone();
+                if let Some(cc) = cc.as_mut() {
+                    cc.zoom = (cc.zoom * factor).clamp(0.1, 5.0);
                 }
-            }),
-            on_cancel: Some(move |_: ()| {}),
+                canvas.set(cc);
+                on_save.call(());
+            },
+            onmousedown: move |ev: MouseEvent| {
+                let web = ev.data().as_web_event();
+                let (px, py) = canvas
+                    .peek()
+                    .as_ref()
+                    .map(|c| (c.pan_x, c.pan_y))
+                    .unwrap_or((0.0, 0.0));
+                *pan_origin.write_unchecked() = (web.client_x() as f64, web.client_y() as f64);
+                *pan_base.write_unchecked() = (px, py);
+                *panning.write_unchecked() = true;
+                *dragging.write_unchecked() = None;
+            },
+            onmousemove: move |ev: MouseEvent| {
+                let web = ev.data().as_web_event();
+                let drag = dragging.peek().clone();
+                if let Some(node_id) = drag.as_deref() {
+                    let (sx, sy, nx, ny) = *drag_origin.peek();
+                    let zoom = canvas.peek().as_ref().map(|c| c.zoom).unwrap_or(1.0);
+                    let dx = (web.client_x() as f64 - sx) / zoom;
+                    let dy = (web.client_y() as f64 - sy) / zoom;
+                    let mut cc = canvas.peek().clone();
+                    if let Some(cc) = cc.as_mut() {
+                        if let Some(node) = cc.nodes.iter_mut().find(|n| n.id == node_id) {
+                            node.x = nx + dx;
+                            node.y = ny + dy;
+                        }
+                    }
+                    canvas.set(cc);
+                } else if *panning.peek() {
+                    let (ox, oy) = *pan_origin.peek();
+                    let (bx, by) = *pan_base.peek();
+                    let dx = web.client_x() as f64 - ox;
+                    let dy = web.client_y() as f64 - oy;
+                    let mut cc = canvas.peek().clone();
+                    if let Some(cc) = cc.as_mut() {
+                        cc.pan_x = bx + dx;
+                        cc.pan_y = by + dy;
+                    }
+                    canvas.set(cc);
+                }
+            },
+            onmouseup: move |_: MouseEvent| {
+                let was = dragging.peek().is_some() || *panning.peek();
+                *dragging.write_unchecked() = None;
+                *panning.write_unchecked() = false;
+                if was {
+                    on_save.call(());
+                }
+            },
+            onmouseleave: move |_: MouseEvent| {
+                *dragging.write_unchecked() = None;
+                *panning.write_unchecked() = false;
+            },
         }
 
-        // ── Delete confirmation ──
-        ConfirmDialog {
-            open: use_signal(|| false),  // TODO: bind to delete_target.is_some()
-            title: "Delete canvas?".to_string(),
-            message: {
-                let name = delete_target
-                    .read()
-                    .as_ref()
-                    .and_then(|id| rows.iter().find(|c| c.id == id))
-                    .map(|c| c.name.clone())
-                    .unwrap_or_default();
-                format!("Remove \"{name}\"? This cannot be undone.")
-            },
-            danger: true,
-            on_confirm: Some({
-                let s_for_delete = s;
-                move |_: ()| {
-                    if let Some(id) = delete_target.read().clone() {
-                        delete_canvas(s_for_delete, id);
+        // Subtle grid for orientation (transformed with the canvas).
+        div {
+            class: "canvas-grid absolute inset-0",
+            style: "background-image: radial-gradient(circle, #374151 1px, transparent 1px); background-size: 40px 40px;",
+        }
+
+        // Groups (rendered behind nodes).
+        for g in &c.groups {
+            {
+                let gid = g.id.clone();
+                rsx! {
+                    div {
+                        key: gid,
+                        class: "absolute border-2 border-dashed border-gray-700 rounded-lg bg-gray-800/20",
+                        style: "left: {g.x}px; top: {g.y}px; width: {g.width}px; height: {g.height}px;",
+                    }
+                    div { class: "px-2 py-1 text-xs text-gray-500 font-medium", "{g.label}" }
+                }
+            }
+        }
+
+        // Edges (SVG connectors), behind nodes.
+        svg {
+            class: "absolute inset-0",
+            style: "width: 100%; height: 100%; overflow: visible;",
+            key: c.edges.len(),
+            for seg in &edge_segs {
+                {
+                    let (eid, x1, y1, x2, y2) = (seg.0.clone(), seg.1, seg.2, seg.3, seg.4);
+                    rsx! {
+                        line {
+                            key: eid,
+                            x1: "{x1}",
+                            y1: "{y1}",
+                            x2: "{x2}",
+                            y2: "{y2}",
+                            stroke: "#4b5563",
+                            "stroke-width": "2",
+                            fill: "none",
+                        }
                     }
                 }
-            }),
-            on_cancel: Some(move |_: ()| {
-                *delete_target.write_unchecked() = None;
-            }),
+            }
+            defs {
+                marker {
+                    id: "canvas-arrow",
+                    "markerWidth": "8",
+                    "markerHeight": "8",
+                    "refX": "6",
+                    "refY": "3.5",
+                    orient: "auto",
+                    "markerUnits": "strokeWidth",
+                    polygon { points: "0 0, 8 3.5, 0 7", fill: "#6b7280" }
+                }
+            }
         }
+
+        // Nodes (DOM cards).
+        for node in &nodes {
+            {
+                let node_id = node.id.clone();
+                let node_title = node.title.clone();
+                let node_path = node.note_path.clone();
+                let node_kind = node.kind.clone();
+                let (nx, ny) = (node.x, node.y);
+                rsx! {
+                    div {
+                        key: node_id.clone(),
+                        class: "absolute bg-gray-800 border border-gray-600 rounded-lg shadow-lg cursor-move hover:border-blue-500 transition-colors",
+                        style: "left: {nx}px; top: {ny}px; min-width: 180px;",
+                        onmousedown: move |ev: MouseEvent| {
+                            ev.stop_propagation();
+                            let web = ev.data().as_web_event();
+                            *drag_origin.write_unchecked() = (
+                                web.client_x() as f64,
+                                web.client_y() as f64,
+                                nx,
+                                ny,
+                            );
+                            *dragging.write_unchecked() = Some(node_id.clone());
+                            *panning.write_unchecked() = false;
+                        },
+                        ondblclick: move |_: MouseEvent| {
+                            on_open_note.call(node_path.clone());
+                        },
+                    }
+                    div { class: "flex items-center justify-between px-2 py-1 border-b border-gray-700" }
+                    span {
+                        class: "text-xs font-medium text-gray-300 truncate",
+                        title: node_path.clone(),
+                        "{node_title}"
+                    }
+                    button {
+                        class: "text-xs text-gray-500 hover:text-red-400",
+                        "aria-label": "Remove node",
+                        onmousedown: move |ev: MouseEvent| { ev.stop_propagation(); },
+                        onclick: move |_: MouseEvent| {
+                            on_remove_node.call(node_id.clone());
+                        },
+                        {render_icon_view(Icon::X)}
+                    }
+                    div { class: "px-2 py-1 text-xs text-gray-500", "{node_kind}" }
+                }
+            }
+        }
+
+        // Screen-fixed toolbar (not transformed).
+        div {
+            class: "absolute top-3 right-3 z-20 flex items-center gap-1.5 bg-gray-800/90 border border-gray-700 rounded-lg px-2 py-1",
+        }
+        button {
+            class: "w-7 h-7 flex items-center justify-center hover:bg-gray-700 rounded",
+            "aria-label": "Zoom out",
+            onclick: move |_: MouseEvent| {
+                let mut cc = canvas.peek().clone();
+                if let Some(cc) = cc.as_mut() {
+                    cc.zoom = (cc.zoom * 0.8).clamp(0.1, 5.0);
+                }
+                canvas.set(cc);
+                on_save.call(());
+            },
+            {render_icon_view(Icon::ZoomOut)}
+        }
+        button {
+            class: "w-7 h-7 flex items-center justify-center hover:bg-gray-700 rounded",
+            "aria-label": "Reset view",
+            onclick: move |_: MouseEvent| {
+                let mut cc = canvas.peek().clone();
+                if let Some(cc) = cc.as_mut() {
+                    cc.pan_x = 0.0;
+                    cc.pan_y = 0.0;
+                    cc.zoom = 1.0;
+                }
+                canvas.set(cc);
+                on_save.call(());
+            },
+            {render_icon_view(Icon::Target)}
+        }
+        button {
+            class: "w-7 h-7 flex items-center justify-center hover:bg-gray-700 rounded",
+            "aria-label": "Zoom in",
+            onclick: move |_: MouseEvent| {
+                let mut cc = canvas.peek().clone();
+                if let Some(cc) = cc.as_mut() {
+                    cc.zoom = (cc.zoom * 1.2).clamp(0.1, 5.0);
+                }
+                canvas.set(cc);
+                on_save.call(());
+            },
+            {render_icon_view(Icon::ZoomIn)}
+        }
+        div { class: "h-4 w-px bg-gray-700" }
+        {match save_st {
+            SaveState::Idle => rsx! { span { class: "text-xs text-gray-500", "Saved" } },
+            SaveState::Saving => rsx! {
+                span { class: "flex items-center gap-1 text-xs text-amber-400",
+                    Spinner { size: SpinnerSize::Sm }
+                    " Saving…"
+                }
+            },
+            SaveState::Saved => rsx! {
+                span { class: "flex items-center gap-1 text-xs text-green-400", "{render_icon_view(Icon::CircleCheck)}" " Saved" }
+            },
+            SaveState::Error => rsx! {
+                span { class: "flex items-center gap-1 text-xs text-red-400", "{render_icon_view(Icon::CircleX)}" " Save failed" }
+            },
+        }}
+        {save_err_val.as_ref().map(|m| rsx! { span { class: "text-xs text-red-300 max-w-40 truncate", title: "{m}", "{m}" } })}
+        div { class: "text-xs text-gray-500 w-10 text-right", "{zoom_pct}%" }
+    }
+}
+
+// ── Tests ────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(id: &str, path: &str, x: f64, y: f64) -> CanvasNode {
+        CanvasNode {
+            id: id.to_string(),
+            note_path: path.to_string(),
+            title: path.to_string(),
+            x,
+            y,
+            width: None,
+            height: None,
+            kind: "note".to_string(),
+            source: String::new(),
+            text: String::new(),
+        }
+    }
+
+    fn edge(id: &str, source: &str, target: &str) -> CanvasEdge {
+        CanvasEdge {
+            id: id.to_string(),
+            source: source.to_string(),
+            target: target.to_string(),
+            label: String::new(),
+        }
+    }
+
+    fn entry(path: &str, title: &str) -> NoteIndexEntry {
+        NoteIndexEntry {
+            path: path.to_string(),
+            title: title.to_string(),
+            folder: String::new(),
+            modified_at: String::new(),
+            pinned: false,
+        }
+    }
+
+    #[test]
+    fn classify_list_transitions() {
+        assert_eq!(classify_list(ListState::Idle, 0), ListPhase::Loading);
+        assert_eq!(classify_list(ListState::Loading, 5), ListPhase::Loading);
+        assert_eq!(classify_list(ListState::Loaded, 0), ListPhase::Empty);
+        assert_eq!(classify_list(ListState::Loaded, 3), ListPhase::Loaded);
+        assert_eq!(classify_list(ListState::Failed, 0), ListPhase::Error);
+    }
+
+    #[test]
+    fn classify_canvas_phases() {
+        let empty = new_canvas_with_id("Empty", "c1");
+        let loaded = CanvasDef {
+            id: "c2".to_string(),
+            name: "Loaded".to_string(),
+            nodes: vec![node("n1", "a.md", 0.0, 0.0)],
+            ..Default::default()
+        };
+        // No active selection → Select, even when Loaded.
+        assert_eq!(
+            classify_canvas(CanvasLoadState::Idle, None, None),
+            CanvasPhase::Select
+        );
+        // Active selection while loading → Loading.
+        assert_eq!(
+            classify_canvas(CanvasLoadState::Loading, None, Some("c1")),
+            CanvasPhase::Loading
+        );
+        // Loaded + empty canvas → Empty.
+        assert_eq!(
+            classify_canvas(CanvasLoadState::Loaded, Some(&empty), Some("c1")),
+            CanvasPhase::Empty
+        );
+        // Loaded + nodes → Ready.
+        assert_eq!(
+            classify_canvas(CanvasLoadState::Loaded, Some(&loaded), Some("c2")),
+            CanvasPhase::Ready
+        );
+        // Failed → Error regardless of payload.
+        assert_eq!(
+            classify_canvas(CanvasLoadState::Failed, Some(&loaded), Some("c2")),
+            CanvasPhase::Error
+        );
+    }
+
+    #[test]
+    fn new_canvas_has_defaults() {
+        let c = new_canvas_with_id("My Canvas", "abc");
+        assert_eq!(c.name, "My Canvas");
+        assert_eq!(c.id, "abc");
+        assert!(c.nodes.is_empty());
+        assert!(c.edges.is_empty());
+        assert_eq!(c.zoom, 1.0);
+        assert_eq!(c.pan_x, 0.0);
+        assert_eq!(c.pan_y, 0.0);
+    }
+
+    #[test]
+    fn next_node_position_cascades() {
+        let c = new_canvas_with_id("c", "1");
+        // With pan (0,0) and zoom 1.0 the cascade steps by 30px per index.
+        let (x0, y0) = next_node_position(&c, 0);
+        let (x1, y1) = next_node_position(&c, 1);
+        assert!(x0.abs() < 1e-9 && y0.abs() < 1e-9);
+        assert!((x1 - 30.0).abs() < 1e-9 && (y1 - 30.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn next_node_position_respects_pan_and_zoom() {
+        let c = CanvasDef {
+            pan_x: 100.0,
+            pan_y: 50.0,
+            zoom: 2.0,
+            ..Default::default()
+        };
+        let (x, y) = next_node_position(&c, 0);
+        // centre ≈ (-pan_x / zoom, -pan_y / zoom)
+        assert!((x - (-50.0)).abs() < 1e-9);
+        assert!((y - (-25.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn create_node_appends_and_ids_sequentially() {
+        let mut c = new_canvas_with_id("c", "1");
+        create_node(&mut c, &entry("note/a.md", "A"));
+        create_node(&mut c, &entry("note/b.md", "B"));
+        assert_eq!(c.nodes.len(), 2);
+        assert_eq!(c.nodes[0].id, "n1");
+        assert_eq!(c.nodes[1].id, "n2");
+        assert_eq!(c.nodes[0].note_path, "note/a.md");
+        assert_eq!(c.nodes[1].note_path, "note/b.md");
+    }
+
+    #[test]
+    fn remove_node_cascades_to_edges() {
+        let mut c = CanvasDef {
+            id: "c".to_string(),
+            name: "c".to_string(),
+            nodes: vec![node("n1", "a.md", 0.0, 0.0), node("n2", "b.md", 10.0, 10.0)],
+            edges: vec![edge("e1", "n1", "n2")],
+            ..Default::default()
+        };
+        remove_node(&mut c, "n1");
+        assert!(c.nodes.iter().all(|n| n.id != "n1"));
+        assert!(c.edges.is_empty(), "edges attached to removed node should be removed");
+    }
+
+    #[test]
+    fn edge_endpoints_uses_node_centres() {
+        let c = CanvasDef {
+            nodes: vec![node("n1", "a.md", 0.0, 0.0), node("n2", "b.md", 100.0, 60.0)],
+            edges: vec![edge("e1", "n1", "n2")],
+            ..Default::default()
+        };
+        let (x1, y1, x2, y2) = edge_endpoints(&c, &c.edges[0]).unwrap();
+        // Node width/height default to 240x120 → centre offsets.
+        assert!((x1 - (0.0 + DEFAULT_NODE_W / 2.0)).abs() < 1e-9);
+        assert!((y1 - (0.0 + DEFAULT_NODE_H / 2.0)).abs() < 1e-9);
+        assert!((x2 - (100.0 + DEFAULT_NODE_W / 2.0)).abs() < 1e-9);
+        assert!((y2 - (60.0 + DEFAULT_NODE_H / 2.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn edge_endpoints_missing_node_is_none() {
+        let c = CanvasDef {
+            nodes: vec![node("n1", "a.md", 0.0, 0.0)],
+            edges: vec![edge("e1", "n1", "missing")],
+            ..Default::default()
+        };
+        assert!(edge_endpoints(&c, &c.edges[0]).is_none());
+    }
+
+    #[test]
+    fn canvas_summary_reflects_contents() {
+        let mut c = new_canvas_with_id("c", "1");
+        assert_eq!(canvas_summary(&c), "blank canvas");
+        c.nodes.push(node("n1", "a.md", 0.0, 0.0));
+        assert_eq!(canvas_summary(&c), "1 nodes · 0 connections");
+    }
+
+    #[test]
+    fn generate_canvas_id_is_unique_and_prefixed() {
+        let a = generate_canvas_id();
+        let b = generate_canvas_id();
+        assert!(a.starts_with("canvas-"));
+        assert_ne!(a, b);
     }
 }
