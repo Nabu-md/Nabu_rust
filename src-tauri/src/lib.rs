@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod diagnostics;
+pub mod dictation;
 pub mod event_bridge;
 pub mod history;
 pub mod native_messaging;
@@ -432,6 +433,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .manage(settings_store)
+        .manage(crate::dictation::DictationService::new())
         .invoke_handler(tauri::generate_handler![
             crate::commands::check_vault_exists,
             crate::commands::get_current_vault,
