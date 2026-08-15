@@ -27,12 +27,13 @@
 //! - [`recovery`] — crash-recovery banner, save-status indicator, diff view,
 //!   version history browser, and snapshot recovery manager
 
-pub mod app;
 pub mod activity;
+pub mod app;
 pub mod contexts;
 pub mod dictation_pill;
 pub mod editor;
 pub mod file_tree;
+pub mod graph_layout;
 pub mod graph_view;
 pub mod inbox;
 pub mod layout;
