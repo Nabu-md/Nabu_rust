@@ -4378,6 +4378,29 @@ mod tests {
         ));
         ctx.register("vault_graph", graph.clone());
 
+        let history_mgr = Arc::new(std::sync::RwLock::new(nabu_core::history::HistoryManager::new()));
+        ctx.register("history_manager", history_mgr);
+
+        let conv_store = Arc::new(ConversationStore::new(vault.join(".nabu").join("conversations")));
+        ctx.register("conversation_store", conv_store);
+
+        let diag_platform = Arc::new(nabu_core::diagnostic::DiagnosticPlatform::new());
+        ctx.register("diagnostic_platform", diag_platform);
+
+        let perf_monitor = Arc::new(nabu_core::diagnostics::PerformanceMonitor::new());
+        ctx.register("performance_monitor", perf_monitor);
+
+        let stream_manager = Arc::new(StreamManager::new((*event_bus).clone()));
+        ctx.register("stream_manager", stream_manager);
+
+        let executors = Arc::new(nabu_core::jobs::workers::ExecutorRegistry::new());
+        let queue = Arc::new(
+            nabu_core::jobs::DurableJobQueue::new(vault.join(".nabu").join("jobs"))
+                .expect("job queue"),
+        );
+        let pool = Arc::new(nabu_core::jobs::workers::WorkerPool::new(2, queue, executors));
+        ctx.register("worker_pool", pool);
+
         // ITEM_STORED → index + graph (mirrors the production subscriber).
         {
             let s = storage.clone();
@@ -4424,6 +4447,27 @@ mod tests {
         }
 
         ctx
+    }
+
+    /// Creates a throwaway settings file path in a temp directory.
+    fn temp_settings_path() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "nabu-settings-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("settings.json")
+    }
+
+    /// Creates a SettingsStore pointed at the given vault path.
+    fn test_settings_store(vault: &Path) -> SettingsStore {
+        let store = SettingsStore::new(temp_settings_path());
+        store.set(AppSettings {
+            last_vault_path: vault.to_string_lossy().to_string(),
+            ..AppSettings::default()
+        });
+        store
     }
 
     #[test]
@@ -4540,6 +4584,798 @@ mod tests {
         let ids = vec![obj.id.to_string(), bogus];
         let result = inbox_batch_approve_impl(&ctx, &ids);
         assert!(result.is_err(), "batch should surface the failing item");
+    }
+
+    // ── Settings command tests ───────────────────────────────────────
+
+    #[test]
+    fn settings_set_then_get_returns_value() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        settings_set_impl(&store, "theme", serde_json::json!("dark")).unwrap();
+        let val = settings_get_impl(&store, "theme").unwrap();
+        assert_eq!(val, serde_json::json!("dark"));
+    }
+
+    #[test]
+    fn settings_set_all_overwrites() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        let new_settings = AppSettings {
+            last_vault_path: vault.to_string_lossy().to_string(),
+            font_size: Some(18.0),
+            ..AppSettings::default()
+        };
+        settings_set_all_impl(&store, &new_settings).unwrap();
+        let got = get_settings_impl(&store).unwrap();
+        assert_eq!(got.font_size, Some(18.0));
+    }
+
+    #[test]
+    fn settings_export_import_roundtrip() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        settings_set_impl(&store, "custom_key", serde_json::json!(42)).unwrap();
+        let exported = settings_export_impl(&store).unwrap();
+        let new_store = SettingsStore::new(temp_settings_path());
+        let imported = settings_import_impl(&new_store, &exported).unwrap();
+        assert_eq!(
+            settings_get_impl(&new_store, "custom_key").unwrap(),
+            serde_json::json!(42)
+        );
+        assert_eq!(imported.extra_settings.get("custom_key"), Some(&serde_json::json!(42)));
+    }
+
+    #[test]
+    fn settings_reset_clears_extra_settings() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        settings_set_impl(&store, "to_delete", serde_json::json!(true)).unwrap();
+        settings_reset_impl(&store).unwrap();
+        let after = get_settings_impl(&store).unwrap();
+        assert!(!after.extra_settings.contains_key("to_delete"));
+    }
+
+    #[test]
+    fn settings_get_missing_key_returns_null() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        let val = settings_get_impl(&store, "nonexistent").unwrap();
+        assert!(val.is_null());
+    }
+
+    // ── Template command tests ──
+
+    #[test]
+    fn template_crud_lifecycle() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        let tmpl = TemplateRecord {
+            name: "Meeting Notes".to_string(),
+            description: Some("For meetings".to_string()),
+            icon: None,
+            default_folder: None,
+            content: "# {{title}}\n\n## Agenda\n\n## Notes\n".to_string(),
+            favourite: false,
+        };
+        template_save_impl(&store, tmpl.clone()).unwrap();
+        let list = template_list_impl(&store).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "Meeting Notes");
+
+        let mut updated = tmpl.clone();
+        updated.description = Some("Updated".to_string());
+        template_save_impl(&store, updated).unwrap();
+        let list = template_list_impl(&store).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].description.as_deref(), Some("Updated"));
+
+        template_delete_impl(&store, "Meeting Notes").unwrap();
+        let list = template_list_impl(&store).unwrap();
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn template_duplicate_creates_unique_copy() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        template_save_impl(&store, TemplateRecord {
+            name: "Template A".to_string(),
+            description: None,
+            icon: None,
+            default_folder: None,
+            content: "Original".to_string(),
+            favourite: true,
+        }).unwrap();
+        let cloned = template_duplicate_impl(&store, "Template A").unwrap();
+        assert!(cloned.name.starts_with("Template A Copy"));
+        assert!(!cloned.favourite);
+        assert_eq!(cloned.content, "Original");
+
+        let cloned2 = template_duplicate_impl(&store, "Template A").unwrap();
+        assert_ne!(cloned.name, cloned2.name);
+    }
+
+    #[test]
+    fn template_set_favourite_toggles() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        template_save_impl(&store, TemplateRecord {
+            name: "Task".to_string(),
+            description: None,
+            icon: None,
+            default_folder: None,
+            content: "{{content}}".to_string(),
+            favourite: false,
+        }).unwrap();
+        template_set_favourite_impl(&store, "Task", true).unwrap();
+        let list = template_list_impl(&store).unwrap();
+        assert!(list.iter().any(|t| t.name == "Task" && t.favourite));
+    }
+
+    // ── Smart Folder tests ──
+
+    #[test]
+    fn smart_folder_crud_lifecycle() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        let folder = SmartFolder {
+            id: "inbox-important".to_string(),
+            name: "Important".to_string(),
+            query: "tag:important".to_string(),
+        };
+        smart_folder_save_impl(&store, folder.clone()).unwrap();
+        let list = smart_folders_list_impl(&store).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "inbox-important");
+
+        let mut updated = folder.clone();
+        updated.query = "tag:important tag:review".to_string();
+        smart_folder_save_impl(&store, updated).unwrap();
+        let list = smart_folders_list_impl(&store).unwrap();
+        assert_eq!(list[0].query, "tag:important tag:review");
+
+        smart_folder_delete_impl(&store, "inbox-important").unwrap();
+        let list = smart_folders_list_impl(&store).unwrap();
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn smart_folder_evaluate_empty_query_returns_all() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        std::fs::write(vault.join("a.md"), "# Note A\ntag:work").unwrap();
+        std::fs::write(vault.join("b.md"), "# Note B\ntag:personal").unwrap();
+        let results = smart_folder_evaluate_impl(&store, "").unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn smart_folder_evaluate_tag_filter() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        std::fs::write(vault.join("a.md"), "# Note A\n\ntags: work\n\n").unwrap();
+        std::fs::write(vault.join("b.md"), "# Note B\n\ntags: personal\n\n").unwrap();
+        std::fs::write(vault.join("c.md"), "# Note C\n\ntags: Work project\n\n").unwrap();
+        let results = smart_folder_evaluate_impl(&store, "tag:work").unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    // ── Canvas tests ──
+
+    #[test]
+    fn canvas_crud_lifecycle() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        let canvas = CanvasDef {
+            id: "canvas-1".to_string(),
+            name: "My Canvas".to_string(),
+            nodes: vec![],
+            edges: vec![],
+            groups: vec![],
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+        };
+        canvas_save_impl(&store, canvas.clone()).unwrap();
+        let list = canvas_list_impl(&store).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "My Canvas");
+
+        let got = canvas_get_impl(&store, "canvas-1").unwrap();
+        assert!(got.is_some());
+        assert_eq!(got.unwrap().name, "My Canvas");
+
+        let mut updated = canvas.clone();
+        updated.name = "Renamed Canvas".to_string();
+        canvas_save_impl(&store, updated).unwrap();
+        let list = canvas_list_impl(&store).unwrap();
+        assert_eq!(list[0].name, "Renamed Canvas");
+
+        canvas_delete_impl(&store, "canvas-1").unwrap();
+        let list = canvas_list_impl(&store).unwrap();
+        assert!(list.is_empty());
+    }
+
+    // ── Archive tests ──
+
+    #[test]
+    fn archive_note_moves_to_archive_folder() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let store = test_settings_store(&dir);
+        std::fs::write(dir.join("original.md"), "# Hello").unwrap();
+        archive_note_impl(&ctx, &store, "original.md").unwrap();
+        assert!(!dir.join("original.md").exists());
+        assert!(dir.join("archive").join("original.md").exists());
+    }
+
+    #[test]
+    fn archive_note_rejects_path_traversal() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let store = test_settings_store(&dir);
+        let result = archive_note_impl(&ctx, &store, "../escape.md");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn archive_note_rejects_archive_folder_path() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let store = test_settings_store(&dir);
+        let result = archive_note_impl(&ctx, &store, "archive/note.md");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn archive_restore_returns_to_original_location() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let store = test_settings_store(&dir);
+        std::fs::write(dir.join("to_archive.md"), "# Restore Me").unwrap();
+        archive_note_impl(&ctx, &store, "to_archive.md").unwrap();
+        archive_restore_impl(&ctx, &store, "archive/to_archive.md").unwrap();
+        assert!(dir.join("to_archive.md").exists());
+        assert!(!dir.join("archive").join("to_archive.md").exists());
+    }
+
+    #[test]
+    fn archive_list_returns_archived_notes() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let store = test_settings_store(&dir);
+        std::fs::write(dir.join("archived1.md"), "# Note 1").unwrap();
+        archive_note_impl(&ctx, &store, "archived1.md").unwrap();
+        let list = archive_list_impl(&store).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].original_path, "archived1.md");
+    }
+
+    // ── Calendar & Daily Notes tests ──
+
+    #[test]
+    fn daily_note_creates_with_default_content() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        let path = daily_note_for_impl(&store, "2024-01-15").unwrap();
+        assert_eq!(path, "2024-01-15.md");
+        assert!(vault.join("2024-01-15.md").exists());
+    }
+
+    #[test]
+    fn daily_note_returns_existing_without_overwriting() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        std::fs::write(vault.join("2024-01-15.md"), "# My Notes").unwrap();
+        daily_note_for_impl(&store, "2024-01-15").unwrap();
+        let content = std::fs::read_to_string(vault.join("2024-01-15.md")).unwrap();
+        assert_eq!(content, "# My Notes");
+    }
+
+    #[test]
+    fn daily_note_rejects_invalid_date() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        let result = daily_note_for_impl(&store, "not-a-date");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn calendar_notes_filters_by_month() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        std::fs::write(vault.join("2024-01-15.md"), "# Jan Note").unwrap();
+        std::fs::write(vault.join("2024-02-20.md"), "# Feb Note").unwrap();
+        let results = calendar_notes_impl(&store, "2024-01").unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].path, "2024-01-15.md");
+    }
+
+    #[test]
+    fn calendar_notes_empty_for_empty_vault() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        let results = calendar_notes_impl(&store, "2024-01").unwrap();
+        assert!(results.is_empty());
+    }
+
+    // ── Notes diff tests ──
+
+    #[test]
+    fn notes_diff_shows_changes() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        std::fs::write(vault.join("a.md"), "# Hello\nWorld\n").unwrap();
+        std::fs::write(vault.join("b.md"), "# Hello\nWorld\nNew Line\n").unwrap();
+        let diff = notes_diff_impl(&store, "a.md", "b.md").unwrap();
+        assert!(!diff.is_empty());
+    }
+
+    #[test]
+    fn notes_diff_empty_for_identical_notes() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        std::fs::write(vault.join("a.md"), "# Same\n").unwrap();
+        std::fs::write(vault.join("b.md"), "# Same\n").unwrap();
+        let diff = notes_diff_impl(&store, "a.md", "b.md").unwrap();
+        assert!(diff.iter().all(|r| matches!(r.kind, crate::recovery::DiffKind::Context)));
+    }
+
+    // ── Tree list tests ──
+
+    #[test]
+    fn tree_list_returns_markdown_files() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        std::fs::write(vault.join("note1.md"), "# Note 1").unwrap();
+        std::fs::create_dir_all(vault.join("subfolder")).unwrap();
+        std::fs::write(vault.join("subfolder").join("note2.md"), "# Note 2").unwrap();
+        let entries = tree_list_impl(&store).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().any(|e| e.path == "note1.md"));
+        assert!(entries.iter().any(|e| e.path == "subfolder/note2.md"));
+    }
+
+    #[test]
+    fn tree_list_empty_when_no_vault() {
+        let store = SettingsStore::new(temp_settings_path());
+        let entries = tree_list_impl(&store).unwrap();
+        assert!(entries.is_empty());
+    }
+
+    // ── Check vault exists tests ──
+
+    #[test]
+    fn check_vault_exists_returns_path_when_valid() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        let result = check_vault_exists_impl(&store).unwrap();
+        assert_eq!(result.as_deref(), Some(vault.to_str().unwrap()));
+    }
+
+    #[test]
+    fn check_vault_exists_returns_none_for_empty_path() {
+        let store = SettingsStore::new(temp_settings_path());
+        let result = check_vault_exists_impl(&store).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn check_vault_exists_returns_none_for_nonexistent_path() {
+        let store = SettingsStore::new(temp_settings_path());
+        store.update(|s| {
+            s.last_vault_path = "/nonexistent/path/that/should/not/exist".to_string();
+        }).unwrap();
+        let result = check_vault_exists_impl(&store).unwrap();
+        assert!(result.is_none());
+    }
+
+    // ── Capability command tests ──
+
+    #[test]
+    fn capability_list_returns_built_in_capabilities() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let caps = capability_list_impl(&ctx).unwrap();
+        assert!(!caps.is_empty());
+    }
+
+    #[test]
+    fn capability_list_with_state_returns_summaries() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let summaries = capability_list_with_state_impl(&ctx).unwrap();
+        assert!(!summaries.is_empty());
+    }
+
+    #[test]
+    fn capability_enable_empty_id_rejected() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let result = capability_enable_impl(&ctx, "");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn capability_disable_empty_id_rejected() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let result = capability_disable_impl(&ctx, "");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn capability_enable_unknown_id_errors() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let result = capability_enable_impl(&ctx, "nonexistent:capability");
+        assert!(result.is_err());
+    }
+
+    // ── Health / Metrics / Pool tests ──
+
+    #[test]
+    fn health_check_returns_service_health() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let health = health_check_impl(&ctx).unwrap();
+        assert!(health.registered_services > 0);
+    }
+
+    #[test]
+    fn metrics_returns_runtime_metrics() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let metrics = metrics_impl(&ctx).unwrap();
+        assert!(metrics.timers.len() >= 0);
+    }
+
+    #[test]
+    fn pool_health_returns_worker_pool_info() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let health = pool_health_impl(&ctx).unwrap();
+        assert_eq!(health.worker_count, 2);
+    }
+
+    // ── Thread command tests ──
+
+    #[test]
+    fn thread_save_and_load_roundtrip() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let thread = Thread::new("Test Thread".to_string());
+        thread_save_impl(&ctx, thread.clone()).unwrap();
+        let loaded = thread_load_impl(&ctx, &thread.id.to_string()).unwrap();
+        assert!(loaded.is_some());
+        assert_eq!(loaded.unwrap().title, "Test Thread");
+    }
+
+    #[test]
+    fn thread_list_returns_saved_threads() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        thread_save_impl(&ctx, Thread::new("Thread 1".to_string())).unwrap();
+        thread_save_impl(&ctx, Thread::new("Thread 2".to_string())).unwrap();
+        let list = thread_list_impl(&ctx).unwrap();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn thread_delete_removes_thread() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let thread = Thread::new("To Delete".to_string());
+        thread_save_impl(&ctx, thread.clone()).unwrap();
+        thread_delete_impl(&ctx, &thread.id.to_string()).unwrap();
+        let loaded = thread_load_impl(&ctx, &thread.id.to_string()).unwrap();
+        assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn thread_load_nonexistent_returns_none() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let bogus = uuid::Uuid::new_v4().to_string();
+        let result = thread_load_impl(&ctx, &bogus);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn thread_load_invalid_id_returns_error() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let result = thread_load_impl(&ctx, "not-a-uuid");
+        assert!(result.is_err());
+    }
+
+    // ── History command tests ──
+
+    #[test]
+    fn history_status_empty_when_no_entries() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let status = crate::history::history_status_impl(&ctx).unwrap();
+        assert!(!status.can_undo);
+        assert!(!status.can_redo);
+        assert_eq!(status.undo_len, 0);
+    }
+
+    #[test]
+    fn history_undo_redo_roundtrip() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        crate::history::push_history(
+            &ctx,
+            nabu_core::history::HistoryOp::NoteCreate,
+            "Test Op".to_string(),
+            vec!["note.md".to_string()],
+            serde_json::json!({}),
+            serde_json::json!({}),
+            std::sync::Arc::new(|| Ok(())),
+            std::sync::Arc::new(|| Ok(())),
+        ).unwrap();
+        let status = crate::history::history_status_impl(&ctx).unwrap();
+        assert!(status.can_undo);
+        assert_eq!(status.undo_len, 1);
+        let undo_label = crate::history::history_undo_impl(&ctx).unwrap();
+        assert_eq!(undo_label.as_deref(), Some("Test Op"));
+        let status = crate::history::history_status_impl(&ctx).unwrap();
+        assert!(status.can_redo);
+        let redo_label = crate::history::history_redo_impl(&ctx).unwrap();
+        assert_eq!(redo_label.as_deref(), Some("Test Op"));
+    }
+
+    #[test]
+    fn history_clear_resets_stacks() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        crate::history::push_history(
+            &ctx,
+            nabu_core::history::HistoryOp::NoteCreate,
+            "Op".to_string(),
+            vec![],
+            serde_json::json!({}),
+            serde_json::json!({}),
+            std::sync::Arc::new(|| Ok(())),
+            std::sync::Arc::new(|| Ok(())),
+        ).unwrap();
+        crate::history::history_clear_impl(&ctx).unwrap();
+        let status = crate::history::history_status_impl(&ctx).unwrap();
+        assert!(!status.can_undo);
+    }
+
+    #[test]
+    fn history_set_depth_limits() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        crate::history::history_set_depth_impl(&ctx, 3).unwrap();
+        let status = crate::history::history_status_impl(&ctx).unwrap();
+        assert_eq!(status.max_depth, 3);
+    }
+
+    // ── Inbox reject/retry/delete tests ──
+
+    #[test]
+    fn inbox_reject_marks_item_rejected() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let manager = ctx.storage_manager().unwrap();
+        let obj = nabu_core::inbox::model::build_inbox_object(
+            nabu_core::models::ObjectContent::Markdown("reject me".to_string()),
+            Some("capture"),
+        );
+        manager.save(&obj).unwrap();
+        let id = obj.id.to_string();
+        inbox_reject_impl(&ctx, &id, "spam").unwrap();
+        let loaded = manager.load(obj.id).unwrap();
+        assert_eq!(custom_text(&loaded, "inbox_status").as_deref(), Some("rejected"));
+    }
+
+    #[test]
+    fn inbox_retry_resets_to_pending() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let manager = ctx.storage_manager().unwrap();
+        let obj = nabu_core::inbox::model::build_inbox_object(
+            nabu_core::models::ObjectContent::Markdown("retry me".to_string()),
+            Some("capture"),
+        );
+        manager.save(&obj).unwrap();
+        let id = obj.id.to_string();
+        inbox_reject_impl(&ctx, &id, "bad").unwrap();
+        inbox_retry_impl(&ctx, &id).unwrap();
+        let loaded = manager.load(obj.id).unwrap();
+        assert_eq!(custom_text(&loaded, "inbox_status").as_deref(), Some("pending"));
+    }
+
+    #[test]
+    fn inbox_delete_removes_object() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let manager = ctx.storage_manager().unwrap();
+        let obj = nabu_core::inbox::model::build_inbox_object(
+            nabu_core::models::ObjectContent::Markdown("delete me".to_string()),
+            Some("capture"),
+        );
+        manager.save(&obj).unwrap();
+        inbox_delete_impl(&ctx, &obj.id.to_string()).unwrap();
+        assert!(manager.load(obj.id).is_none());
+    }
+
+    #[test]
+    fn inbox_batch_reject_applies_to_all() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let manager = ctx.storage_manager().unwrap();
+        let mut ids = Vec::new();
+        for i in 0..3 {
+            let obj = nabu_core::inbox::model::build_inbox_object(
+                nabu_core::models::ObjectContent::Markdown(format!("batch {i}")),
+                Some(format!("capture{i}")),
+            );
+            manager.save(&obj).unwrap();
+            ids.push(obj.id.to_string());
+        }
+        inbox_batch_reject_impl(&ctx, &ids, "batch reason").unwrap();
+        for id_str in &ids {
+            let uuid = uuid::Uuid::parse_str(id_str).unwrap();
+            let loaded = manager.load(uuid).unwrap();
+            assert_eq!(custom_text(&loaded, "inbox_status").as_deref(), Some("rejected"));
+        }
+    }
+
+    // ── Queue command tests ──
+
+    #[test]
+    fn queue_set_status_changes_reading_status() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let manager = ctx.storage_manager().unwrap();
+        let obj = nabu_core::inbox::model::build_inbox_object(
+            nabu_core::models::ObjectContent::Markdown("queue item".to_string()),
+            Some("capture"),
+        );
+        manager.save(&obj).unwrap();
+        queue_set_status_impl(&ctx, &obj.id.to_string(), "completed").unwrap();
+        let loaded = manager.load(obj.id).unwrap();
+        assert_eq!(
+            custom_text(&loaded, "reading_status").as_deref(),
+            Some("completed")
+        );
+    }
+
+    #[test]
+    fn queue_set_priority_changes_priority() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let manager = ctx.storage_manager().unwrap();
+        let obj = nabu_core::inbox::model::build_inbox_object(
+            nabu_core::models::ObjectContent::Markdown("priority item".to_string()),
+            Some("capture"),
+        );
+        manager.save(&obj).unwrap();
+        queue_set_priority_impl(&ctx, &obj.id.to_string(), "high").unwrap();
+        let loaded = manager.load(obj.id).unwrap();
+        assert_eq!(
+            custom_text(&loaded, "reading_priority").as_deref(),
+            Some("high")
+        );
+    }
+
+    #[test]
+    fn queue_set_progress_clamps_to_range() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let manager = ctx.storage_manager().unwrap();
+        let obj = nabu_core::inbox::model::build_inbox_object(
+            nabu_core::models::ObjectContent::Markdown("progress item".to_string()),
+            Some("capture"),
+        );
+        manager.save(&obj).unwrap();
+        queue_set_progress_impl(&ctx, &obj.id.to_string(), 150.0).unwrap();
+        let loaded = manager.load(obj.id).unwrap();
+        let progress = loaded
+            .custom_properties
+            .get("reading_progress")
+            .and_then(|v| match v {
+                CustomPropertyValue::Number(n) => Some(*n),
+                _ => None,
+            });
+        assert_eq!(progress, Some(1.0_f64));
+    }
+
+    // ── Mention ignore tests ──
+
+    #[test]
+    fn mention_ignore_adds_to_list() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        mention_ignore_impl(&store, "Some Note").unwrap();
+        let list = mention_ignore_list_impl(&store).unwrap();
+        assert!(list.iter().any(|t| *t == "Some Note"));
+    }
+
+    #[test]
+    fn mention_ignore_deduplicates() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        mention_ignore_impl(&store, "Dup Note").unwrap();
+        mention_ignore_impl(&store, "Dup Note").unwrap();
+        let list = mention_ignore_list_impl(&store).unwrap();
+        assert_eq!(list.iter().filter(|t| **t == "Dup Note").count(), 1);
+    }
+
+    #[test]
+    fn mention_ignore_list_empty_by_default() {
+        let vault = temp_vault();
+        let store = test_settings_store(&vault);
+        let list = mention_ignore_list_impl(&store).unwrap();
+        assert!(list.is_empty());
+    }
+
+    // ── note_create_file tests ──
+
+    #[test]
+    fn note_create_file_writes_content() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let store = test_settings_store(&dir);
+        note_create_file_impl(&ctx, &store, "new_note.md", "# Hello World").unwrap();
+        let content = std::fs::read_to_string(dir.join("new_note.md")).unwrap();
+        assert_eq!(content, "# Hello World");
+    }
+
+    #[test]
+    fn note_create_file_rejects_traversal() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let store = test_settings_store(&dir);
+        let result = note_create_file_impl(&ctx, &store, "../escape.md", "content");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn note_create_file_creates_subdirectories() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let store = test_settings_store(&dir);
+        note_create_file_impl(&ctx, &store, "sub/deep/note.md", "deep content").unwrap();
+        assert!(dir.join("sub/deep/note.md").exists());
+    }
+
+    #[test]
+    fn note_create_file_can_be_undone() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let store = test_settings_store(&dir);
+        note_create_file_impl(&ctx, &store, "undoable.md", "content").unwrap();
+        assert!(dir.join("undoable.md").exists());
+        crate::history::history_undo_impl(&ctx).unwrap();
+        assert!(!dir.join("undoable.md").exists());
+    }
+
+    // ── notes_index tests ──
+
+    #[test]
+    fn notes_index_includes_saved_notes() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let manager = ctx.storage_manager().unwrap();
+        manager.save_note_content("a.md", "alpha").unwrap();
+        manager.save_note_content("b.md", "beta").unwrap();
+        let entries = notes_index_impl(&ctx).unwrap();
+        assert!(entries.iter().any(|e| e.path == "a.md"));
+        assert!(entries.iter().any(|e| e.path == "b.md"));
+    }
+
+    #[test]
+    fn notes_index_empty_for_empty_vault() {
+        let dir = temp_vault();
+        let ctx = test_context(&dir);
+        let entries = notes_index_impl(&ctx).unwrap();
+        assert!(entries.is_empty());
     }
 }
 
