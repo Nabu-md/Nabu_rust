@@ -1,11 +1,31 @@
 use crate::jobs::cancellation::CancellationToken;
 use crate::jobs::workers::progress::ProgressReporter;
-use crate::models::{ObjectContent, ObjectType};
-use crate::processing::processor::{ProcessingContext, ProcessingResult, Processor};
+use crate::models::{CustomPropertyValue, ObjectContent, ObjectType};
+use crate::processing::processor::{ProcessingContext, ProcessingResult, Processor, ProcessingStats};
+use crate::diagnostic::{Diagnostic, DiagnosticCategory, DiagnosticSeverity, TextPosition, TextRange};
+use crate::native::NativeError;
 use async_trait::async_trait;
+use std::time::Instant;
+
+fn pdf_diagnostic(severity: DiagnosticSeverity, message: String, code: &str) -> Diagnostic {
+    Diagnostic::new(
+        severity,
+        TextRange::empty(TextPosition::new(0, 0)),
+        message,
+    )
+    .with_code(code.to_string())
+    .with_source("pdf_text_processor".to_string())
+    .with_category(DiagnosticCategory::Ocr)
+}
 
 /// Extracts text content from PDF files via the native PDFKit engine
 /// ([`crate::native::pdfkit`]). No simulated extraction exists.
+///
+/// On success the extracted text is:
+/// - Stored as `pdf_extracted_text` plain-text custom property.
+/// - Stored as a structured `pdf_info` JSON custom property (for future UI).
+/// - Set as `metadata.description` in full (not truncated to 200 chars) so
+///   the Indexer tokenizes every word via `tokenize_str(desc)`.
 pub struct PdfTextProcessor;
 
 #[async_trait]
@@ -26,7 +46,6 @@ impl Processor for PdfTextProcessor {
 
         progress.set_progress(0.1);
 
-        // Only process PDF binary content.
         let pdf_data = match &context.object.content {
             ObjectContent::Binary {
                 mime_type, data, ..
@@ -37,23 +56,83 @@ impl Processor for PdfTextProcessor {
         progress.set_progress(0.4);
         let mut object = context.object.clone();
 
-        let engine_result =
-            tokio::task::spawn_blocking(move || crate::native::pdfkit::extract_text(&pdf_data))
-                .await;
+        let start = Instant::now();
+        let engine_result = tokio::task::spawn_blocking(move || crate::native::pdfkit::extract_text(&pdf_data))
+            .await;
+        let duration_ms = start.elapsed().as_millis() as u64;
 
         let extracted = match engine_result {
             Ok(Ok(text)) => text,
-            Ok(Err(e)) => {
-                tracing::warn!(
-                    subsystem = "processing",
-                    component = "pdf_text_processor",
-                    object_id = %object.id,
-                    error = %e,
-                    "PDFKit text extraction unavailable; leaving object unmodified"
+            Ok(Err(NativeError::UnsupportedPlatform)) => {
+                let info = serde_json::json!({
+                    "extracted_text": null,
+                    "page_count": 0,
+                    "extraction_succeeded": false,
+                    "warning": "PDFKit unavailable on this platform (requires macOS)",
+                });
+                object.custom_properties.insert(
+                    "pdf_info".to_string(),
+                    CustomPropertyValue::Text(info.to_string()),
                 );
-                return ProcessingResult::unmodified(object);
+                return ProcessingResult::new(object)
+                    .add_diagnostic(pdf_diagnostic(
+                        DiagnosticSeverity::Information,
+                        "PDFKit unavailable on this platform; PDF preserved without text extraction".to_string(),
+                        "PDF_PLATFORM_UNSUPPORTED",
+                    ))
+                    .with_stats(
+                        ProcessingStats::new()
+                            .with_duration_ms(duration_ms)
+                            .with_metric("pdf_pages".to_string(), "0".to_string()),
+                    );
             }
-            Err(_) => return ProcessingResult::unmodified(object),
+            Ok(Err(e)) => {
+                let err_msg = format!("PDFKit text extraction error: {e}");
+                let info = serde_json::json!({
+                    "extracted_text": null,
+                    "page_count": 0,
+                    "extraction_succeeded": false,
+                    "warning": err_msg,
+                });
+                object.custom_properties.insert(
+                    "pdf_info".to_string(),
+                    CustomPropertyValue::Text(info.to_string()),
+                );
+                return ProcessingResult::new(object)
+                    .add_diagnostic(pdf_diagnostic(
+                        DiagnosticSeverity::Error,
+                        format!("PDF text extraction failed: {e}"),
+                        "PDF_ENGINE_ERROR",
+                    ))
+                    .with_stats(
+                        ProcessingStats::new()
+                            .with_duration_ms(duration_ms)
+                            .with_metric("pdf_pages".to_string(), "0".to_string()),
+                    );
+            }
+            Err(_) => {
+                let info = serde_json::json!({
+                    "extracted_text": null,
+                    "page_count": 0,
+                    "extraction_succeeded": false,
+                    "warning": "PDF text extraction task panicked",
+                });
+                object.custom_properties.insert(
+                    "pdf_info".to_string(),
+                    CustomPropertyValue::Text(info.to_string()),
+                );
+                return ProcessingResult::new(object)
+                    .add_diagnostic(pdf_diagnostic(
+                        DiagnosticSeverity::Critical,
+                        "PDF text extraction task panicked".to_string(),
+                        "PDF_PANIC",
+                    ))
+                    .with_stats(
+                        ProcessingStats::new()
+                            .with_duration_ms(duration_ms)
+                            .with_metric("pdf_pages".to_string(), "0".to_string()),
+                    );
+            }
         };
 
         progress.set_progress(0.7);
@@ -61,23 +140,39 @@ impl Processor for PdfTextProcessor {
         if !extracted.text.is_empty() {
             object.custom_properties.insert(
                 "pdf_extracted_text".to_string(),
-                crate::models::CustomPropertyValue::Text(extracted.text.clone()),
+                CustomPropertyValue::Text(extracted.text.clone()),
             );
 
-            // Use extracted text as description
+            let info = serde_json::json!({
+                "extracted_text": extracted.text,
+                "page_count": extracted.page_count,
+                "extraction_succeeded": true,
+                "warning": serde_json::Value::Null,
+            });
+            object.custom_properties.insert(
+                "pdf_info".to_string(),
+                CustomPropertyValue::Text(info.to_string()),
+            );
+
             if object.metadata.description.is_none() {
-                let desc: String = extracted.text.chars().take(200).collect();
-                object.metadata.description = Some(desc);
+                object.metadata.description = Some(extracted.text.clone());
             }
 
             object.custom_properties.insert(
                 "pdf_text_extracted".to_string(),
-                crate::models::CustomPropertyValue::Text("true".to_string()),
+                CustomPropertyValue::Text("true".to_string()),
             );
+
+            object.metadata.word_count = Some(extracted.text.split_whitespace().count());
         }
 
         progress.set_progress(1.0);
         ProcessingResult::new(object)
+            .with_stats(
+                ProcessingStats::new()
+                    .with_duration_ms(duration_ms)
+                    .with_metric("pdf_pages".to_string(), extracted.page_count.to_string()),
+            )
     }
 
     fn supports(&self, object_type: &ObjectType) -> bool {
@@ -122,14 +217,45 @@ mod tests {
                 .custom_properties
                 .get("pdf_extracted_text")
                 .map(|v| match v {
-                    crate::models::CustomPropertyValue::Text(s) => s.clone(),
+                    CustomPropertyValue::Text(s) => s.clone(),
                     _ => String::new(),
                 })
                 .unwrap_or_default();
             assert!(!extracted.is_empty(), "PDFKit should extract text");
             assert!(extracted.contains("QUICK BROWN FOX"));
+
+            // pdf_info JSON must be stored
+            let pdf_info = result
+                .object
+                .custom_properties
+                .get("pdf_info")
+                .and_then(|v| match v {
+                    CustomPropertyValue::Text(s) => serde_json::from_str::<serde_json::Value>(s).ok(),
+                    _ => None,
+                });
+            assert!(pdf_info.is_some(), "pdf_info must be stored");
+            let parsed = pdf_info.unwrap();
+            assert!(parsed["extraction_succeeded"].as_bool().unwrap_or(false), "extraction_succeeded must be true");
+            assert!(parsed["page_count"].is_number(), "page_count must be a number");
+
+            // description must contain the FULL text (not truncated to 200 chars)
+            let desc = result.object.metadata.description.as_deref().unwrap_or("");
+            assert!(desc.contains("QUICK BROWN FOX"), "description must contain the full extracted text");
+            assert_eq!(desc, &extracted, "description should be the full extracted text, not truncated");
         } else {
-            assert!(!result.modified);
+            // Non-macOS: PDFKit unavailable, pdf_info must be stored with warning.
+            assert!(result.modified, "object should be modified to record PDF platform warning");
+            let pdf_info = result
+                .object
+                .custom_properties
+                .get("pdf_info")
+                .and_then(|v| match v {
+                    CustomPropertyValue::Text(s) => serde_json::from_str::<serde_json::Value>(s).ok(),
+                    _ => None,
+                });
+            assert!(pdf_info.is_some(), "pdf_info must be stored even on failure");
+            let warning = pdf_info.and_then(|v| v["warning"].as_str().map(|s| s.to_string()));
+            assert!(warning.is_some(), "warning must be set on non-macOS");
         }
     }
 

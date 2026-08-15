@@ -41,7 +41,7 @@ struct ActiveSession {
     mic: Box<dyn Microphone>,
 }
 
-/// Real-time dictation pipeline: capture → buffer → transcribe.
+/// Real-time dictation pipeline: capture -> buffer -> transcribe.
 ///
 /// Construct with [`DictationService::new`] (real system microphone + the
 /// real Whisper engine) or [`DictationService::with_factory`] (injected
@@ -64,7 +64,10 @@ impl DictationService {
         Self::with_factory(transcriber, Arc::new(SystemMicrophoneFactory))
     }
 
-    pub fn with_factory(transcriber: Arc<dyn Transcriber>, factory: Arc<dyn MicrophoneFactory>) -> Self {
+    pub fn with_factory(
+        transcriber: Arc<dyn Transcriber>,
+        factory: Arc<dyn MicrophoneFactory>,
+    ) -> Self {
         Self {
             transcriber,
             factory,
@@ -92,7 +95,7 @@ impl DictationService {
     }
 
     /// Pre-flight check + begin real-time capture.
-    pub fn start(&self) -> Result<DictationState, DictationError> {
+    pub fn start(&self) -> Result<(), DictationError> {
         let current = self.status();
         if matches!(current, DictationState::Recording | DictationState::Processing) {
             return Err(DictationError::AlreadyActive);
@@ -118,7 +121,7 @@ impl DictationService {
 
         *self.active.lock().unwrap() = Some(ActiveSession { mic });
         self.set_state(DictationState::Recording);
-        Ok(DictationState::Recording)
+        Ok(())
     }
 
     /// Stop capture and run Whisper on the accumulated audio, returning the
@@ -148,9 +151,9 @@ impl DictationService {
 
         let text = match outcome {
             Ok(t) => t,
-            Err(ref e) => {
+            Err(e) => {
                 self.fail(e.to_string());
-                return Err(e.clone());
+                return Err(e);
             }
         };
         self.set_state(DictationState::Completed { text: text.clone() });
@@ -177,7 +180,7 @@ impl DictationService {
     }
 
     /// Convenience wrapper used by the IPC layer: returns a [`DictationResult`]
-    /// for `stop` and `start` flows alike.
+    /// carrying the transcription text on success.
     pub async fn stop_result(&self) -> Result<DictationResult, DictationError> {
         match self.stop().await {
             Ok(text) => Ok(DictationResult {
@@ -195,10 +198,11 @@ impl DictationService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Mutex;
 
     /// Mock microphone that hands back a pre-canned `CapturedAudio` (or an
     /// error) so capture can be tested without a physical microphone.
+    #[derive(Clone)]
     struct MockMicrophone {
         permission: bool,
         open_ok: bool,
@@ -236,29 +240,16 @@ mod tests {
         }
     }
 
-    /// Mock factory that returns a fixed microphone instance.
-    struct MockFactory {
-        mic: Option<MockMicrophone>,
-    }
+    /// Mock factory that returns a clone of a fixed microphone.
+    struct MockFactory(MockMicrophone);
     impl MicrophoneFactory for MockFactory {
         fn create(&self) -> Result<Box<dyn Microphone>, DictationError> {
-            // The factory is stateless here; rebuild a fresh mock each call by
-            // cloning the shared call log so tests can inspect invocations.
-            Ok(Box::new(MockMicrophone {
-                permission: true,
-                open_ok: true,
-                start_ok: true,
-                stop_result: Ok(CapturedAudio {
-                    wav_bytes: b"\x00".repeat(48),
-                    sample_rate: 16000,
-                    channels: 1,
-                }),
-                calls: self.mic.as_ref().unwrap().calls.clone(),
-            }))
+            Ok(Box::new(self.0.clone()))
         }
     }
 
     /// Mock transcriber that records received audio and returns a canned text.
+    #[derive(Clone)]
     struct MockTranscriber {
         available: bool,
         path: Option<PathBuf>,
@@ -280,41 +271,38 @@ mod tests {
     }
 
     fn svc_with(mic: MockMicrophone, transcriber: Arc<MockTranscriber>) -> DictationService {
-        let factory = Arc::new(MockFactory { mic: Some(mic) });
+        let factory: Arc<dyn MicrophoneFactory> = Arc::new(MockFactory(mic));
         DictationService::with_factory(transcriber, factory)
     }
 
-    async fn assert_completed_text(svc: &DictationService, expected: &str) {
-        let text = svc.stop().await.expect("stop should succeed");
-        assert_eq!(text, expected);
-        assert_eq!(
-            svc.status(),
-            DictationState::Completed { text: expected.to_string() }
-        );
+    fn ok_mic(bytes: Vec<u8>) -> MockMicrophone {
+        MockMicrophone {
+            permission: true,
+            open_ok: true,
+            start_ok: true,
+            stop_result: Ok(CapturedAudio {
+                wav_bytes: bytes,
+                sample_rate: 16000,
+                channels: 1,
+            }),
+            calls: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn mock_transcriber(available: bool, text: Result<String, DictationError>) -> Arc<MockTranscriber> {
+        Arc::new(MockTranscriber {
+            available,
+            path: Some(PathBuf::from("model.bin")),
+            text,
+            received: Arc::new(Mutex::new(Vec::new())),
+        })
     }
 
     // Test 1 — state lifecycle: Idle -> Recording -> Processing -> Completed
     #[tokio::test]
     async fn state_lifecycle_idle_to_completed() {
-        let received = Arc::new(Mutex::new(Vec::new()));
-        let transcriber = Arc::new(MockTranscriber {
-            available: true,
-            path: Some(PathBuf::from("model.bin")),
-            text: Ok("hello world".into()),
-            received,
-        });
-        let mic = MockMicrophone {
-            permission: true,
-            open_ok: true,
-            start_ok: true,
-            stop_result: Ok(CapturedAudio {
-                wav_bytes: b"\x00".repeat(48),
-                sample_rate: 16000,
-                channels: 1,
-            }),
-            calls: Arc::new(Mutex::new(Vec::new())),
-        };
-        let svc = svc_with(mic, transcriber.clone());
+        let transcriber = mock_transcriber(true, Ok("hello world".into()));
+        let svc = svc_with(ok_mic(vec![0u8; 48]), transcriber.clone());
 
         assert_eq!(svc.status(), DictationState::Idle);
         svc.start().expect("start ok");
@@ -322,9 +310,7 @@ mod tests {
         let text = svc.stop().await.expect("stop ok");
         assert_eq!(svc.status(), DictationState::Completed { text: "hello world".into() });
         assert_eq!(text, "hello world");
-        let received = transcriber.received.lock().unwrap();
-        assert_eq!(received.len(), 1);
-        assert!(!received[0].is_empty());
+        assert_eq!(transcriber.received.lock().unwrap().len(), 1);
     }
 
     // Test 2 — the Whisper processor receives real captured audio.
@@ -338,18 +324,7 @@ mod tests {
             received: received.clone(),
         });
         let payload = vec![0x01u8, 0x02, 0x03, 0x04, 0x05];
-        let mic = MockMicrophone {
-            permission: true,
-            open_ok: true,
-            start_ok: true,
-            stop_result: Ok(CapturedAudio {
-                wav_bytes: payload.clone(),
-                sample_rate: 16000,
-                channels: 1,
-            }),
-            calls: Arc::new(Mutex::new(Vec::new())),
-        };
-        let svc = svc_with(mic, transcriber);
+        let svc = svc_with(ok_mic(payload.clone()), transcriber);
         svc.start().unwrap();
         svc.stop().await.unwrap();
         let got = received.lock().unwrap();
@@ -360,28 +335,16 @@ mod tests {
     // Test 3 — missing Whisper model fails explicitly, no fake transcription.
     #[tokio::test]
     async fn missing_model_fails_at_start() {
-        let received = Arc::new(Mutex::new(Vec::new()));
         let transcriber = Arc::new(MockTranscriber {
             available: false,
             path: Some(PathBuf::from("/no/such/model.bin")),
             text: Ok(String::new()),
-            received,
+            received: Arc::new(Mutex::new(Vec::new())),
         });
-        let mic = MockMicrophone {
-            permission: true,
-            open_ok: true,
-            start_ok: true,
-            stop_result: Ok(CapturedAudio {
-                wav_bytes: vec![0; 48],
-                sample_rate: 16000,
-                channels: 1,
-            }),
-            calls: Arc::new(Mutex::new(Vec::new())),
-        };
-        let svc = svc_with(mic, transcriber);
+        let svc = svc_with(ok_mic(vec![0u8; 48]), transcriber);
         let err = svc.start().unwrap_err();
         assert!(matches!(err, DictationError::ModelNotFound(_)), "got {err:?}");
-        assert_eq!(svc.status(), DictationState::Failed { .. });
+        assert!(matches!(svc.status(), DictationState::Failed { .. }));
         assert!(svc.stop().await.is_err(), "no transcription should be produced");
         assert!(svc.active.lock().unwrap().is_none());
     }
@@ -394,48 +357,29 @@ mod tests {
             available: true,
             path: Some(PathBuf::from("/no/such/model.bin")),
             text: Err(DictationError::ModelNotFound("/no/such/model.bin".into())),
-            received,
+            received: received.clone(),
         });
-        let mic = MockMicrophone {
-            permission: true,
-            open_ok: true,
-            start_ok: true,
-            stop_result: Ok(CapturedAudio {
-                wav_bytes: vec![0; 48],
-                sample_rate: 16000,
-                channels: 1,
-            }),
-            calls: Arc::new(Mutex::new(Vec::new())),
-        };
-        let svc = svc_with(mic, transcriber);
+        let svc = svc_with(ok_mic(vec![0u8; 48]), transcriber);
         svc.start().unwrap();
         let err = svc.stop().await.unwrap_err();
         assert!(matches!(err, DictationError::ModelNotFound(_)), "got {err:?}");
         assert!(matches!(svc.status(), DictationState::Failed { .. }));
     }
 
-    // Test 4 — capture (start) failure enters an error state without crashing.
+    // Test 4 — capture (open) failure enters an error state without crashing.
     #[tokio::test]
     async fn capture_failure_enters_error_state() {
         let received = Arc::new(Mutex::new(Vec::new()));
-        let transcriber = Arc::new(MockTranscriber {
-            available: true,
-            path: Some(PathBuf::from("model.bin")),
-            text: Ok(String::new()),
-            received,
-        });
-        let mic = MockMicrophone {
+        let transcriber = mock_transcriber(true, Ok(String::new()));
+        transcriber.received = received;
+        let bad_mic = MockMicrophone {
             permission: true,
-            open_ok: false, // open() fails
+            open_ok: false,
             start_ok: true,
-            stop_result: Ok(CapturedAudio {
-                wav_bytes: vec![0; 48],
-                sample_rate: 16000,
-                channels: 1,
-            }),
+            stop_result: Err(DictationError::CaptureInitFailed("never reached".into())),
             calls: Arc::new(Mutex::new(Vec::new())),
         };
-        let svc = svc_with(mic, transcriber);
+        let svc = svc_with(bad_mic, transcriber);
         let err = svc.start().unwrap_err();
         assert!(matches!(err, DictationError::CaptureInitFailed(_)), "got {err:?}");
         assert!(matches!(svc.status(), DictationState::Failed { .. }));
@@ -445,13 +389,7 @@ mod tests {
     // Test 4b — microphone permission denied is reported distinctly.
     #[tokio::test]
     async fn permission_denied_is_reported() {
-        let received = Arc::new(Mutex::new(Vec::new()));
-        let transcriber = Arc::new(MockTranscriber {
-            available: true,
-            path: Some(PathBuf::from("model.bin")),
-            text: Ok(String::new()),
-            received,
-        });
+        let transcriber = mock_transcriber(true, Ok(String::new()));
         let mic = MockMicrophone {
             permission: false,
             open_ok: true,
@@ -478,22 +416,14 @@ mod tests {
             text: Ok("Nabu records audio".into()),
             received,
         });
-        let mic = MockMicrophone {
-            permission: true,
-            open_ok: true,
-            start_ok: true,
-            stop_result: Ok(CapturedAudio {
-                wav_bytes: vec![0u8; 192000], // ~6s of 16kHz mono 16-bit
-                sample_rate: 16000,
-                channels: 1,
-            }),
-            calls: Arc::new(Mutex::new(Vec::new())),
-        };
-        let svc = svc_with(mic, transcriber);
+        let svc = svc_with(ok_mic(vec![0u8; 192000]), transcriber);
         svc.start().unwrap();
         let text = svc.stop().await.unwrap();
         assert_eq!(text, "Nabu records audio");
-        assert_eq!(svc.status(), DictationState::Completed { text: "Nabu records audio".into() });
+        assert_eq!(
+            svc.status(),
+            DictationState::Completed { text: "Nabu records audio".into() }
+        );
     }
 
     // Test 6 — cancellation releases the session and inserts nothing.
@@ -504,55 +434,24 @@ mod tests {
             available: true,
             path: Some(PathBuf::from("model.bin")),
             text: Ok(String::new()),
-            received,
+            received: received.clone(),
         });
-        let mic = MockMicrophone {
-            permission: true,
-            open_ok: true,
-            start_ok: true,
-            stop_result: Ok(CapturedAudio {
-                wav_bytes: vec![0; 48],
-                sample_rate: 16000,
-                channels: 1,
-            }),
-            calls: Arc::new(Mutex::new(Vec::new())),
-        };
-        let svc = svc_with(mic, transcriber.clone());
+        let svc = svc_with(ok_mic(vec![0u8; 48]), transcriber);
         svc.start().unwrap();
         assert_eq!(svc.status(), DictationState::Recording);
 
         svc.cancel().unwrap();
         assert_eq!(svc.status(), DictationState::Cancelled);
         assert!(svc.active.lock().unwrap().is_none(), "session must be released");
-
-        // No transcription must have been produced.
-        assert!(received.lock().unwrap().is_empty());
-        // Stopping after cancel is an error, not a fake success.
-        assert!(svc.stop().await.is_err());
+        assert!(received.lock().unwrap().is_empty(), "no audio should reach transcriber");
+        assert!(svc.stop().await.is_err(), "no false successful transcription");
     }
 
     // Test 7 — double-start is rejected.
     #[tokio::test]
     async fn double_start_is_rejected() {
-        let received = Arc::new(Mutex::new(Vec::new()));
-        let transcriber = Arc::new(MockTranscriber {
-            available: true,
-            path: Some(PathBuf::from("model.bin")),
-            text: Ok(String::new()),
-            received,
-        });
-        let mic = MockMicrophone {
-            permission: true,
-            open_ok: true,
-            start_ok: true,
-            stop_result: Ok(CapturedAudio {
-                wav_bytes: vec![0; 48],
-                sample_rate: 16000,
-                channels: 1,
-            }),
-            calls: Arc::new(Mutex::new(Vec::new())),
-        };
-        let svc = svc_with(mic, transcriber);
+        let transcriber = mock_transcriber(true, Ok(String::new()));
+        let svc = svc_with(ok_mic(vec![0u8; 48]), transcriber);
         svc.start().unwrap();
         let err = svc.start().unwrap_err();
         assert!(matches!(err, DictationError::AlreadyActive), "got {err:?}");

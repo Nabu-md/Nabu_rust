@@ -29,6 +29,7 @@ pub mod capture;
 pub mod conversations;
 pub mod diagnostic;
 pub mod diagnostics;
+pub mod dictation;
 pub mod event_bus;
 pub mod graph;
 pub mod history;
