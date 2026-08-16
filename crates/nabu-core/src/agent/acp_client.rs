@@ -145,7 +145,7 @@ impl AcpClient {
     /// must ensure `start_read_loop` is running so responses are demultiplexed.
     pub async fn send_request(&self, method: &str, params: Option<Value>) -> AgentResult<Response> {
         let id = {
-            let mut guard = self.inner.lock().await;
+            let guard = self.inner.lock().await;
             let id = guard.next_id.fetch_add(1, Ordering::SeqCst) as i64;
             RequestId::Number(id)
         };

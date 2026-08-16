@@ -56,20 +56,28 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex as AsyncMutex;
 
+use crate::acp::types::{
+    ClientCapabilities, Implementation, InitializeRequest, NewSessionRequest,
+    SUPPORTED_PROTOCOL_VERSION,
+};
 use crate::event_bus::{EventBus, PipelineEvent};
-use crate::process_supervisor::{ProcessConfig, ProcessId, ProcessState, ProcessSupervisor};
+use crate::process_supervisor::{ProcessConfig, ProcessId, ProcessState, ProcessSupervisor, StdioMode};
 use crate::registry::lifecycle::{
     Lifecycle, LifecycleManager, LifecycleStage,
 };
 use crate::registry::metrics::{
     CounterMetric, GaugeMetric, MetricsAggregator, ServiceMetrics,
 };
+use crate::streaming::StreamingPipeline;
 
+use super::acp_client::AcpClient;
 use super::config::AgentConfig;
 use super::errors::{AgentManagerError, AgentResult};
 use super::process::{AgentProcess, AgentProcessState, AgentSnapshot};
 use super::registry::AgentRegistry;
+use super::stdio_channel::StdioChannel;
 
 /// The fixed delay applied between detecting a process crash and when the
 /// supervisor's monitoring task restarts it. The `ProcessSupervisor` already
@@ -373,6 +381,127 @@ impl AgentManager {
         self.publish_agent_started(name, supervisor_pid, &config_clone);
 
         Ok(supervisor_pid)
+    }
+
+    /// Start an ACP agent — spawn with piped stdio, create an [`AcpClient`],
+    /// initialize the ACP handshake, and open a new session.
+    ///
+    /// The returned `AcpClient` is wrapped in `Arc<AsyncMutex<>>` for
+    /// shared access across tasks. The underlying child process is kept
+    /// alive by a background monitoring task.
+    ///
+    /// # Errors
+    ///
+    /// - [`AgentManagerError::AgentNotFound`] if no agent with the given name
+    ///   is registered.
+    /// - [`AgentManagerError::NotReady`] if the manager is not running.
+    /// - [`AgentManagerError::Supervisor`] if the process cannot be spawned.
+    /// - [`AgentManagerError::Acp`] if the ACP initialization or session
+    ///   creation fails.
+    pub async fn start_acp_agent(
+        &self,
+        name: &str,
+        pipeline: Arc<StreamingPipeline>,
+    ) -> AgentResult<Arc<AsyncMutex<AcpClient>>> {
+        self.ensure_ready(LifecycleStage::Running)?;
+
+        let process_config = {
+            let process_handle = self
+                .registry
+                .get(name)
+                .ok_or_else(|| AgentManagerError::AgentNotFound(name.to_string()))?;
+            let proc = process_handle.lock().expect("agent process lock poisoned");
+            let mut cfg: ProcessConfig = proc.config.process.clone();
+            cfg = cfg.with_piped_stdio();
+            cfg
+        };
+
+        tracing::info!(
+            subsystem = "agent_manager",
+            component = "manager",
+            operation = "start_acp_agent",
+            agent = %name,
+            command = %process_config.command_line(),
+            "Starting ACP agent"
+        );
+
+        let spawned = self
+            .supervisor
+            .spawn_with_stdio(process_config)
+            .map_err(AgentManagerError::Supervisor)?;
+
+        let stdin = spawned
+            .child
+            .stdin
+            .take()
+            .ok_or_else(|| AgentManagerError::Acp("child has no stdin".into()))?;
+        let stdout = spawned
+            .child
+            .stdout
+            .take()
+            .ok_or_else(|| AgentManagerError::Acp("child has no stdout".into()))?;
+
+        tokio::spawn(async move {
+            let _child = spawned.child;
+            let _ = _child.wait().await;
+        });
+
+        let channel = StdioChannel::new(stdin, stdout);
+        let mut client = AcpClient::new(channel, Some(pipeline));
+
+        let init_req = InitializeRequest {
+            protocol_version: SUPPORTED_PROTOCOL_VERSION,
+            client_info: Some(Implementation {
+                name: "nabu".to_string(),
+                title: Some("Nabu Agent Manager".to_string()),
+                version: env!("CARGO_PKG_VERSION").to_string(),
+                _meta: None,
+            }),
+            client_capabilities: Some(ClientCapabilities::default()),
+            _meta: None,
+        };
+
+        client.initialize(init_req).await.map_err(|e| {
+            tracing::error!(
+                agent = %name,
+                error = %e,
+                "ACP agent initialization failed"
+            );
+            e
+        })?;
+
+        let cwd = {
+            let process_handle = self
+                .registry
+                .get(name)
+                .ok_or_else(|| AgentManagerError::AgentNotFound(name.to_string()))?;
+            let proc = process_handle.lock().expect("agent process lock poisoned");
+            proc.config.process.working_dir
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+        };
+
+        let new_session_req = NewSessionRequest {
+            cwd: cwd.unwrap_or_else(|| std::env::current_dir().unwrap().to_string_lossy().to_string()),
+            mcp_servers: vec![],
+            additional_directories: vec![],
+            _meta: None,
+        };
+
+        client.new_session(new_session_req).await?;
+
+        let client_arc = Arc::new(AsyncMutex::new(client));
+
+        tracing::info!(
+            subsystem = "agent_manager",
+            component = "manager",
+            operation = "start_acp_agent",
+            agent = %name,
+            session_id = %client_arc.lock().await.session_id().await.unwrap_or_default(),
+            "ACP agent started and initialized"
+        );
+
+        Ok(client_arc)
     }
 
     /// Stop a running agent by name.

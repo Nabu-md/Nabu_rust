@@ -1,39 +1,42 @@
-//! # ACP Protocol Types
+//! # ACP Protocol Types (Client-Side)
 //!
-//! Strongly-typed request and response structures for the Agent Communication
-//! Protocol (ACP) method surface. These types map directly to the JSON wire
-//! format described in the ACP specification and are designed to be
-//! serialized into `serde_json::Value` for transport through the existing
-//! [`crate::rpc`] JSON-RPC 2.0 infrastructure.
+//! Strongly-typed request, response, notification, and event structures for the
+//! Agent Communication Protocol (ACP) v1, viewed from the **client** side.
+//!
+//! Nabu is the ACP **client/editor**. The external process is the ACP **agent**.
+//! These types map directly to the JSON wire format described in the
+//! [ACP v1 specification](https://agentclientprotocol.com/protocol/v1/overview).
+//!
+//! All types are designed to be serialized into `serde_json::Value` for
+//! transport through the existing [`crate::rpc`] JSON-RPC 2.0 infrastructure.
 //!
 //! ## Forward compatibility
 //!
-//! None of the types in this module use `#[serde(deny_unknown_fields)]`.
-//! Unknown fields in incoming JSON are silently ignored, so future ACP revisions
-//! that add fields will deserialize without error. Optional fields use
-//! `#[serde(default)]` and `skip_serializing_if = "Option::is_none"` so they
-//! round-trip cleanly and do not bloat responses.
+//! None of the types use `#[serde(deny_unknown_fields)]`. Unknown fields in
+//! incoming JSON are silently ignored, so future ACP revisions that add fields
+//! will deserialize without error. Optional fields use `#[serde(default)]`
+//! and `skip_serializing_if = "Option::is_none"`.
 //!
 //! ## Naming convention
 //!
-//! ACP wire fields use `camelCase` (except the reserved `_meta`); Rust field
-//! names use `snake_case` and serde performs the conversion via
-//! `#[serde(rename_all = "camelCase")]`.
+//! ACP wire fields use `camelCase`. Rust field names use `snake_case` and
+//! serde performs the conversion via `#[serde(rename_all = "camelCase")]`.
+//! Discriminator values (variant tags) use `snake_case` per the ACP convention.
 
 use crate::acp::error::AcpError;
-use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Scalar type aliases
 // ---------------------------------------------------------------------------
 
-/// The ACP protocol version. This is a single unsigned integer; the value is
-/// only incremented for breaking changes.
+/// The ACP protocol version identifier. A single unsigned integer; only
+/// incremented for breaking changes. ACP v1 is the current stable protocol.
 pub type ProtocolVersion = u16;
 
-/// The Nabu ACP implementation reports this as its supported protocol version
-/// during `initialize`. Nabu Phase 3a targets ACP protocol version 1.
+/// The Nabu ACP client reports this as its supported protocol version during
+/// `initialize`. Nabu Phase 3a targets ACP protocol version 1 (stable v1).
 pub const SUPPORTED_PROTOCOL_VERSION: ProtocolVersion = 1;
 
 /// A unique identifier for a conversation session.
@@ -41,6 +44,57 @@ pub type SessionId = String;
 
 /// A typed identifier for an authentication method.
 pub type AuthMethodId = String;
+
+/// A typed identifier for a message within a `session/update` stream.
+/// All chunks belonging to the same message share the same `messageId`.
+pub type MessageId = String;
+
+/// A typed identifier for a tool call within a session.
+pub type ToolCallId = String;
+
+// ---------------------------------------------------------------------------
+// JSON-RPC envelope (client-side view)
+// ---------------------------------------------------------------------------
+
+/// A JSON-RPC 2.0 message that the ACP client can receive from the agent.
+///
+/// The client receives three kinds of messages:
+/// - **Responses** to requests it sent (e.g. the `initialize` response)
+/// - **Notifications** from the agent (e.g. `session/update`, `session/cancel`)
+/// - **Requests** from the agent to the client (e.g. `fs/read_text_file`,
+///   `session/request_permission`)
+///
+/// This enum is used by the message reader to classify incoming wire messages.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomingMessage {
+    #[serde(rename = "jsonrpc")]
+    pub version: String,
+    /// The request ID this is a response to (absent for notifications).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// The method name (present for requests and notifications).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+    /// Parameters or result payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params: Option<serde_json::Value>,
+    /// Error object (present on error responses).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<JsonRpcError>,
+}
+
+/// Structured JSON-RPC error object as it appears on the wire.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JsonRpcError {
+    /// The numeric JSON-RPC error code (e.g. `-32601`).
+    pub code: i64,
+    /// A human-readable error message.
+    pub message: String,
+    /// Optional additional error data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+}
 
 // ---------------------------------------------------------------------------
 // Lifecycle metadata
@@ -160,19 +214,19 @@ pub struct SessionCapabilities {
     pub _meta: Option<serde_json::Value>,
 }
 
-/// Capabilities for the `logout` method.
+/// Capabilities for session config options.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LogoutCapabilities {
+pub struct SessionConfigOptionsCapabilities {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
 }
 
-/// Authentication-related capabilities an agent may advertise.
+/// Session-related capabilities supported by the client.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentAuthCapabilities {
+pub struct ClientSessionCapabilities {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub logout: Option<LogoutCapabilities>,
+    pub config_options: Option<SessionConfigOptionsCapabilities>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
 }
@@ -195,25 +249,25 @@ pub struct AgentCapabilities {
     pub session_capabilities: Option<SessionCapabilities>,
     /// Optional authentication extensions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth: Option<AgentAuthCapabilities>,
+    pub auth: Option<AuthCapabilities>,
     /// Reserved for ACP forward-compatibility metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
 }
 
-/// Capabilities for session config options.
+/// Authentication-related capabilities an agent may advertise.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionConfigOptionsCapabilities {
+#[serde(rename_all = "camelCase")]
+pub struct AuthCapabilities {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logout: Option<LogoutCapabilities>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
 }
 
-/// Session-related capabilities supported by the client.
+/// Capabilities for the `logout` method.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ClientSessionCapabilities {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config_options: Option<SessionConfigOptionsCapabilities>,
+pub struct LogoutCapabilities {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
 }
@@ -244,7 +298,6 @@ pub struct AuthMethod {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// Reserved for ACP forward-compatibility metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
 }
@@ -344,7 +397,10 @@ impl Serialize for McpServer {
         };
         let mut value = value.map_err(serde::ser::Error::custom)?;
         if let serde_json::Value::Object(ref mut obj) = value {
-            obj.insert("type".to_string(), serde_json::Value::String(tag.to_string()));
+            obj.insert(
+                "type".to_string(),
+                serde_json::Value::String(tag.to_string()),
+            );
         }
         value.serialize(serializer)
     }
@@ -533,10 +589,444 @@ pub enum StopReason {
 }
 
 // ---------------------------------------------------------------------------
+// Agent → client request types (agent sends these to the client)
+// ---------------------------------------------------------------------------
+
+/// Request parameters for the `fs/read_text_file` method (agent → client).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadTextFileRequest {
+    pub path: String,
+    pub session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Response from `fs/read_text_file`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadTextFileResponse {
+    pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Request parameters for the `fs/write_text_file` method (agent → client).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteTextFileRequest {
+    pub path: String,
+    pub content: String,
+    pub session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Response from `fs/write_text_file`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WriteTextFileResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// A permission option presented to the user.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionOption {
+    pub option_id: String,
+    pub name: String,
+    pub kind: PermissionOptionKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// The type of permission option being presented.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionOptionKind {
+    AllowOnce,
+    AllowAlways,
+    RejectOnce,
+    RejectAlways,
+}
+
+/// A tool call reference in a permission request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallUpdate {
+    pub tool_call_id: ToolCallId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<ToolKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<ToolCallStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<Vec<ToolCallContent>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locations: Option<Vec<ToolCallLocation>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_input: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_output: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Categories of tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolKind {
+    Read,
+    Edit,
+    Delete,
+    Move,
+    Search,
+    Execute,
+    Think,
+    Fetch,
+    SwitchMode,
+    Other,
+}
+
+/// Execution status of a tool call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+/// Content produced by a tool call.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolCallContent {
+    Content(serde_json::Value),
+    Diff(DiffContent),
+    Terminal(TerminalContent),
+}
+
+/// File modification shown as a diff.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffContent {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_text: Option<String>,
+    pub new_text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Terminal reference in tool call content.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalContent {
+    pub terminal_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// A file location accessed by a tool.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallLocation {
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Request from agent to client for user permission on a tool call.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestPermissionRequest {
+    pub session_id: SessionId,
+    pub tool_call: ToolCallUpdate,
+    pub options: Vec<PermissionOption>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// The user's decision on a permission request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectedPermissionOutcome {
+    pub option_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Outcome of a permission request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestPermissionResponse {
+    pub outcome: PermissionOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// The outcome of a permission request — selected or cancelled.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionSelectedOutcome {
+    pub option_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Permission outcome variants.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum PermissionOutcome {
+    Selected(SelectedPermissionOutcome),
+    Cancelled {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        _meta: Option<serde_json::Value>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// session/update notification (the main bidirectional channel)
+// ---------------------------------------------------------------------------
+
+/// A plan entry in the agent's execution plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanEntry {
+    pub content: String,
+    pub priority: PlanEntryPriority,
+    pub status: PlanEntryStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanEntryPriority {
+    High,
+    Medium,
+    Low,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanEntryStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+/// An execution plan for accomplishing complex tasks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Plan {
+    pub entries: Vec<PlanEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// An available slash command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvailableCommand {
+    pub name: String,
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Session mode information.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionMode {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// The set of modes and the one currently active.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionModeState {
+    pub current_mode_id: String,
+    pub available_modes: Vec<SessionMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// A session configuration option.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionConfigOption {
+    pub config_id: String,
+    pub name: String,
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boolean: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Cost information for a session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Cost {
+    pub amount: f64,
+    pub currency: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Context window and cost update for a session.
+#[derive(Debug, Clone, PartialEq Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageUpdate {
+    pub used: u64,
+    pub size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<Cost>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Update to session metadata (partial — only changed fields).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionInfoUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Config option update.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigOptionUpdate {
+    pub config_options: Vec<SessionConfigOption>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Current mode update.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CurrentModeUpdate {
+    pub current_mode_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Available commands update.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvailableCommandsUpdate {
+    pub available_commands: Vec<AvailableCommand>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// A single block of content in a streamed message chunk.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentChunk {
+    pub content: ContentBlock,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<MessageId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// A tool call initiated by the agent.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCall {
+    pub tool_call_id: ToolCallId,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<ToolKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<ToolCallStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<Vec<ToolCallContent>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locations: Option<Vec<ToolCallLocation>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_input: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_output: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// The discriminated union of all `session/update` variants.
+///
+/// The `sessionUpdate` field is the discriminator. This enum is used as the
+/// `update` field of a `SessionNotification`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "sessionUpdate", rename_all = "snake_case")]
+pub enum SessionUpdate {
+    /// A chunk of the user's message being streamed.
+    UserMessageChunk(ContentChunk),
+    /// A chunk of the agent's response being streamed.
+    AgentMessageChunk(ContentChunk),
+    /// A chunk of the agent's internal reasoning being streamed.
+    AgentThoughtChunk(ContentChunk),
+    /// A tool call has been initiated.
+    ToolCall(ToolCall),
+    /// Update on the status or results of a tool call.
+    ToolCallUpdate(ToolCallUpdate),
+    /// The agent's execution plan.
+    Plan {
+        entries: Vec<PlanEntry>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        _meta: Option<serde_json::Value>,
+    },
+    /// Available commands are ready or have changed.
+    AvailableCommandsUpdate(AvailableCommandsUpdate),
+    /// The current mode of the session has changed.
+    CurrentModeUpdate(CurrentModeUpdate),
+    /// Session configuration options have been updated.
+    ConfigOptionUpdate(ConfigOptionUpdate),
+    /// Session metadata has been updated (title, timestamps, etc.).
+    SessionInfoUpdate(SessionInfoUpdate),
+    /// Context window and cost update for the session.
+    UsageUpdate(UsageUpdate),
+}
+
+/// Notification parameters for `session/update`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionNotificationParams {
+    pub session_id: SessionId,
+    pub update: SessionUpdate,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+// ---------------------------------------------------------------------------
 // initialize
 // ---------------------------------------------------------------------------
 
-/// Request parameters for the `initialize` method.
+/// Request parameters for the `initialize` method (client → agent).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InitializeRequest {
@@ -553,7 +1043,7 @@ pub struct InitializeRequest {
     pub _meta: Option<serde_json::Value>,
 }
 
-/// Response to the `initialize` method.
+/// Response to the `initialize` method (agent → client).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InitializeResponse {
@@ -584,6 +1074,7 @@ pub struct NewSessionRequest {
     /// The working directory for this session. Must be an absolute path.
     pub cwd: String,
     /// MCP servers the agent should connect to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<McpServer>,
     /// Additional workspace roots (absolute paths).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -601,10 +1092,10 @@ pub struct NewSessionResponse {
     pub session_id: SessionId,
     /// Initial session configuration options, if supported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config_options: Option<Vec<serde_json::Value>>,
+    pub config_options: Option<Vec<SessionConfigOption>>,
     /// Initial mode state, if supported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modes: Option<serde_json::Value>,
+    pub modes: Option<SessionModeState>,
     /// Reserved for ACP forward-compatibility metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
@@ -623,6 +1114,7 @@ pub struct LoadSessionRequest {
     /// The working directory for this session. Must be an absolute path.
     pub cwd: String,
     /// MCP servers to connect to for this session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<McpServer>,
     /// Additional workspace roots to activate.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -638,10 +1130,10 @@ pub struct LoadSessionRequest {
 pub struct LoadSessionResponse {
     /// Initial session configuration options, if supported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config_options: Option<Vec<serde_json::Value>>,
+    pub config_options: Option<Vec<SessionConfigOption>>,
     /// Initial mode state, if supported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modes: Option<serde_json::Value>,
+    pub modes: Option<SessionModeState>,
     /// Reserved for ACP forward-compatibility metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
@@ -704,10 +1196,10 @@ pub struct ResumeSessionRequest {
 pub struct ResumeSessionResponse {
     /// Initial session configuration options, if supported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config_options: Option<Vec<serde_json::Value>>,
+    pub config_options: Option<Vec<SessionConfigOption>>,
     /// Initial mode state, if supported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modes: Option<serde_json::Value>,
+    pub modes: Option<SessionModeState>,
     /// Reserved for ACP forward-compatibility metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
@@ -737,6 +1229,131 @@ pub struct CloseSessionResponse {
 }
 
 // ---------------------------------------------------------------------------
+// session/delete
+// ---------------------------------------------------------------------------
+
+/// Request parameters for deleting a session from the session list.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteSessionRequest {
+    /// The ID of the session to delete.
+    pub session_id: SessionId,
+    /// Reserved for ACP forward-compatibility metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Response from deleting a session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DeleteSessionResponse {
+    /// Reserved for ACP forward-compatibility metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+// ---------------------------------------------------------------------------
+// session/list
+// ---------------------------------------------------------------------------
+
+/// Session information returned by `session/list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionInfo {
+    pub session_id: SessionId,
+    pub cwd: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additional_directories: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Request parameters for listing sessions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListSessionsRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+/// Response from listing sessions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListSessionsResponse {
+    pub sessions: Vec<SessionInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+// ---------------------------------------------------------------------------
+// session/cancel notification (client → agent)
+// ---------------------------------------------------------------------------
+
+/// Notification to cancel ongoing operations for a session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelNotification {
+    pub session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub _meta: Option<serde_json::Value>,
+}
+
+// ---------------------------------------------------------------------------
+// Method name constants — match the ACP v1 specification exactly
+// ---------------------------------------------------------------------------
+
+/// Method name for protocol-level request cancellation notifications.
+pub const CANCEL_REQUEST_METHOD: &str = "$/cancel_request";
+
+/// Method name for the initialize request.
+pub const METHOD_INITIALIZE: &str = "initialize";
+
+/// Method name for creating a new session.
+pub const METHOD_NEW_SESSION: &str = "session/new";
+
+/// Method name for loading an existing session.
+pub const METHOD_LOAD_SESSION: &str = "session/load";
+
+/// Method name for resuming a session.
+pub const METHOD_RESUME_SESSION: &str = "session/resume";
+
+/// Method name for sending a prompt.
+pub const METHOD_PROMPT: &str = "session/prompt";
+
+/// Method name for closing a session.
+pub const METHOD_CLOSE_SESSION: &str = "session/close";
+
+/// Method name for deleting a session.
+pub const METHOD_DELETE_SESSION: &str = "session/delete";
+
+/// Method name for listing sessions.
+pub const METHOD_LIST_SESSIONS: &str = "session/list";
+
+/// Method name for canceling a prompt turn (notification).
+pub const METHOD_CANCEL: &str = "session/cancel";
+
+/// Method name for the session/update notification (agent → client).
+pub const METHOD_SESSION_UPDATE: &str = "session/update";
+
+/// Method name for fs/read_text_file (agent → client).
+pub const METHOD_READ_TEXT_FILE: &str = "fs/read_text_file";
+
+/// Method name for fs/write_text_file (agent → client).
+pub const METHOD_WRITE_TEXT_FILE: &str = "fs/write_text_file";
+
+/// Method name for session/request_permission (agent → client).
+pub const METHOD_REQUEST_PERMISSION: &str = "session/request_permission";
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -764,8 +1381,8 @@ mod tests {
 
     fn sample_impl() -> Implementation {
         Implementation {
-            name: "nabu-agent".to_string(),
-            title: Some("Nabu Agent".to_string()),
+            name: "nabu".to_string(),
+            title: Some("Nabu".to_string()),
             version: "0.1.0".to_string(),
             _meta: None,
         }
@@ -784,7 +1401,7 @@ mod tests {
         let back: InitializeRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back.protocol_version, 1);
         assert!(back.client_capabilities.is_some());
-        assert_eq!(back.client_info.as_ref().unwrap().name, "nabu-agent");
+        assert_eq!(back.client_info.as_ref().unwrap().name, "nabu");
     }
 
     #[test]
@@ -794,13 +1411,6 @@ mod tests {
         assert_eq!(req.protocol_version, 1);
         assert!(req.client_capabilities.is_none());
         assert!(req.client_info.is_none());
-    }
-
-    #[test]
-    fn initialize_request_ignores_unknown_fields() {
-        let json = r#"{"protocolVersion": 1, "futureField": 42}"#;
-        let req: InitializeRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.protocol_version, 1);
     }
 
     #[test]
@@ -1011,30 +1621,6 @@ mod tests {
     }
 
     #[test]
-    fn resume_session_response_roundtrips() {
-        let resp = ResumeSessionResponse {
-            config_options: None,
-            modes: None,
-            _meta: None,
-        };
-        let json = serde_json::to_string(&resp).unwrap();
-        assert_eq!(json, "{}");
-    }
-
-    #[test]
-    fn new_session_response_roundtrips() {
-        let resp = NewSessionResponse {
-            session_id: "sess_123".to_string(),
-            config_options: None,
-            modes: None,
-            _meta: None,
-        };
-        let json = serde_json::to_string(&resp).unwrap();
-        let back: NewSessionResponse = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.session_id, "sess_123");
-    }
-
-    #[test]
     fn load_session_request_roundtrips() {
         let req = LoadSessionRequest {
             session_id: "sess_456".to_string(),
@@ -1070,7 +1656,10 @@ mod tests {
     fn implementation_requires_name_and_version() {
         // Missing version → error
         let json = r#"{"name":"test"}"#;
-        assert!(Implementation::deserialize(serde_json::from_str::<serde_json::Value>(json).unwrap()).is_err());
+        assert!(Implementation::deserialize(
+            serde_json::from_str::<serde_json::Value>(json).unwrap()
+        )
+        .is_err());
 
         // Full
         let json = r#"{"name":"test","version":"1.0.0","title":"Test"}"#;
@@ -1098,5 +1687,190 @@ mod tests {
         let json = r#"{"protocolVersion": 1, "futureField": true, "another": 42}"#;
         let req: InitializeRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.protocol_version, 1);
+    }
+
+    #[test]
+    fn session_update_agent_message_chunk_roundtrips() {
+        let json = r#"{
+            "sessionUpdate": "agent_message_chunk",
+            "messageId": "msg_123",
+            "content": {
+                "type": "text",
+                "text": "Hello from agent"
+            }
+        }"#;
+        let update: SessionUpdate = serde_json::from_str(json).unwrap();
+        match update {
+            SessionUpdate::AgentMessageChunk(chunk) => {
+                assert_eq!(chunk.message_id.as_deref(), Some("msg_123"));
+                match &chunk.content {
+                    ContentBlock::Text(t) => assert_eq!(t.text, "Hello from agent"),
+                    _ => panic!("expected text content"),
+                }
+            }
+            _ => panic!("expected AgentMessageChunk"),
+        }
+    }
+
+    #[test]
+    fn session_update_user_message_chunk_roundtrips() {
+        let json = r#"{
+            "sessionUpdate": "user_message_chunk",
+            "content": {
+                "type": "text",
+                "text": "Hello from user"
+            }
+        }"#;
+        let update: SessionUpdate = serde_json::from_str(json).unwrap();
+        assert!(matches!(update, SessionUpdate::UserMessageChunk(_)));
+    }
+
+    #[test]
+    fn session_update_plan_roundtrips() {
+        let json = r#"{
+            "sessionUpdate": "plan",
+            "entries": [
+                {
+                    "content": "Check for errors",
+                    "priority": "high",
+                    "status": "pending"
+                }
+            ]
+        }"#;
+        let update: SessionUpdate = serde_json::from_str(json).unwrap();
+        match update {
+            SessionUpdate::Plan { entries, .. } => {
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0].content, "Check for errors");
+                assert_eq!(entries[0].priority, PlanEntryPriority::High);
+                assert_eq!(entries[0].status, PlanEntryStatus::Pending);
+            }
+            _ => panic!("expected Plan"),
+        }
+    }
+
+    #[test]
+    fn session_update_usage_update_roundtrips() {
+        let json = r#"{
+            "sessionUpdate": "usage_update",
+            "used": 53000,
+            "size": 200000,
+            "cost": {"amount": 0.045, "currency": "USD"}
+        }"#;
+        let update: SessionUpdate = serde_json::from_str(json).unwrap();
+        match update {
+            SessionUpdate::UsageUpdate(u) => {
+                assert_eq!(u.used, 53000);
+                assert_eq!(u.size, 200000);
+                assert_eq!(u.cost.as_ref().unwrap().amount, 0.045);
+            }
+            _ => panic!("expected UsageUpdate"),
+        }
+    }
+
+    #[test]
+    fn session_update_tool_call_roundtrips() {
+        let json = r#"{
+            "sessionUpdate": "tool_call",
+            "toolCallId": "call_001",
+            "title": "Reading file",
+            "kind": "read",
+            "status": "pending"
+        }"#;
+        let update: SessionUpdate = serde_json::from_str(json).unwrap();
+        match update {
+            SessionUpdate::ToolCall(tc) => {
+                assert_eq!(tc.tool_call_id, "call_001");
+                assert_eq!(tc.title, "Reading file");
+            }
+            _ => panic!("expected ToolCall"),
+        }
+    }
+
+    #[test]
+    fn session_update_tool_call_update_roundtrips() {
+        let json = r#"{
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "call_001",
+            "status": "completed"
+        }"#;
+        let update: SessionUpdate = serde_json::from_str(json).unwrap();
+        match update {
+            SessionUpdate::ToolCallUpdate(tcu) => {
+                assert_eq!(tcu.tool_call_id, "call_001");
+                assert_eq!(tcu.status, Some(ToolCallStatus::Completed));
+            }
+            _ => panic!("expected ToolCallUpdate"),
+        }
+    }
+
+    #[test]
+    fn session_notification_roundtrips() {
+        let json = r#"{
+            "sessionId": "sess_abc",
+            "update": {
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": "msg_123",
+                "content": {
+                    "type": "text",
+                    "text": "Hello"
+                }
+            }
+        }"#;
+        let notif: SessionNotificationParams = serde_json::from_str(json).unwrap();
+        assert_eq!(notif.session_id, "sess_abc");
+        match notif.update {
+            SessionUpdate::AgentMessageChunk(_) => {}
+            _ => panic!("expected AgentMessageChunk"),
+        }
+    }
+
+    #[test]
+    fn permission_outcome_selected_roundtrips() {
+        let json = r#"{"outcome":"selected","optionId":"allow_once"}"#;
+        let resp: RequestPermissionResponse = serde_json::from_str(json).unwrap();
+        match resp.outcome {
+            PermissionOutcome::Selected(s) => assert_eq!(s.option_id, "allow_once"),
+            _ => panic!("expected Selected"),
+        }
+    }
+
+    #[test]
+    fn permission_outcome_cancelled_roundtrips() {
+        let json = r#"{"outcome":"cancelled"}"#;
+        let resp: RequestPermissionResponse = serde_json::from_str(json).unwrap();
+        assert!(matches!(resp.outcome, PermissionOutcome::Cancelled { .. }));
+    }
+
+    #[test]
+    fn delete_session_request_roundtrips() {
+        let req = DeleteSessionRequest {
+            session_id: "sess_del".to_string(),
+            _meta: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let back: DeleteSessionRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.session_id, "sess_del");
+    }
+
+    #[test]
+    fn list_sessions_response_roundtrips() {
+        let resp = ListSessionsResponse {
+            sessions: vec![SessionInfo {
+                session_id: "sess_1".to_string(),
+                cwd: "/home/user".to_string(),
+                additional_directories: vec![],
+                title: Some("My Session".to_string()),
+                updated_at: Some("2025-10-29T14:22:15Z".to_string()),
+                _meta: None,
+            }],
+            next_cursor: Some("eyJwYWdlIjogMn0=".to_string()),
+            _meta: None,
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let back: ListSessionsResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.sessions.len(), 1);
+        assert_eq!(back.sessions[0].session_id, "sess_1");
+        assert_eq!(back.next_cursor.as_deref(), Some("eyJwYWdlIjogMn0="));
     }
 }

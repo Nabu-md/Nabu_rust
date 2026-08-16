@@ -30,7 +30,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, ChildStdout};
 use tokio::sync::Mutex;
 
-use crate::io_stream::framing::{decode_message_bytes, encode_message};
+use crate::io_stream::framing::{decode_message, encode_message};
 use crate::io_stream::{TransportError, TransportResult};
 use crate::rpc::{Request, Response};
 
