@@ -314,7 +314,11 @@ pub async fn dispatch_agent_request<H: AcpClientHandler + ?Sized>(
             let request_id = req_val.get("requestId").and_then(|v| v.as_str());
             let title = req_val.get("title").and_then(|v| v.as_str()).unwrap_or("");
             let message = req_val.get("message").and_then(|v| v.as_str());
-            let fields = req_val.get("fields").cloned().unwrap_or_default();
+            let fields = req_val
+                .get("fields")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
             let result = handler
                 .elicitation_create(session_id, request_id, title, message, &fields)
                 .await?;

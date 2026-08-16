@@ -46,6 +46,7 @@ use tokio::sync::mpsc;
 /// [`MockTransport`] (in-memory channels for testing).
 ///
 /// All methods are `async` because JSON-RPC I/O is inherently asynchronous.
+#[async_trait::async_trait]
 pub trait Transport: Send + Unpin {
     /// Send a JSON value as a single newline-terminated line.
     async fn send_json(&mut self, msg: &Value) -> Result<(), AcpError>;
@@ -138,26 +139,32 @@ pub struct StdioWriter<W> {
 }
 
 impl<R: AsyncRead + Unpin + Send> StdioReader<R> {
-    /// Read the next complete message line. Returns `None` at EOF.
-    async fn read_line_inner(&mut self) -> Result<Option<String>, AcpError> {
-        let mut line = String::new();
-        let n = self
-            .reader
-            .read_line(&mut line)
-            .await
-            .map_err(AcpError::from)?;
-        if n == 0 {
-            return Ok(None); // EOF
-        }
-        let trimmed = line.trim_end_matches(['\n', '\r']).to_string();
-        if trimmed.is_empty() {
-            self.read_line_inner().await
-        } else {
-            Ok(Some(trimmed))
+    /// Read the next complete message line, skipping empty lines.
+    /// Uses a loop instead of recursion to avoid infinitely-sized futures.
+    fn read_line_inner(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<Option<String>, AcpError>> + Send + '_ {
+        async move {
+            loop {
+                let mut line = String::new();
+                let n = self
+                    .reader
+                    .read_line(&mut line)
+                    .await
+                    .map_err(AcpError::from)?;
+                if n == 0 {
+                    return Ok(None); // EOF
+                }
+                let trimmed = line.trim_end_matches(['\n', '\r']).to_string();
+                if !trimmed.is_empty() {
+                    return Ok(Some(trimmed));
+                }
+            }
         }
     }
 }
 
+#[async_trait::async_trait]
 impl<R: AsyncRead + Unpin + Send> Transport for StdioReader<R> {
     async fn send_json(&mut self, _msg: &Value) -> Result<(), AcpError> {
         Err(AcpError::new(
@@ -191,6 +198,7 @@ impl<W: AsyncWrite + Unpin + Send> StdioWriter<W> {
     }
 }
 
+#[async_trait::async_trait]
 impl<W: AsyncWrite + Unpin + Send> Transport for StdioWriter<W> {
     async fn send_json(&mut self, msg: &Value) -> Result<(), AcpError> {
         let json = serde_json::to_string(msg)
@@ -211,6 +219,7 @@ impl<W: AsyncWrite + Unpin + Send> Transport for StdioWriter<W> {
 }
 
 // Full StdioTransport also implements Transport (both read and write)
+#[async_trait::async_trait]
 impl<R, W> Transport for StdioTransport<R, W>
 where
     R: AsyncRead + Unpin + Send,
@@ -239,20 +248,20 @@ where
     }
 
     async fn read_line(&mut self) -> Result<Option<String>, AcpError> {
-        let mut line = String::new();
-        let n = self
-            .reader
-            .read_line(&mut line)
-            .await
-            .map_err(AcpError::from)?;
-        if n == 0 {
-            return Ok(None);
-        }
-        let trimmed = line.trim_end_matches(['\n', '\r']).to_string();
-        if trimmed.is_empty() {
-            self.read_line().await
-        } else {
-            Ok(Some(trimmed))
+        loop {
+            let mut line = String::new();
+            let n = self
+                .reader
+                .read_line(&mut line)
+                .await
+                .map_err(AcpError::from)?;
+            if n == 0 {
+                return Ok(None);
+            }
+            let trimmed = line.trim_end_matches(['\n', '\r']).to_string();
+            if !trimmed.is_empty() {
+                return Ok(Some(trimmed));
+            }
         }
     }
 }
@@ -308,6 +317,7 @@ impl MockTransport {
     }
 }
 
+#[async_trait::async_trait]
 impl Transport for MockTransport {
     async fn send_json(&mut self, msg: &Value) -> Result<(), AcpError> {
         let json = serde_json::to_string(msg)
@@ -378,6 +388,7 @@ impl MockPeer {
     }
 }
 
+#[async_trait::async_trait]
 impl Transport for MockPeer {
     async fn send_json(&mut self, msg: &Value) -> Result<(), AcpError> {
         let json = serde_json::to_string(msg)

@@ -541,12 +541,13 @@ pub mod method {
 
 /// Decode ACP client-side request params into a typed request struct.
 ///
-/// Mirrors [`crate::acp::decode_params`] for client-side method params.
+/// Delegates to [`crate::acp::types::decode_params`] for deserialization,
+/// mapping failures to [`crate::acp::AcpError`].
 pub fn decode_params<T>(params: Option<serde_json::Value>) -> Result<T, crate::acp::AcpError>
 where
     T: DeserializeOwned,
 {
-    crate::acp::decode_params(params)
+    crate::acp::types::decode_params(params)
 }
 
 // ---------------------------------------------------------------------------
