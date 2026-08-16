@@ -425,7 +425,7 @@ impl AgentManager {
             "Starting ACP agent"
         );
 
-        let spawned = self
+        let mut spawned = self
             .supervisor
             .spawn_with_stdio(process_config)
             .map_err(AgentManagerError::Supervisor)?;
