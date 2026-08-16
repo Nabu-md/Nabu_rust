@@ -63,6 +63,7 @@ pub mod processing;
     pub mod streaming;
     pub mod sync;
     pub mod tool_calling;
+    pub mod mcp;
 
 // Re-export key types for convenient access
 // Ambiguous glob re-exports are intentional — all public API types should
