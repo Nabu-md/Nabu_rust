@@ -56,7 +56,7 @@ use crate::registry::metrics::{
     CounterMetric, GaugeMetric, MetricsAggregator, ServiceMetrics,
 };
 
-use super::config::ProcessConfig;
+use super::config::{ProcessConfig, StdioMode};
 use super::errors::ProcessResult;
 use super::errors::ProcessSupervisorError;
 use super::managed::ManagedProcess;
@@ -79,6 +79,22 @@ const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 /// This replaces busy-waiting — we poll process state at reasonable
 /// intervals rather than spinning.
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Result of spawning a process with piped stdio.
+///
+/// Unlike [`spawn`](ProcessSupervisor::spawn), which starts a monitoring task
+/// that owns the `Child`, `spawn_with_stdio` returns the `Child` directly so
+/// the caller can read from and write to the process's stdin/stdout. This is
+/// used by ACP agent clients that need bidirectional I/O over a pipe.
+pub struct SpawnedChild {
+    /// The unique identifier assigned to this process.
+    pub id: ProcessId,
+    /// The human-readable name from the config.
+    pub name: String,
+    /// The managed child process. The caller owns this and is responsible for
+    /// waiting on it (e.g. `child.wait().await`) or killing it.
+    pub child: tokio::process::Child,
+}
 
 /// The central supervisor for all managed subprocesses.
 ///
@@ -313,6 +329,133 @@ impl ProcessSupervisor {
         );
 
         Ok(id)
+    }
+
+    /// Spawn a subprocess with piped stdin/stdout and return the child directly.
+    ///
+    /// Unlike [`spawn`](Self::spawn), which starts a monitoring task that owns
+    /// the `Child`, this method returns the `Child` to the caller so they can
+    /// perform direct I/O over stdin/stdout pipes. The process is still tracked
+    /// in the supervisor's process map (so `get_state`, `stop`, and other
+    /// operations work), but **no monitoring task is started** — the caller is
+    /// responsible for detecting process exit (e.g. by awaiting `child.wait()`).
+    ///
+    /// The returned `Child` has `kill_on_drop` set to `true` so the child is
+    /// terminated when the `Child` is dropped.
+    ///
+    /// # Errors
+    ///
+    /// - [`ProcessSupervisorError::ShuttingDown`] if the supervisor is shutting down.
+    /// - [`ProcessSupervisorError::NoRuntime`] if no tokio runtime is available.
+    /// - [`ProcessSupervisorError::SpawnFailed`] if the child process cannot be spawned.
+    pub fn spawn_with_stdio(
+        &self,
+        config: ProcessConfig,
+    ) -> ProcessResult<SpawnedChild> {
+        tracing::debug!(
+            subsystem = "supervisor",
+            component = "supervisor",
+            operation = "spawn_with_stdio",
+            process = %config.name,
+            command = %config.command_line(),
+            "Spawning managed process with piped stdio"
+        );
+
+        if self.ctx.is_shutting_down() {
+            tracing::warn!(
+                subsystem = "supervisor",
+                component = "supervisor",
+                operation = "spawn_with_stdio",
+                process = %config.name,
+                "Spawn rejected: supervisor is shutting down"
+            );
+            return Err(ProcessSupervisorError::ShuttingDown);
+        }
+
+        let runtime = Handle::try_current().map_err(|e| {
+            tracing::error!(
+                subsystem = "supervisor",
+                component = "supervisor",
+                operation = "spawn_with_stdio",
+                process = %config.name,
+                error = %e,
+                "No tokio runtime available"
+            );
+            ProcessSupervisorError::NoRuntime
+        })?;
+
+        let _ = runtime; // runtime is available — proceed
+
+        let id = Uuid::new_v4();
+        let process_name = config.name.clone();
+
+        // Create the ManagedProcess record so it's tracked by the supervisor.
+        let record = Arc::new(Mutex::new(ManagedProcess::new(id, config.clone())));
+
+        // Spawn the child with piped stdio
+        let mut cmd = tokio::process::Command::new(config.command.clone());
+        cmd.args(&config.args)
+            .envs(&config.env)
+            .kill_on_drop(true);
+
+        // Configure stdio based on the config
+        if config.stdio == StdioMode::Piped {
+            cmd.stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+        }
+
+        if let Some(dir) = &config.working_dir {
+            cmd.current_dir(dir);
+        }
+
+        let child = cmd.spawn().map_err(|e| {
+            tracing::error!(
+                subsystem = "supervisor",
+                component = "supervisor",
+                operation = "spawn_with_stdio",
+                process = %config.name,
+                error = %e,
+                "Failed to spawn process"
+            );
+            let mut rec = record.lock().unwrap();
+            rec.state = ProcessState::Failed;
+            rec.last_error = Some(e.to_string());
+            ProcessSupervisorError::SpawnFailed(e.to_string())
+        })?;
+
+        // Update the record with running state
+        {
+            let mut rec = record.lock().unwrap();
+            rec.pid = child.id();
+            let _ = rec.transition_state(ProcessState::Running);
+            rec.started_at = Some(Utc::now());
+        }
+
+        tracing::info!(
+            subsystem = "supervisor",
+            component = "supervisor",
+            operation = "spawn_with_stdio",
+            process = %process_name,
+            process_id = %id,
+            pid = ?child.id(),
+            "Managed process with piped stdio spawned"
+        );
+
+        // Insert into the process map
+        {
+            let mut processes = self
+                .processes
+                .write()
+                .expect("process map lock not poisoned");
+            processes.insert(id, record);
+        }
+
+        Ok(SpawnedChild {
+            id,
+            name: process_name,
+            child,
+        })
     }
 
     // -----------------------------------------------------------------------

@@ -65,13 +65,13 @@ pub mod state;
 pub mod supervisor;
 
 // Re-export public types at the module level for ergonomic access.
-pub use config::ProcessConfig;
+pub use config::{ProcessConfig, StdioMode};
 pub use errors::{ProcessResult, ProcessSupervisorError};
 pub use health::{ProcessHealth, ProcessHealthStatus};
 pub use managed::ProcessSnapshot;
 pub use policy::RestartPolicy;
 pub use state::ProcessState;
-pub use supervisor::{ProcessSupervisor, SupervisorSummary};
+pub use supervisor::{ProcessSupervisor, SpawnedChild, SupervisorSummary};
 
 // Re-export ProcessId from the event_bus module (always available).
 pub use crate::event_bus::ProcessId;

@@ -33,6 +33,7 @@ pub mod dictation;
 pub mod event_bus;
 pub mod graph;
 pub mod history;
+pub mod acp;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod io_stream;
 // IPC socket server is built on UNIX domain sockets (`tokio::net::UnixListener`

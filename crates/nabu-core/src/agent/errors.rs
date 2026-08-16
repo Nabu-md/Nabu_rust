@@ -79,6 +79,14 @@ pub enum AgentManagerError {
     /// The agent configuration is invalid.
     #[error("invalid agent configuration: {0}")]
     InvalidConfig(String),
+
+    /// An ACP protocol-level error (failed initialization, unknown session, etc.).
+    #[error("ACP error: {0}")]
+    Acp(String),
+
+    /// The ACP client was not initialized (initialize() not called).
+    #[error("ACP client is not initialized")]
+    NotInitialized,
 }
 
 impl AgentManagerError {
@@ -97,12 +105,18 @@ impl AgentManagerError {
             Self::ExecutableNotFound(_) => true,
             Self::WorkingDirectoryNotFound(_) => true,
             Self::NoRuntime => true,
+            Self::Acp(_) | Self::NotInitialized => false,
         }
     }
 
     /// Returns `true` if this error indicates the agent was not found.
     pub fn is_agent_not_found(&self) -> bool {
         matches!(self, Self::AgentNotFound(_))
+    }
+
+    /// Returns `true` if this error is an ACP protocol error.
+    pub fn is_acp_error(&self) -> bool {
+        matches!(self, Self::Acp(_) | Self::NotInitialized)
     }
 }
 
@@ -185,6 +199,20 @@ mod tests {
 
         let err = AgentManagerError::ShuttingDown;
         assert!(!err.is_agent_not_found());
+    }
+
+    #[test]
+    fn acp_error_is_not_retryable() {
+        let err = AgentManagerError::Acp("protocol error".to_string());
+        assert!(!err.is_retryable());
+        assert!(err.is_acp_error());
+    }
+
+    #[test]
+    fn not_initialized_is_not_retryable() {
+        let err = AgentManagerError::NotInitialized;
+        assert!(!err.is_retryable());
+        assert!(err.is_acp_error());
     }
 
     #[test]

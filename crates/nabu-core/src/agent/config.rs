@@ -72,6 +72,12 @@ pub enum AgentKind {
 
     /// A file system or tooling MCP server.
     ToolServer,
+
+    /// An Anthropic Capability Protocol (ACP) server or client.
+    ///
+    /// ACP agents communicate over stdin/stdout using JSON-RPC 2.0.
+    /// See [`crate::acp`] for the protocol types and server implementation.
+    Acp,
 }
 
 #[allow(clippy::derivable_impls)]
@@ -91,6 +97,7 @@ impl std::fmt::Display for AgentKind {
             Self::SyncService => write!(f, "sync_service"),
             Self::EmbeddingProvider => write!(f, "embedding_provider"),
             Self::ToolServer => write!(f, "tool_server"),
+            Self::Acp => write!(f, "acp"),
         }
     }
 }
@@ -370,6 +377,12 @@ mod tests {
         assert_eq!(config.process.restart_policy, RestartPolicy::OnFailure);
         assert!(config.jsonrpc.is_none());
         assert!(config.transport.is_none());
+    }
+
+    #[test]
+    fn acp_kind_serializes() {
+        let json = serde_json::to_string(&AgentKind::Acp).unwrap();
+        assert_eq!(json, "\"acp\"");
     }
 
     #[test]
