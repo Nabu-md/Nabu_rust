@@ -376,14 +376,15 @@ mod tests {
 
         let result = tool.call(call).await.unwrap();
         assert!(result.is_success());
-        let content = result.result.unwrap().get("content").unwrap().as_str().unwrap();
+        let result_value = result.result.unwrap();
+        let content = result_value.get("content").unwrap().as_str().unwrap();
         assert_eq!(content, "# Hello World");
     }
 
     #[tokio::test]
     async fn read_text_file_not_found() {
         let (storage, _dir) = make_storage();
-        let tool = FileSystemTool::new(storage);
+        let tool = FileSystemTool::new(storage.clone());
 
         let path = storage.vault_path().join("nonexistent.md");
         let abs_path = path.to_string_lossy().to_string();
@@ -408,9 +409,9 @@ mod tests {
     #[tokio::test]
     async fn write_text_file_saves_content() {
         let (storage, _dir) = make_storage();
-        let tool = FileSystemTool::new(storage);
+        let tool = FileSystemTool::new(storage.clone());
 
-        let abs_path = storage
+        let abs_path = storage.clone()
             .vault_path()
             .join("output.md")
             .to_string_lossy()

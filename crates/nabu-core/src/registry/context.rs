@@ -457,6 +457,11 @@ impl ApplicationContext {
         self.resolve("diagnostic_platform")
     }
 
+    /// Returns the ACP session manager if registered.
+    pub fn acp_session_manager(&self) -> Option<Arc<crate::agent::AcpSessionManager>> {
+        self.resolve("acp_session_manager")
+    }
+
     // -----------------------------------------------------------------------
     // Service health & validation
     // -----------------------------------------------------------------------

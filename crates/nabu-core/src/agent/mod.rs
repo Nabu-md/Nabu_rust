@@ -105,6 +105,8 @@ pub mod process;
 pub mod registry;
 pub mod stdio_channel;
 pub mod acp_client;
+pub mod handler;
+pub mod session;
 
 // Re-export public types at the module level for ergonomic access.
 pub use config::{
@@ -116,6 +118,8 @@ pub use process::{AgentProcess, AgentProcessState, AgentSnapshot};
 pub use registry::{AgentRegistry, RegistryError, RegistryResult};
 pub use stdio_channel::StdioChannel;
 pub use acp_client::{AcpClient, AcpClientError};
+pub use handler::NabuAcpHandler;
+pub use session::AcpSessionManager;
 
 // Re-export ProcessId from the event_bus module for convenience.
 pub use crate::event_bus::ProcessId;

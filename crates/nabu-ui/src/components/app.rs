@@ -250,5 +250,10 @@ pub fn ViewContent() -> Element {
                 }
             }
         },
+        ViewMode::Chat => rsx! {
+            div { class: "max-w-7xl mx-auto h-full",
+                crate::components::chat::ChatView {}
+            }
+        },
     }
 }
