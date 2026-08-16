@@ -165,6 +165,7 @@ pub fn default_client_capabilities() -> crate::acp::ClientCapabilities {
 mod tests {
     use super::*;
     use crate::acp::types::ClientCapabilities;
+    use crate::tool_calling::acp_client::types::ElicitationId;
 
     #[tokio::test]
     async fn default_client_capabilities_has_fs_and_terminal() {

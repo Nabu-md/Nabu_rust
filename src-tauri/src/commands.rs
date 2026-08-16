@@ -5488,3 +5488,142 @@ pub(crate) async fn stream_cancel_impl(
         Err(e) => Err(e.to_string()),
     }
 }
+
+// ── ACP Session IPC ─────────────────────────────────────────────────────────
+
+/// Response returned by the `acp_connect` command.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpConnectResult {
+    /// The Nabu thread UUID for this session.
+    thread_id: Uuid,
+    /// The ACP session ID assigned by the agent.
+    session_id: String,
+    /// The negotiated protocol version.
+    protocol_version: nabu_core::acp::types::ProtocolVersion,
+}
+
+/// Connects to an external ACP agent via stdio.
+///
+/// Spawns the agent subprocess, initialises the ACP protocol, and creates a
+/// new session.  Token chunks from the agent are streamed to the frontend
+/// through Nabu's existing `StreamingPipeline` → EventBus → EventBridge
+/// pipeline, so the `StreamingProvider` picks them up automatically.
+#[tauri::command]
+pub async fn acp_connect(
+    ctx: State<'_, ApplicationContext>,
+    config: nabu_core::agent::AcpConnectConfig,
+) -> Result<AcpConnectResult, String> {
+    acp_connect_impl(&ctx, &config).await
+}
+
+pub(crate) async fn acp_connect_impl(
+    ctx: &ApplicationContext,
+    config: &nabu_core::agent::AcpConnectConfig,
+) -> Result<AcpConnectResult, String> {
+    let manager = ctx
+        .resolve::<nabu_core::agent::AcpSessionManager>("acp_session_manager")
+        .ok_or_else(|| "AcpSessionManager is not registered".to_string())?;
+
+    let (thread_id, session_id) = manager.connect(config).await.map_err(|e| e.to_string())?;
+
+    Ok(AcpConnectResult {
+        thread_id,
+        session_id,
+        protocol_version: nabu_core::acp::types::SUPPORTED_PROTOCOL_VERSION,
+    })
+}
+
+/// Sends a user message to the active ACP session.
+#[tauri::command]
+pub async fn acp_send_message(
+    ctx: State<'_, ApplicationContext>,
+    thread_id: String,
+    message: String,
+) -> Result<(), String> {
+    acp_send_message_impl(&ctx, thread_id, message).await
+}
+
+pub(crate) async fn acp_send_message_impl(
+    ctx: &ApplicationContext,
+    thread_id: String,
+    message: String,
+) -> Result<(), String> {
+    let manager = ctx
+        .resolve::<nabu_core::agent::AcpSessionManager>("acp_session_manager")
+        .ok_or_else(|| "AcpSessionManager is not registered".to_string())?;
+
+    let thread_uuid = uuid::Uuid::parse_str(&thread_id)
+        .map_err(|e| format!("Invalid thread id: {e}"))?;
+
+    manager.send_message(thread_uuid, message).await.map_err(|e| e.to_string())
+}
+
+/// Cancels the active prompt turn.
+#[tauri::command]
+pub async fn acp_cancel(
+    ctx: State<'_, ApplicationContext>,
+    thread_id: String,
+) -> Result<(), String> {
+    acp_cancel_impl(&ctx, thread_id).await
+}
+
+pub(crate) async fn acp_cancel_impl(
+    ctx: &ApplicationContext,
+    thread_id: String,
+) -> Result<(), String> {
+    let manager = ctx
+        .resolve::<nabu_core::agent::AcpSessionManager>("acp_session_manager")
+        .ok_or_else(|| "AcpSessionManager is not registered".to_string())?;
+
+    let thread_uuid = uuid::Uuid::parse_str(&thread_id)
+        .map_err(|e| format!("Invalid thread id: {e}"))?;
+
+    manager.cancel(thread_uuid).await.map_err(|e| e.to_string())
+}
+
+/// Disconnects from an ACP session and terminates the agent process.
+#[tauri::command]
+pub async fn acp_disconnect(
+    ctx: State<'_, ApplicationContext>,
+    thread_id: String,
+) -> Result<(), String> {
+    acp_disconnect_impl(&ctx, thread_id).await
+}
+
+pub(crate) async fn acp_disconnect_impl(
+    ctx: &ApplicationContext,
+    thread_id: String,
+) -> Result<(), String> {
+    let manager = ctx
+        .resolve::<nabu_core::agent::AcpSessionManager>("acp_session_manager")
+        .ok_or_else(|| "AcpSessionManager is not registered".to_string())?;
+
+    let thread_uuid = uuid::Uuid::parse_str(&thread_id)
+        .map_err(|e| format!("Invalid thread id: {e}"))?;
+
+    manager.disconnect(thread_uuid).await.map_err(|e| e.to_string())
+}
+
+/// Lists the session IDs known to the ACP session manager.
+#[tauri::command]
+pub async fn acp_list_sessions(
+    ctx: State<'_, ApplicationContext>,
+) -> Result<Vec<String>, String> {
+    acp_list_sessions_impl(&ctx).await
+}
+
+pub(crate) async fn acp_list_sessions_impl(ctx: &ApplicationContext) -> Result<Vec<String>, String> {
+    let manager = ctx
+        .resolve::<nabu_core::agent::AcpSessionManager>("acp_session_manager")
+        .ok_or_else(|| "AcpSessionManager is not registered".to_string())?;
+
+    manager.list_sessions().await.map_err(|e| e.to_string())
+}
+
+/// Response for the `acp_list_sessions` command.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpSessionSummary {
+    pub session_id: String,
+    pub thread_id: Uuid,
+    pub agent_name: Option<String>,
+}

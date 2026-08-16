@@ -334,6 +334,18 @@ fn build_application_context(
     ctx.register("stream_manager", stream_manager.clone());
     tracing::info!("StreamManager registered in ApplicationContext");
 
+    // ---- 14. One AcpSessionManager (Phase 3d — ACP client integration) ----
+    // Bridges the Phase 3a/b AcpClient to Nabu's StreamingPipeline +
+    // ConversationStore.  Registered as a singleton so Tauri commands can
+    // resolve it through the ApplicationContext.
+    let acp_manager = Arc::new(nabu_core::agent::AcpSessionManager::new(
+        event_bus.clone(),
+        storage.clone(),
+        conversation_store.clone(),
+    ));
+    ctx.register("acp_session_manager", acp_manager.clone());
+    tracing::info!("AcpSessionManager registered in ApplicationContext");
+
     // ---- Lifecycle: initialize then start ----
     //
     // Initialization validates configuration and allocates resources for

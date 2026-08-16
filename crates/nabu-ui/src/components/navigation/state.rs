@@ -55,6 +55,8 @@ pub enum ViewMode {
     Activity,
     /// Live streaming responses from agent processes.
     Streaming,
+    /// ACP chat view — connect to an external ACP agent and converse.
+    Chat,
 }
 
 impl Default for ViewMode {
@@ -85,6 +87,7 @@ pub fn parse_view_mode(mode: &str) -> ViewMode {
         "statistics" => ViewMode::Statistics,
         "activity" => ViewMode::Activity,
         "streaming" => ViewMode::Streaming,
+        "chat" => ViewMode::Chat,
         _ => ViewMode::Editor,
     }
 }
@@ -112,6 +115,7 @@ pub fn view_mode_key(mode: ViewMode) -> &'static str {
         ViewMode::Statistics => "statistics",
         ViewMode::Activity => "activity",
         ViewMode::Streaming => "streaming",
+        ViewMode::Chat => "chat",
     }
 }
 
@@ -138,6 +142,7 @@ pub fn view_mode_label(mode: ViewMode) -> &'static str {
         ViewMode::Statistics => "Statistics",
         ViewMode::Activity => "Activity",
         ViewMode::Streaming => "Streaming",
+        ViewMode::Chat => "Chat",
     }
 }
 
@@ -164,6 +169,7 @@ pub fn view_mode_icon(mode: ViewMode) -> Icon {
         ViewMode::Statistics => Icon::TrendingUp,
         ViewMode::Activity => Icon::Activity,
         ViewMode::Streaming => Icon::Sparkles,
+        ViewMode::Chat => Icon::MessageCircle,
     }
 }
 
