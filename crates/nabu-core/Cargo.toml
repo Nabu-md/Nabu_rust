@@ -60,3 +60,7 @@ harness = false
 [[bench]]
 name = "graph_rebuild"
 harness = false
+
+[[bin]]
+name = "nabu-mcp-server"
+path = "src/bin/mcp_server.rs"
