@@ -383,17 +383,14 @@ pub fn build_default_capture_engine(
         engine.set_queue(queue);
     }
 
-    engine.register(Arc::new(super::handler::BrowserCaptureHandler));
     engine.register(Arc::new(super::handler::ClipboardHandler));
     engine.register(Arc::new(super::handler::ScreenshotHandler));
     engine.register(Arc::new(super::handler::FileDropHandler));
     engine.register(Arc::new(super::handler::WatchFolderHandler));
-    engine.register(Arc::new(super::handler::SafariReaderHandler));
     engine.register(Arc::new(super::handler::YouTubeCaptureHandler));
     engine.register(Arc::new(super::handler::GitHubRepositoryHandler));
     engine.register(Arc::new(super::handler::EmailCaptureHandler));
     engine.register(Arc::new(super::handler::BookmarkCaptureHandler));
-    engine.register(Arc::new(super::handler::ArticleCaptureHandler));
 
     engine
 }
@@ -522,35 +519,22 @@ mod tests {
     async fn test_default_engine_registers_all_handlers() {
         let engine = build_default_capture_engine(None, None);
         let names = engine.handler_names();
-        // 11 built-in handlers: browser, clipboard, screenshot, file_drop,
-        // watch_folder, safari_reader, youtube, github, email, bookmark, article.
+        // 8 built-in handlers: clipboard, screenshot, file_drop, watch_folder,
+        // youtube, github, email, bookmark.
         assert_eq!(
             engine.handler_count(),
-            11,
-            "Expected 11 handlers: {:?}",
+            8,
+            "Expected 8 handlers: {:?}",
             names
         );
-        assert!(names.contains(&"browser".to_string()));
         assert!(names.contains(&"clipboard".to_string()));
         assert!(names.contains(&"screenshot".to_string()));
-        assert!(names.contains(&"safari_reader".to_string()));
+        assert!(names.contains(&"file_drop".to_string()));
+        assert!(names.contains(&"watch_folder".to_string()));
         assert!(names.contains(&"youtube".to_string()));
         assert!(names.contains(&"github".to_string()));
         assert!(names.contains(&"email".to_string()));
         assert!(names.contains(&"bookmark".to_string()));
-        assert!(names.contains(&"article".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_browser_url_routes_to_bookmark() {
-        let engine = build_default_capture_engine(None, None);
-        let request = CaptureRequest::new(CaptureData::Uri(
-            "https://example.com/some-page".to_string(),
-        ));
-        let result = engine.ingest(request).await.unwrap();
-        assert!(result.is_some());
-        // The object id is returned; the handler routing happens inside
-        // route() — we verify no error and an id is produced.
     }
 
     #[tokio::test]
@@ -685,10 +669,10 @@ mod tests {
     #[test]
     fn lifecycle_handler_count_preserved_through_lifecycle() {
         let engine = build_default_capture_engine(None, None);
-        assert_eq!(engine.handler_count(), 11);
+        assert_eq!(engine.handler_count(), 8);
         assert!(engine.start().is_ok());
-        assert_eq!(engine.handler_count(), 11);
+        assert_eq!(engine.handler_count(), 8);
         assert!(engine.shutdown().is_ok());
-        assert_eq!(engine.handler_count(), 11);
+        assert_eq!(engine.handler_count(), 8);
     }
 }
