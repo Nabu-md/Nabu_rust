@@ -185,6 +185,7 @@ use std::sync::Arc;
 mod tests {
     use super::*;
     use crate::tool_calling::acp_client::callbacks::ElicitationHandler;
+    use crate::tool_calling::acp_client::types::ElicitationId;
     use async_trait::async_trait;
 
     struct MockElicitationHandler {
@@ -195,7 +196,7 @@ mod tests {
     impl ElicitationHandler for MockElicitationHandler {
         async fn request_elicitation(
             &self,
-            _elicitation_id: &str,
+            _elicitation_id: &ElicitationId,
             _message: &str,
             _schema: &ElicitationSchema,
         ) -> ElicitationOutcome {
@@ -211,7 +212,7 @@ mod tests {
     impl ElicitationHandler for CancelHandler {
         async fn request_elicitation(
             &self,
-            _elicitation_id: &str,
+            _elicitation_id: &ElicitationId,
             _message: &str,
             _schema: &ElicitationSchema,
         ) -> ElicitationOutcome {

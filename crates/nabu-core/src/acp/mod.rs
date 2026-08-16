@@ -89,6 +89,7 @@ pub use crate::rpc::{JsonRpcError, RequestId};
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn method_constants_are_correct() {

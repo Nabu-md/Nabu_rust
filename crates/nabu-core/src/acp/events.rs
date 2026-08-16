@@ -476,7 +476,7 @@ mod tests {
             InboundMessage::AgentRequest { id, typed, .. } => {
                 assert_eq!(id, RequestId::String("x99".to_string()));
                 let typed = typed.unwrap();
-                assert_eq!(*typed.id(), &RequestId::String("x99".to_string()));
+                assert_eq!(typed.id(), &RequestId::String("x99".to_string()));
             }
             _ => panic!("expected AgentRequest"),
         }

@@ -424,6 +424,9 @@ impl Transport for MockPeer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use tokio::io::AsyncReadExt;
+    use tokio::io::AsyncWriteExt;
 
     #[tokio::test]
     async fn mock_transport_roundtrip() {
@@ -520,6 +523,7 @@ mod tests {
     async fn stdio_transport_split_read_write() {
         let (client_read, agent_write) = tokio::io::duplex(8192);
         let (agent_read, client_write) = tokio::io::duplex(8192);
+        let mut agent_read = agent_read;
 
         let transport = StdioTransport::new(client_read, client_write);
         let (mut reader, mut writer) = transport.split();

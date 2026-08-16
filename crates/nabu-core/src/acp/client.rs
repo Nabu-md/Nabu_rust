@@ -1,5 +1,5 @@
 //! # ACP Client
-use crate::acp::error::AcpError;
+use crate::acp::error::{AcpError, ErrorKind};
 use crate::acp::events::{
     classify_message, classify_notification, InboundMessage, NotificationKind,
 };
@@ -22,7 +22,7 @@ struct OutboundMessage {
 }
 
 type UpdateCallback = Arc<
-    dyn Fn(&str, SessionUpdate) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+    dyn Fn(String, SessionUpdate) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
         + Send
         + Sync,
 >;
@@ -56,11 +56,11 @@ impl<T: Transport + 'static> AcpClient<T> {
 
     pub fn on_update<F, Fut>(&mut self, callback: F)
     where
-        F: Fn(&str, SessionUpdate) -> Fut + Send + Sync + 'static,
+        F: Fn(String, SessionUpdate) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
         let cb: UpdateCallback = Arc::new(move |sid, update| {
-            let fut = callback(sid, update);
+            let fut = callback(sid.to_string(), update);
             Box::pin(async move { fut.await })
         });
         self.update_callback = Some(cb);
@@ -283,7 +283,7 @@ impl<T: Transport + 'static> AcpClient<T> {
         Ok(())
     }
 
-    pub async fn shutdown(mut self) -> Result<(), AcpError> {
+    pub async fn shutdown(&mut self) -> Result<(), AcpError> {
         self.outbound_tx = None;
         if let Some(handle) = self.loop_handle.take() {
             let _ = handle.await;
@@ -465,7 +465,7 @@ async fn process_line<T: Transport>(
                             if let Some(cb) = update_callback {
                                 let sid = notif_params.session_id.clone();
                                 let update = notif_params.update.clone();
-                                cb(&sid, update).await;
+                                cb(sid, update).await;
                             }
                         }
                     }
@@ -1103,7 +1103,7 @@ mod tests {
         client.on_update(move |sid, update| {
             let tx = notify_tx.clone();
             Box::pin(async move {
-                tx.send((sid.to_string(), update)).unwrap();
+                tx.send((sid, update)).unwrap();
             })
         });
 
