@@ -56,6 +56,8 @@ use crate::registry::metrics::{
     CounterMetric, GaugeMetric, MetricsAggregator, ServiceMetrics,
 };
 
+use chrono::Utc;
+
 use super::config::{ProcessConfig, StdioMode};
 use super::errors::ProcessResult;
 use super::errors::ProcessSupervisorError;
