@@ -41,7 +41,6 @@ const TOOL_ID: &str = "nabu:elicitation/create";
 /// When invoked, this tool delegates to an [`ElicitationHandler`] to present
 /// the elicitation to the user and collect their response. The default handler
 /// denies all requests.
-#[derive(Debug)]
 pub struct ElicitationTool {
     handler: Arc<dyn ElicitationHandler>,
 }

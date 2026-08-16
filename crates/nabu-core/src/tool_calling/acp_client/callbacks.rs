@@ -11,7 +11,7 @@
 //! (denying all requests), which is the safe fallback.
 
 use super::types::{
-    ElicitationId, ElicitationOutcome, PermissionOptionId, RequestPermissionOutcome,
+    ElicitationId, ElicitationOutcome, RequestPermissionOutcome,
 };
 use async_trait::async_trait;
 
@@ -112,7 +112,7 @@ impl PermissionHandler for AllowPermissionHandler {
             }
         }
         // No allow option available — treat as cancelled.
-        RequestPermissionOutcome::Cancelled
+        RequestPermissionOutcome::Cancelled { _meta: None }
     }
 }
 

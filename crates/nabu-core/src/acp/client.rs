@@ -23,7 +23,7 @@
 //! - Agent→client requests (e.g. `fs/read_text_file`) to the handler trait
 //!
 //! The client's public methods are `async` and communicate with the message
-//! loop via channels.
+//! loop via an outbound channel.
 
 use crate::acp::error::{AcpError, ErrorKind};
 use crate::acp::events::{
@@ -31,7 +31,7 @@ use crate::acp::events::{
 };
 use crate::acp::handler::AcpClientHandler;
 use crate::acp::state::{ClientState, NegotiatedCapabilities};
-use crate::acp::transport::{MockTransport, Transport, TransportRead, TransportWrite};
+use crate::acp::transport::Transport;
 use crate::acp::types::*;
 use crate::rpc::{JsonRpcError, RequestId};
 
@@ -42,6 +42,13 @@ use tokio::sync::{mpsc, oneshot};
 /// A pending request waiting for a response from the agent.
 struct PendingEntry {
     tx: oneshot::Sender<Result<Value, JsonRpcError>>,
+}
+
+/// An outbound message with an optional response channel.
+struct OutboundMessage {
+    msg: Value,
+    /// If `Some`, the message loop sends the result of the write here.
+    ack: Option<oneshot::Sender<Result<(), AcpError>>>,
 }
 
 /// The callback type for receiving `session/update` notifications from the agent.
@@ -55,21 +62,14 @@ type UpdateCallback = Arc<
 ///
 /// Created with [`AcpClient::new`] and connected via [`AcpClient::initialize`].
 ///
-/// The client owns a background message loop task that reads JSON-RPC messages
-/// from the transport and dispatches them. All public methods are `async`.
+/// The client owns a background message loop task that reads JSON-RPC
+/// messages from the transport and dispatches them. All public methods are
+/// `async`.
 pub struct AcpClient<T: Transport> {
     /// Outbound message channel — client → message loop → transport.
-    outbound_tx: mpsc::UnboundedSender<(Value, oneshot::Sender<Result<(), AcpError>>)>,
-    /// Inbound notification channel — message loop → client.
-    /// Used for session/update notifications and other pushed events.
-    inbound_notify: mpsc::UnboundedReceiver<InboundEvent>,
-    inbound_notify_tx: mpsc::UnboundedSender<InboundEvent>,
-    /// Pending request responses.
-    pending: Arc<
-        tokio::sync::Mutex<
-            std::collections::HashMap<String, oneshot::Sender<Result<Value, JsonRpcError>>>,
-        >,
-    >,
+    outbound_tx: Option<mpsc::UnboundedSender<OutboundMessage>>,
+    /// Pending request responses, keyed by request ID string.
+    pending: Arc<tokio::sync::Mutex<std::collections::HashMap<String, PendingEntry>>>,
     /// Next request ID counter.
     next_id: Arc<tokio::sync::atomic::AtomicI64>,
     /// Shared connection state.
@@ -82,20 +82,9 @@ pub struct AcpClient<T: Transport> {
     loop_handle: Option<tokio::task::JoinHandle<()>>,
     /// The negotiated protocol version.
     protocol_version: ProtocolVersion,
-    /// Phantom marker for the transport type.
-    _transport: std::marker::PhantomData<T>,
-}
-
-/// Internal events the message loop pushes to the client.
-#[derive(Debug, Clone)]
-pub enum InboundEvent {
-    /// A session/update notification.
-    SessionUpdate {
-        session_id: String,
-        update: SessionUpdate,
-    },
-    /// The transport was closed (EOF).
-    TransportClosed,
+    /// The transport (stored until initialize() starts the loop).
+    transport: Option<T>,
+    _phantom: std::marker::PhantomData<T>,
 }
 
 impl<T: Transport + 'static> AcpClient<T> {
@@ -106,13 +95,8 @@ impl<T: Transport + 'static> AcpClient<T> {
     ///
     /// [`initialize`]: AcpClient::initialize
     pub fn new(transport: T, handler: Arc<dyn AcpClientHandler>) -> Self {
-        let (outbound_tx, _) = mpsc::unbounded_channel();
-        let (inbound_notify_tx, inbound_notify) = mpsc::unbounded_channel();
-
         Self {
-            outbound_tx,
-            inbound_notify,
-            inbound_notify_tx,
+            outbound_tx: None,
             pending: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             next_id: Arc::new(tokio::sync::atomic::AtomicI64::new(0)),
             state: Arc::new(tokio::sync::Mutex::new(ClientState::new())),
@@ -120,7 +104,8 @@ impl<T: Transport + 'static> AcpClient<T> {
             update_callback: None,
             loop_handle: None,
             protocol_version: SUPPORTED_PROTOCOL_VERSION,
-            _transport: std::marker::PhantomData,
+            transport: Some(transport),
+            _phantom: std::marker::PhantomData,
         }
     }
 
@@ -141,223 +126,15 @@ impl<T: Transport + 'static> AcpClient<T> {
         self.update_callback = Some(cb);
     }
 
-    /// Generate the next request ID (monotonically increasing integer).
-    fn next_request_id(&self) -> String {
-        let id = self
-            .next_id
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        format!("{}", id)
-    }
-
-    /// Start the background message loop that reads incoming JSON-RPC
-    /// messages from the transport and dispatches them.
-    ///
-    /// The loop takes ownership of the transport and runs in a spawned task.
-    /// The client communicates with the loop via channels.
-    async fn start_message_loop(
-        transport: T,
-        state: Arc<tokio::sync::Mutex<ClientState>>,
-        pending: Arc<
-            tokio::sync::Mutex<
-                std::collections::HashMap<String, oneshot::Sender<Result<Value, JsonRpcError>>>,
-            >,
-        >,
-        handler: Arc<dyn AcpClientHandler>,
-        outbound_rx: mpsc::UnboundedReceiver<(Value, oneshot::Sender<Result<(), AcpError>>)>,
-        notify_tx: mpsc::UnboundedSender<InboundEvent>,
-        update_callback: Option<UpdateCallback>,
-    ) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(async move {
-            let mut transport = transport;
-            let mut outbound_rx = outbound_rx;
-            let notify_tx = notify_tx;
-            let pending = pending;
-            let state = state;
-            let handler = handler;
-            let update_callback = update_callback;
-
-            loop {
-                tokio::select! {
-                    // Outbound messages (client → agent)
-                    msg = outbound_rx.recv() => {
-                        match msg {
-                            Some((json_msg, resp_tx)) => {
-                                let result = transport.send_json(&json_msg).await;
-                                let _ = resp_tx.send(result);
-                            }
-                            None => {
-                                // Outbound channel closed
-                                break;
-                            }
-                        }
-                    }
-
-                    // Inbound messages (agent → client)
-                    line_result = transport.read_line() => {
-                        match line_result {
-                            Ok(Some(line)) => {
-                                Self::process_line(
-                                    &mut transport,
-                                    &state,
-                                    &pending,
-                                    &handler,
-                                    &update_callback,
-                                    &notify_tx,
-                                    &line,
-                                ).await;
-                            }
-                            Ok(None) => {
-                                // EOF — transport closed
-                                let _ = notify_tx.send(InboundEvent::TransportClosed);
-                                break;
-                            }
-                            Err(e) => {
-                                tracing::error!("ACP transport read error: {}", e);
-                                let _ = notify_tx.send(InboundEvent::TransportClosed);
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        })
-    }
-
-    /// Process a single line received from the transport.
-    async fn process_line(
-        transport: &mut T,
-        state: &Arc<tokio::sync::Mutex<ClientState>>,
-        pending: &Arc<
-            tokio::sync::Mutex<
-                std::collections::HashMap<String, oneshot::Sender<Result<Value, JsonRpcError>>>,
-            >,
-        >,
-        handler: &Arc<dyn AcpClientHandler>,
-        update_callback: &Option<UpdateCallback>,
-        notify_tx: &mpsc::UnboundedSender<InboundEvent>,
-        line: &str,
-    ) {
-        // Parse and classify the incoming message
-        let classified = match classify_message(line) {
-            Ok(msg) => msg,
-            Err(e) => {
-                tracing::warn!("ACP: failed to classify message: {} (line: {})", e, line);
-                return;
-            }
-        };
-
-        match classified {
-            // A response to a request we sent
-            InboundMessage::Response { id, result, error } => {
-                let id_key = id_to_key(&id);
-                let mut map = pending.lock().await;
-                if let Some(entry) = map.remove(&id_key) {
-                    let _ = entry.tx.send(match error {
-                        Some(e) => Err(e),
-                        None => Ok(result.unwrap_or(Value::Null)),
-                    });
-                } else {
-                    tracing::warn!("ACP: received response for unknown request id: {}", id_key);
-                }
-            }
-
-            // A notification from the agent (no response expected)
-            InboundMessage::Notification { method, params } => {
-                let kind = classify_notification(&method);
-                match kind {
-                    NotificationKind::SessionUpdate => {
-                        if let Some(update_params) = &params {
-                            if let Ok(notif_params) =
-                                serde_json::from_value::<SessionNotificationParams>(
-                                    update_params.clone(),
-                                )
-                            {
-                                if let Some(cb) = update_callback {
-                                    let sid = notif_params.session_id.clone();
-                                    let update = notif_params.update.clone();
-                                    cb(&sid, update).await;
-                                }
-                            }
-                        }
-                    }
-                    NotificationKind::CancelRequest => {
-                        tracing::debug!(
-                            "ACP: received $/cancel_request notification: params={:?}",
-                            params
-                        );
-                    }
-                    NotificationKind::SessionCancel => {
-                        tracing::debug!("ACP: received session/cancel notification");
-                    }
-                    NotificationKind::SessionClosed => {
-                        tracing::debug!("ACP: received session/closed notification");
-                        let sid = params
-                            .as_ref()
-                            .and_then(|v| v.get("sessionId"))
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string();
-                        let mut s = state.lock().await;
-                        s.close_session(&sid);
-                    }
-                    NotificationKind::Unknown => {
-                        tracing::debug!("ACP: received unknown notification: {}", method);
-                    }
-                }
-            }
-
-            // A request from the agent to the client
-            InboundMessage::AgentRequest {
-                id,
-                method,
-                params,
-                typed,
-            } => {
-                let id_val = id_to_value(&id);
-                let method_str = method.clone();
-                let params_clone = params.clone();
-                let handler_clone = handler.clone();
-
-                // Dispatch the agent→client request
-                let dispatch_result =
-                    dispatch_async(handler_clone, &method_str, &params_clone).await;
-
-                // Build and send the JSON-RPC response
-                let response = match dispatch_result {
-                    Ok(result) => json!({
-                        "jsonrpc": "2.0",
-                        "id": id_val,
-                        "result": result
-                    }),
-                    Err(err) => {
-                        let rpc_err = err.into_jsonrpc();
-                        json!({
-                            "jsonrpc": "2.0",
-                            "id": id_val,
-                            "error": rpc_err
-                        })
-                    }
-                };
-
-                let _ = transport.send_json(&response).await;
-
-                // If the typed request was parseable, log it
-                if let Some(typed_req) = &typed {
-                    let _ = typed_req; // suppress unused warning
-                }
-            }
-        }
-    }
-
     // -----------------------------------------------------------------------
-    // Public API — protocol methods (client → agent)
+    // Public protocol API
     // -----------------------------------------------------------------------
 
     /// Send the `initialize` request and wait for the response.
     ///
     /// This negotiates the protocol version and capabilities with the agent.
     /// After a successful initialization, the client transitions to the
-    /// `Connected` state and the message loop starts.
+    /// `Connected` state and the background message loop starts.
     pub async fn initialize(
         &mut self,
         client_info: Option<Implementation>,
@@ -371,31 +148,77 @@ impl<T: Transport + 'static> AcpClient<T> {
                 .map_err(|e| AcpError::invalid_state(e.to_string()))?;
         }
 
-        // Create the outbound channel for the message loop
-        let (outbound_tx, outbound_rx) =
-            mpsc::unbounded_channel::<(Value, oneshot::Sender<Result<(), AcpError>>)>();
-        self.outbound_tx = outbound_tx;
+        // Start the message loop (takes ownership of the transport)
+        let transport = self
+            .transport
+            .take()
+            .ok_or_else(|| AcpError::invalid_state("transport already started"))?;
 
-        // The transport needs to be moved into the message loop. But the
-        // client doesn't own it directly — it was passed to `new`. We need
-        // to restructure. Let's store the transport in the client and
-        // pass it to the loop.
+        let (outbound_tx, outbound_rx) = mpsc::unbounded_channel::<OutboundMessage>();
+        self.outbound_tx = Some(outbound_tx);
 
-        // Actually, looking at the AcpClient struct, the transport is stored
-        // as a PhantomData — we lost it. We need to store the actual transport.
+        let handler = self.handler.clone();
+        let pending = self.pending.clone();
+        let state = self.state.clone();
+        let update_cb = self.update_callback.clone();
 
-        // Let me reconsider the design: the client should own the transport.
-        // But Transport requires Send + Unpin, and we need to move it into
-        // the background task. We can use Option<T> and take() it.
+        let loop_handle = tokio::spawn(async move {
+            run_message_loop(transport, outbound_rx, pending, state, handler, update_cb).await;
+        });
+        self.loop_handle = Some(loop_handle);
 
-        todo!("restructure to own the transport")
+        // Send the initialize request
+        let req = InitializeRequest {
+            protocol_version: self.protocol_version,
+            client_capabilities,
+            client_info,
+            _meta: None,
+        };
+
+        let resp = self
+            .send_request(METHOD_INITIALIZE, &json!(req))
+            .await?
+            .ok_or_else(|| AcpError::malformed_response("initialize response missing result"))?;
+
+        let init_resp: InitializeResponse = serde_json::from_value(resp)?;
+
+        // Verify protocol version compatibility
+        if init_resp.protocol_version != self.protocol_version {
+            return Err(AcpError::protocol_version_mismatch(
+                self.protocol_version,
+                init_resp.protocol_version,
+            ));
+        }
+
+        // Transition to Connected state
+        let caps = NegotiatedCapabilities {
+            protocol_version: init_resp.protocol_version,
+            agent_capabilities: init_resp.agent_capabilities.clone(),
+            client_capabilities: self
+                .state
+                .lock()
+                .await
+                .capabilities
+                .as_ref()
+                .and_then(|c| c.client_capabilities.clone()),
+            agent_info: init_resp.agent_info.clone(),
+            client_info: None,
+            _meta: None,
+        };
+
+        {
+            let mut state = self.state.lock().await;
+            state
+                .transition_to_connected(caps)
+                .map_err(|e| AcpError::invalid_state(e.to_string()))?;
+        }
+
+        Ok(init_resp)
     }
 
-    // -----------------------------------------------------------------------
-    // More protocol methods — these need the message loop running
-    // -----------------------------------------------------------------------
-
     /// Create a new session by sending `session/new`.
+    ///
+    /// Returns the server-assigned session ID.
     pub async fn new_session(
         &self,
         cwd: &str,
@@ -585,7 +408,7 @@ impl<T: Transport + 'static> AcpClient<T> {
     /// Shut down the client: stop the message loop and close the transport.
     pub async fn shutdown(mut self) -> Result<(), AcpError> {
         // Close the outbound channel (signals the message loop to stop)
-        // The message loop will break when outbound_rx returns None
+        self.outbound_tx = None;
 
         // Wait for the message loop to finish
         if let Some(handle) = self.loop_handle.take() {
@@ -618,44 +441,39 @@ impl<T: Transport + 'static> AcpClient<T> {
     ///
     /// Generates a unique request ID, registers a pending entry, sends the
     /// request via the message loop's outbound channel, and awaits the
-    /// response.
+    /// response (with a 120s timeout).
     async fn send_request(&self, method: &str, params: &Value) -> Result<Option<Value>, AcpError> {
-        let id = self.next_request_id();
-        let id_clone = id.clone();
+        let id_str = self.next_request_id();
+        let id_val = json!(id_str);
 
         let (tx, rx) = oneshot::channel::<Result<Value, JsonRpcError>>();
         {
             let mut map = self.pending.lock().await;
-            map.insert(id.clone(), PendingEntry { tx });
+            map.insert(id_str.clone(), PendingEntry { tx });
         }
 
         let msg = json!({
             "jsonrpc": "2.0",
-            "id": id_clone,
+            "id": id_val,
             "method": method,
             "params": params
         });
 
-        let (send_tx, send_rx) = oneshot::channel::<Result<(), AcpError>>();
-        if self.outbound_tx.send((msg, send_tx)).is_err() {
-            return Err(AcpError::transport_closed("outbound channel closed"));
-        }
-
-        // Wait for the message to be sent
-        send_rx
-            .await
-            .map_err(|_| AcpError::transport_closed("message loop task unavailable"))?;
-        send_rx.await.ok();
+        self.send_outbound(msg).await?;
 
         // Wait for the response (with a generous timeout)
         let timeout = std::time::Duration::from_secs(120);
         let result = tokio::time::timeout(timeout, rx).await.map_err(|_| {
+            // Clean up the pending entry on timeout
+            let mut map = self.pending.lock().await;
+            map.remove(&id_str);
             AcpError::timeout(format!(
                 "request '{}' timed out after {:?}",
                 method, timeout
             ))
         })?;
 
+        // The pending entry was consumed by the one-shot sender in the loop.
         let result = result.map_err(|_| {
             AcpError::request_cancelled(format!("request '{}' was cancelled", method))
         })?;
@@ -674,27 +492,213 @@ impl<T: Transport + 'static> AcpClient<T> {
             "params": params
         });
 
-        let (send_tx, send_rx) = oneshot::channel::<Result<(), AcpError>>();
-        if self.outbound_tx.send((msg, send_tx)).is_err() {
+        self.send_outbound(msg).await?;
+        Ok(())
+    }
+
+    /// Push a message to the message loop's outbound channel.
+    async fn send_outbound(&self, msg: Value) -> Result<(), AcpError> {
+        let tx = self.outbound_tx.as_ref().ok_or_else(|| {
+            AcpError::invalid_state("message loop not started; call initialize() first")
+        })?;
+
+        let (ack_tx, ack_rx) = oneshot::channel::<Result<(), AcpError>>();
+        if tx
+            .send(OutboundMessage {
+                msg,
+                ack: Some(ack_tx),
+            })
+            .is_err()
+        {
             return Err(AcpError::transport_closed("outbound channel closed"));
         }
 
-        send_rx
+        // Wait for the message loop to confirm the write
+        ack_rx
             .await
-            .map_err(|_| AcpError::transport_closed("message loop task unavailable"))?;
-        send_rx.await.ok();
+            .map_err(|_| AcpError::transport_closed("message loop task unavailable"))??;
 
         Ok(())
     }
 }
 
-/// Async dispatch helper - calls the handler's dispatch logic.
-async fn dispatch_async(
+// ---------------------------------------------------------------------------
+// Message loop
+// ---------------------------------------------------------------------------
+
+/// The background message loop that reads from and writes to the transport.
+///
+/// Uses `tokio::select!` to concurrently:
+/// - Read inbound JSON-RPC lines from the transport
+/// - Send outbound messages (client requests) to the transport
+async fn run_message_loop<T: Transport>(
+    mut transport: T,
+    mut outbound_rx: mpsc::UnboundedReceiver<OutboundMessage>,
+    pending: Arc<tokio::sync::Mutex<std::collections::HashMap<String, PendingEntry>>>,
+    state: Arc<tokio::sync::Mutex<ClientState>>,
     handler: Arc<dyn AcpClientHandler>,
-    method: &str,
-    params: &Option<serde_json::Value>,
-) -> Result<Value, AcpError> {
-    crate::acp::handler::dispatch_agent_request(handler.as_ref(), method, params).await
+    update_callback: Option<UpdateCallback>,
+) {
+    loop {
+        tokio::select! {
+            // Outbound messages (client → agent)
+            outbound_msg = outbound_rx.recv() => {
+                match outbound_msg {
+                    Some(OutboundMessage { msg, ack }) => {
+                        let result = transport.send_json(&msg).await;
+                        if let Some(ack_tx) = ack {
+                            let _ = ack_tx.send(result);
+                        }
+                        // If the write failed, stop the loop
+                        if result.is_err() {
+                            tracing::error!("ACP: transport write error, stopping message loop");
+                            break;
+                        }
+                    }
+                    None => {
+                        // Outbound channel closed — client is shutting down
+                        break;
+                    }
+                }
+            }
+
+            // Inbound messages (agent → client)
+            line_result = transport.read_line() => {
+                match line_result {
+                    Ok(Some(line)) => {
+                        process_line(
+                            &mut transport,
+                            &state,
+                            &pending,
+                            &handler,
+                            &update_callback,
+                            &line,
+                        ).await;
+                    }
+                    Ok(None) => {
+                        // EOF — transport closed
+                        tracing::warn!("ACP: transport EOF, message loop stopping");
+                        break;
+                    }
+                    Err(e) => {
+                        tracing::error!("ACP: transport read error: {}", e);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Process a single line received from the transport.
+async fn process_line<T: Transport>(
+    transport: &mut T,
+    state: &Arc<tokio::sync::Mutex<ClientState>>,
+    pending: &Arc<tokio::sync::Mutex<std::collections::HashMap<String, PendingEntry>>>,
+    handler: &Arc<dyn AcpClientHandler>,
+    update_callback: &Option<UpdateCallback>,
+    line: &str,
+) {
+    let classified = match classify_message(line) {
+        Ok(msg) => msg,
+        Err(e) => {
+            tracing::warn!("ACP: failed to classify message: {} (line: {})", e, line);
+            return;
+        }
+    };
+
+    match classified {
+        // A response to a request we sent
+        InboundMessage::Response { id, result, error } => {
+            let id_key = id_to_key(&id);
+            let mut map = pending.lock().await;
+            if let Some(entry) = map.remove(&id_key) {
+                let _ = entry.tx.send(match error {
+                    Some(e) => Err(e),
+                    None => Ok(result.unwrap_or(Value::Null)),
+                });
+            } else {
+                tracing::warn!("ACP: response for unknown request id: {}", id_key);
+            }
+        }
+
+        // A notification from the agent (no response expected)
+        InboundMessage::Notification { method, params } => {
+            let kind = classify_notification(&method);
+            match kind {
+                NotificationKind::SessionUpdate => {
+                    if let Some(update_params) = &params {
+                        if let Ok(notif_params) = serde_json::from_value::<SessionNotificationParams>(
+                            update_params.clone(),
+                        ) {
+                            if let Some(cb) = update_callback {
+                                let sid = notif_params.session_id.clone();
+                                let update = notif_params.update.clone();
+                                cb(&sid, update).await;
+                            }
+                        }
+                    }
+                }
+                NotificationKind::CancelRequest => {
+                    tracing::debug!("ACP: received $/cancel_request: {:?}", params);
+                }
+                NotificationKind::SessionCancel => {
+                    tracing::debug!("ACP: received session/cancel notification");
+                }
+                NotificationKind::SessionClosed => {
+                    tracing::debug!("ACP: received session/closed notification");
+                    let sid = params
+                        .as_ref()
+                        .and_then(|v| v.get("sessionId"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let mut s = state.lock().await;
+                    s.close_session(&sid);
+                }
+                NotificationKind::Unknown => {
+                    tracing::debug!("ACP: unknown notification: {}", method);
+                }
+            }
+        }
+
+        // A request from the agent to the client
+        InboundMessage::AgentRequest {
+            id, method, params, ..
+        } => {
+            let id_val = id_to_value(&id);
+            let method_str = method.clone();
+            let params_clone = params.clone();
+            let handler_clone = handler.clone();
+
+            let dispatch_result = crate::acp::handler::dispatch_agent_request(
+                handler_clone.as_ref(),
+                &method_str,
+                &params_clone,
+            )
+            .await;
+
+            let response = match dispatch_result {
+                Ok(result) => json!({
+                    "jsonrpc": "2.0",
+                    "id": id_val,
+                    "result": result
+                }),
+                Err(err) => {
+                    let rpc_err = err.into_jsonrpc();
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": id_val,
+                        "error": rpc_err
+                    })
+                }
+            };
+
+            if let Err(e) = transport.send_json(&response).await {
+                tracing::warn!("ACP: failed to send response to agent: {}", e);
+            }
+        }
+    }
 }
 
 /// Convert a JSON-RPC `RequestId` to a string key for the pending map.
@@ -713,4 +717,496 @@ fn id_to_value(id: &RequestId) -> Value {
         RequestId::String(s) => Value::String(s.clone()),
         RequestId::Null => Value::Null,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::acp::transport::MockTransport;
+    use crate::acp::types::{ContentBlock, StopReason, TextContent};
+    use serde_json::json;
+
+    /// A handler that echoes back read requests with a fixed response.
+    struct EchoHandler {
+        pub read_calls: Arc<tokio::sync::Mutex<Vec<String>>>,
+    }
+
+    impl AcpClientHandler for EchoHandler {
+        fn read_text_file(
+            &self,
+            request: &ReadTextFileRequest,
+        ) -> impl std::future::Future<Output = Result<ReadTextFileResponse, AcpError>> + Send
+        {
+            let calls = self.read_calls.clone();
+            let path = request.path.clone();
+            async move {
+                calls.lock().await.push(path.clone());
+                Ok(ReadTextFileResponse {
+                    content: format!("contents of {}", path),
+                    _meta: None,
+                })
+            }
+        }
+
+        fn write_text_file(
+            &self,
+            _request: &WriteTextFileRequest,
+        ) -> impl std::future::Future<Output = Result<WriteTextFileResponse, AcpError>> + Send
+        {
+            async move { Ok(WriteTextFileResponse { _meta: None }) }
+        }
+
+        fn request_permission(
+            &self,
+            _request: &RequestPermissionRequest,
+        ) -> impl std::future::Future<Output = Result<PermissionOutcome, AcpError>> + Send {
+            async move { Ok(PermissionOutcome::Cancelled { _meta: None }) }
+        }
+    }
+
+    /// A handler that returns errors for all requests (for error path tests).
+    struct ErrorHandler;
+
+    impl AcpClientHandler for ErrorHandler {
+        fn read_text_file(
+            &self,
+            _request: &ReadTextFileRequest,
+        ) -> impl std::future::Future<Output = Result<ReadTextFileResponse, AcpError>> + Send
+        {
+            async move { Err(AcpError::new(ErrorKind::Internal, "read failed")) }
+        }
+
+        fn write_text_file(
+            &self,
+            _request: &WriteTextFileRequest,
+        ) -> impl std::future::Future<Output = Result<WriteTextFileResponse, AcpError>> + Send
+        {
+            async move { Err(AcpError::new(ErrorKind::Internal, "write failed")) }
+        }
+
+        fn request_permission(
+            &self,
+            _request: &RequestPermissionRequest,
+        ) -> impl std::future::Future<Output = Result<PermissionOutcome, AcpError>> + Send {
+            async move { Err(AcpError::new(ErrorKind::Internal, "permission denied")) }
+        }
+    }
+
+    /// A handler that returns errors for all requests (for error path tests).
+    struct NoopHandler;
+
+    impl AcpClientHandler for NoopHandler {
+        fn read_text_file(
+            &self,
+            _request: &ReadTextFileRequest,
+        ) -> impl std::future::Future<Output = Result<ReadTextFileResponse, AcpError>> + Send
+        {
+            async move { Err(AcpError::new(ErrorKind::Internal, "not supported")) }
+        }
+
+        fn write_text_file(
+            &self,
+            _request: &WriteTextFileRequest,
+        ) -> impl std::future::Future<Output = Result<WriteTextFileResponse, AcpError>> + Send
+        {
+            async move { Err(AcpError::new(ErrorKind::Internal, "not supported")) }
+        }
+
+        fn request_permission(
+            &self,
+            _request: &RequestPermissionRequest,
+        ) -> impl std::future::Future<Output = Result<PermissionOutcome, AcpError>> + Send {
+            async move { Err(AcpError::new(ErrorKind::Internal, "not supported")) }
+        }
+    }
+
+    #[tokio::test]
+    async fn initialize_success() {
+        let handler = Arc::new(NoopHandler);
+        let (client_transport, mut peer) = MockTransport::pair();
+        let mut client = AcpClient::new(client_transport, handler);
+
+        // Spawn a mock agent task
+        let agent_task = tokio::spawn(async move {
+            // Read the initialize request
+            let req_line = peer.recv_client_msg().await.unwrap();
+            assert!(req_line.contains("initialize"));
+
+            // Send the initialize response
+            let resp = json!({
+                "jsonrpc": "2.0",
+                "id": "0",
+                "result": {
+                    "protocolVersion": 1,
+                    "agentCapabilities": {"loadSession": false},
+                    "agentInfo": {
+                        "name": "mock-agent",
+                        "version": "1.0.0"
+                    },
+                    "authMethods": []
+                }
+            });
+            peer.feed_raw(&serde_json::to_string(&resp).unwrap())
+                .unwrap();
+        });
+
+        let init_resp = client.initialize(None, None).await.unwrap();
+        assert_eq!(init_resp.protocol_version, 1);
+        assert_eq!(init_resp.agent_info.as_ref().unwrap().name, "mock-agent");
+
+        // Wait for the agent task to finish
+        agent_task.await.unwrap();
+
+        // Verify client state
+        let state = client.state.lock().await;
+        assert!(state.connection_state.is_connected());
+    }
+
+    #[tokio::test]
+    async fn initialize_protocol_version_mismatch() {
+        let handler = Arc::new(NoopHandler);
+        let (client_transport, mut peer) = MockTransport::pair();
+        let mut client = AcpClient::new(client_transport, handler);
+
+        let agent_task = tokio::spawn(async move {
+            let _ = peer.recv_client_msg().await; // read request
+            let resp = json!({
+                "jsonrpc": "2.0",
+                "id": "0",
+                "result": {
+                    "protocolVersion": 2,
+                    "agentCapabilities": {},
+                    "agentInfo": {"name": "mock", "version": "1.0.0"},
+                    "authMethods": []
+                }
+            });
+            peer.feed_raw(&serde_json::to_string(&resp).unwrap())
+                .unwrap();
+        });
+
+        let result = client.initialize(None, None).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind, ErrorKind::ProtocolVersionMismatch);
+
+        agent_task.await.unwrap();
+        let _ = client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn new_session() {
+        let handler = Arc::new(NoopHandler);
+        let (client_transport, mut peer) = MockTransport::pair();
+        let mut client = AcpClient::new(client_transport, handler);
+
+        // Initialize first
+        let agent_task = tokio::spawn(async move {
+            let init_req = peer.recv_client_msg().await.unwrap();
+            assert!(init_req.contains("initialize"));
+
+            let resp = json!({
+                "jsonrpc": "2.0",
+                "id": "0",
+                "result": {
+                    "protocolVersion": 1,
+                    "agentCapabilities": {},
+                    "agentInfo": {"name": "mock", "version": "1.0.0"},
+                    "authMethods": []
+                }
+            });
+            peer.feed_raw(&serde_json::to_string(&resp).unwrap())
+                .unwrap();
+
+            // Read session/new request
+            let new_req = peer.recv_client_msg().await.unwrap();
+            assert!(new_req.contains("session/new"));
+
+            let new_resp = json!({
+                "jsonrpc": "2.0",
+                "id": "1",
+                "result": {
+                    "sessionId": "sess_abc123",
+                    "configOptions": null,
+                    "modes": null
+                }
+            });
+            peer.feed_raw(&serde_json::to_string(&new_resp).unwrap())
+                .unwrap();
+        });
+
+        client.initialize(None, None).await.unwrap();
+        let session_id = client
+            .new_session("/workspace", vec![], vec![])
+            .await
+            .unwrap();
+        assert_eq!(session_id, "sess_abc123");
+
+        agent_task.await.unwrap();
+        let _ = client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn session_prompt() {
+        let handler = Arc::new(NoopHandler);
+        let (client_transport, mut peer) = MockTransport::pair();
+        let mut client = AcpClient::new(client_transport, handler);
+
+        let agent_task = tokio::spawn(async move {
+            // Read initialize
+            peer.recv_client_msg().await.unwrap();
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"0","result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"m","version":"1"},"authMethods":[]}}"#).unwrap();
+
+            // Read session/new
+            peer.recv_client_msg().await.unwrap();
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"1","result":{"sessionId":"s1","configOptions":null,"modes":null}}"#).unwrap();
+
+            // Read session/prompt
+            let prompt_req = peer.recv_client_msg().await.unwrap();
+            assert!(prompt_req.contains("session/prompt"));
+
+            // Send prompt response
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"2","result":{"stopReason":"end_turn"}}"#)
+                .unwrap();
+        });
+
+        client.initialize(None, None).await.unwrap();
+        let sid = client.new_session("/ws", vec![], vec![]).await.unwrap();
+        let resp = client
+            .session_prompt(
+                &sid,
+                vec![ContentBlock::Text(TextContent {
+                    text: "Hello".to_string(),
+                    annotations: None,
+                    _meta: None,
+                })],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.stop_reason, StopReason::EndTurn);
+
+        agent_task.await.unwrap();
+        let _ = client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn session_cancel_send_notification() {
+        let handler = Arc::new(NoopHandler);
+        let (client_transport, mut peer) = MockTransport::pair();
+        let mut client = AcpClient::new(client_transport, handler);
+
+        let agent_task = tokio::spawn(async move {
+            // init
+            peer.recv_client_msg().await.unwrap();
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"0","result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"m","version":"1"},"authMethods":[]}}"#).unwrap();
+
+            // session/new
+            peer.recv_client_msg().await.unwrap();
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"1","result":{"sessionId":"s1","configOptions":null,"modes":null}}"#).unwrap();
+
+            // session/cancel notification (no id)
+            let cancel = peer.recv_client_msg().await.unwrap();
+            assert!(cancel.contains("session/cancel"));
+            assert!(!cancel.contains("\"id\""));
+        });
+
+        client.initialize(None, None).await.unwrap();
+        let sid = client.new_session("/ws", vec![], vec![]).await.unwrap();
+        client.session_cancel(&sid).await.unwrap();
+
+        agent_task.await.unwrap();
+        let _ = client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn agent_request_dispatched_to_handler() {
+        let handler = Arc::new(EchoHandler {
+            read_calls: Arc::new(tokio::sync::Mutex::new(vec![])),
+        });
+        let read_calls = handler.read_calls.clone();
+
+        let (client_transport, mut peer) = MockTransport::pair();
+        let mut client = AcpClient::new(client_transport, handler);
+
+        let agent_task = tokio::spawn(async move {
+            // init
+            peer.recv_client_msg().await.unwrap();
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"0","result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"m","version":"1"},"authMethods":[]}}"#).unwrap();
+
+            // session/new
+            peer.recv_client_msg().await.unwrap();
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"1","result":{"sessionId":"s1","configOptions":null,"modes":null}}"#).unwrap();
+
+            // session/prompt
+            peer.recv_client_msg().await.unwrap();
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"2","result":{"stopReason":"end_turn"}}"#)
+                .unwrap();
+
+            // Wait a bit, then send agent→client request
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"99","method":"fs/read_text_file","params":{"path":"/etc/hostname","sessionId":"s1"}}"#).unwrap();
+
+            // Wait for the client's response
+            let resp = peer.recv_client_msg().await.unwrap();
+            assert!(resp.contains("\"result\""));
+            assert!(resp.contains("contents of /etc/hostname"));
+        });
+
+        client.initialize(None, None).await.unwrap();
+        let sid = client.new_session("/ws", vec![], vec![]).await.unwrap();
+        let _ = client.session_prompt(&sid, vec![]).await.unwrap();
+
+        agent_task.await.unwrap();
+
+        // Verify the handler was called
+        let calls = read_calls.lock().await;
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0], "/etc/hostname");
+
+        let _ = client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn agent_request_error_response() {
+        let handler = Arc::new(ErrorHandler);
+        let (client_transport, mut peer) = MockTransport::pair();
+        let mut client = AcpClient::new(client_transport, handler);
+
+        let agent_task = tokio::spawn(async move {
+            // init
+            peer.recv_client_msg().await.unwrap();
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"0","result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"m","version":"1"},"authMethods":[]}}"#).unwrap();
+
+            // session/new
+            peer.recv_client_msg().await.unwrap();
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"1","result":{"sessionId":"s1","configOptions":null,"modes":null}}"#).unwrap();
+
+            // session/prompt
+            peer.recv_client_msg().await.unwrap();
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"2","result":{"stopReason":"end_turn"}}"#)
+                .unwrap();
+
+            // Wait, then send agent→client request that will fail
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"99","method":"fs/read_text_file","params":{"path":"/test","sessionId":"s1"}}"#).unwrap();
+
+            // Read the error response
+            let resp = peer.recv_client_msg().await.unwrap();
+            assert!(resp.contains("\"error\""));
+            assert!(resp.contains("-32601") || resp.contains("-32000"));
+        });
+
+        client.initialize(None, None).await.unwrap();
+        let sid = client.new_session("/ws", vec![], vec![]).await.unwrap();
+        let _ = client.session_prompt(&sid, vec![]).await.unwrap();
+
+        agent_task.await.unwrap();
+        let _ = client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn session_update_notification_callback() {
+        let handler = Arc::new(NoopHandler);
+        let (client_transport, mut peer) = MockTransport::pair();
+        let mut client = AcpClient::new(client_transport, handler);
+
+        let (notify_tx, mut notify_rx) =
+            tokio::sync::mpsc::unbounded_channel::<(String, SessionUpdate)>();
+
+        client.on_update(move |sid, update| {
+            let tx = notify_tx.clone();
+            Box::pin(async move {
+                tx.send((sid.to_string(), update)).unwrap();
+            })
+        });
+
+        let agent_task = tokio::spawn(async move {
+            // init
+            peer.recv_client_msg().await.unwrap();
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"0","result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"m","version":"1"},"authMethods":[]}}"#).unwrap();
+
+            // session/new
+            peer.recv_client_msg().await.unwrap();
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"1","result":{"sessionId":"s1","configOptions":null,"modes":null}}"#).unwrap();
+
+            // session/prompt
+            peer.recv_client_msg().await.unwrap();
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"2","result":{"stopReason":"end_turn"}}"#)
+                .unwrap();
+
+            // Send a session/update notification
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            peer.feed_raw(r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"agent_message_chunk","messageId":"m1","content":{"type":"text","text":"Hello from agent"}}}}"#).unwrap();
+        });
+
+        client.initialize(None, None).await.unwrap();
+        let sid = client.new_session("/ws", vec![], vec![]).await.unwrap();
+        let _ = client.session_prompt(&sid, vec![]).await.unwrap();
+
+        // Wait for the notification to arrive
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let (received_sid, received_update) = notify_rx.recv().await.unwrap();
+        assert_eq!(received_sid, "s1");
+        match received_update {
+            SessionUpdate::AgentMessageChunk(chunk) => {
+                assert_eq!(chunk.message_id.as_deref(), Some("m1"));
+                match chunk.content {
+                    ContentBlock::Text(t) => assert_eq!(t.text, "Hello from agent"),
+                    _ => panic!("expected text"),
+                }
+            }
+            _ => panic!("expected AgentMessageChunk"),
+        }
+
+        agent_task.await.unwrap();
+        let _ = client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn request_ids_are_sequential() {
+        let handler = Arc::new(NoopHandler);
+        let (client_transport, mut peer) = MockTransport::pair();
+        let mut client = AcpClient::new(client_transport, handler);
+
+        let agent_task = tokio::spawn(async move {
+            // init -- request id "0"
+            peer.recv_client_msg().await.unwrap();
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"0","result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"m","version":"1"},"authMethods":[]}}"#).unwrap();
+
+            // session/new -- request id "1"
+            let new_req = peer.recv_client_msg().await.unwrap();
+            assert!(new_req.contains(r#"id":"1"#));
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"1","result":{"sessionId":"s1","configOptions":null,"modes":null}}"#).unwrap();
+
+            // session/delete -- request id "2"
+            let del_req = peer.recv_client_msg().await.unwrap();
+            assert!(del_req.contains(r#"id":"2"#));
+            peer.feed_raw(r#"{"jsonrpc":"2.0","id":"2","result":{}}"#).unwrap();
+        });
+
+        client.initialize(None, None).await.unwrap();
+        let sid = client.new_session("/ws", vec![], vec![]).await.unwrap();
+
+        // Verify delete works (uses request id "2")
+        client.delete_session(&sid).await.unwrap();
+
+        agent_task.await.unwrap();
+        let _ = client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn transport_closed_when_peer_drops() {
+        let handler = Arc::new(NoopHandler);
+        let (client_transport, peer) = MockTransport::pair();
+        let mut client = AcpClient::new(client_transport, handler);
+        drop(peer);
+
+        let result = client.initialize(None, None).await;
+        assert!(result.is_err());
+    }
+}
 }

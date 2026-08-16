@@ -15,9 +15,7 @@
 //! - The actual file I/O is delegated to `StorageManager`, which is the
 //!   single storage owner in the Nabu Capability Platform.
 
-use super::types::{
-    ReadTextFileRequest, ReadTextFileResponse, WriteTextFileRequest, WriteTextFileResponse,
-};
+use super::types::{ReadTextFileRequest, WriteTextFileRequest};
 use crate::storage::StorageManager;
 use crate::tool_calling::{Tool, ToolCall, ToolError, ToolSpec, ToolParam, ToolParamSchema};
 use crate::tool_calling::models::ToolResult;
@@ -44,7 +42,7 @@ pub mod error_code {
 ///
 /// Vault boundary enforcement: all paths are validated to ensure they
 /// resolve within the vault root before any I/O is performed.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FileSystemTool {
     storage: Arc<StorageManager>,
     vault_root: PathBuf,
@@ -238,7 +236,12 @@ impl Tool for FileSystemTool {
                 // Use StorageManager.save_note_content for persistence.
                 // The vault-relative path is passed directly.
                 let vault_rel_str = vault_rel.to_string_lossy().to_string();
-                let _saved_path = self.storage.save_note_content(&vault_rel_str, &req.content)?;
+                let _saved_path = self
+                    .storage
+                    .save_note_content(&vault_rel_str, &req.content)
+                    .map_err(|e| {
+                        ToolError::new(error_code::FS_WRITE_FAILED, e)
+                    })?;
 
                 Ok(ToolResult::success(
                     Some(json!({})),

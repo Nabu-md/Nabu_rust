@@ -175,6 +175,14 @@ impl AcpError {
     /// - `Timeout` / `TransportClosed` → `-32000` (server error)
     /// - Everything else → `-32000` (server error)
     pub fn into_jsonrpc(self) -> crate::rpc::JsonRpcError {
+        self.into_jsonrpc_error()
+    }
+
+    /// Convert this ACP error into a JSON-RPC error object.
+    ///
+    /// Alias for [`into_jsonrpc`](Self::into_jsonrpc) for backwards
+    /// compatibility with the server-side handler code.
+    pub fn into_jsonrpc_error(self) -> crate::rpc::JsonRpcError {
         let code = match self.kind {
             ErrorKind::MethodNotFound => -32601,
             ErrorKind::InvalidParams | ErrorKind::MalformedRequest => -32602,

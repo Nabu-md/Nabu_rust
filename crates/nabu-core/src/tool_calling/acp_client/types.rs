@@ -698,7 +698,7 @@ mod tests {
     #[test]
     fn request_permission_response_cancelled_roundtrips() {
         let resp = RequestPermissionResponse {
-            outcome: RequestPermissionOutcome::Cancelled,
+            outcome: RequestPermissionOutcome::Cancelled { _meta: None },
             _meta: None,
         };
         let json = serde_json::to_string(&resp).unwrap();

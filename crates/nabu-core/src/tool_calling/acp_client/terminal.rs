@@ -42,9 +42,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tokio::io::AsyncRead;
+use tokio::io::AsyncReadExt;
 use tokio::process::Child;
 use tokio::sync::{Mutex, Notify};
+
+#[cfg(unix)]
+use std::os::unix::process::ExitStatusExt;
 
 /// Error codes returned by the terminal tool.
 pub mod error_code {
@@ -144,7 +147,7 @@ impl ActiveTerminals {
 }
 
 /// A tool implementing all ACP terminal client-side methods.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TerminalTool {
     /// Shared, async-safe registry of active terminals.
     terminals: Arc<Mutex<ActiveTerminals>>,
@@ -265,11 +268,7 @@ impl TerminalTool {
 
             let exit_status = if let Some(mut child) = child_opt {
                 match child.wait().await {
-                    Ok(status) => Some(TerminalExitStatus {
-                        exit_code: status.code(),
-                        signal: status.signal().map(|s| s.to_string()),
-                        _meta: None,
-                    }),
+                    Ok(status) => Some(exit_status_to_terminal(status)),
                     Err(_) => None,
                 }
             } else {
@@ -460,6 +459,18 @@ async fn read_stream<R: AsyncRead + Unpin + Send + 'static>(
                 Err(_) => break,
             }
         }
+    }
+}
+
+/// Convert a `tokio::process::ExitStatus` into an ACP `TerminalExitStatus`.
+fn exit_status_to_terminal(exit_status: tokio::process::ExitStatus) -> TerminalExitStatus {
+    TerminalExitStatus {
+        exit_code: exit_status.code().map(|c| c as i64),
+        #[cfg(unix)]
+        signal: ExitStatusExt::signal(&exit_status).map(|s| s.to_string()),
+        #[cfg(not(unix))]
+        signal: None,
+        _meta: None,
     }
 }
 

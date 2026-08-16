@@ -25,7 +25,7 @@
 
 use super::callbacks::PermissionHandler;
 use super::types::{
-    PermissionOption, PermissionOptionKind, RequestPermissionOutcome, RequestPermissionResponse,
+    PermissionOption, RequestPermissionOutcome, RequestPermissionResponse,
 };
 use crate::tool_calling::{Tool, ToolCall, ToolError, ToolId, ToolParam, ToolParamSchema, ToolSpec};
 use crate::tool_calling::models::ToolResult;
@@ -42,7 +42,6 @@ pub mod error_code {
 const TOOL_ID: &str = "nabu:session/request_permission";
 
 /// A tool implementing the ACP `session/request_permission` client-side method.
-#[derive(Debug)]
 pub struct PermissionTool {
     handler: Arc<dyn PermissionHandler>,
 }
@@ -114,7 +113,7 @@ impl Tool for PermissionTool {
             .await;
 
         match outcome {
-            RequestPermissionOutcome::Selected { option_id, .. } => {
+            RequestPermissionOutcome::Selected { .. } => {
                 let resp = RequestPermissionResponse {
                     outcome,
                     _meta: None,
