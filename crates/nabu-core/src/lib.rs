@@ -36,10 +36,10 @@ pub mod history;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod io_stream;
 // IPC socket server is built on UNIX domain sockets (`tokio::net::UnixListener`
-// / `std::os::unix::net`), which only exist on Unix targets. Windows support for
-// native-messaging IPC is a future transport (named pipes); until then the
-// module (and its tests) are excluded from non-Unix builds so the rest of the
-// crate compiles and its tests run on every platform.
+// / `std::os::unix::net`), which only exist on Unix targets. Windows support is
+// a future transport (named pipes); until then the module (and its tests) are
+// excluded from non-Unix builds so the rest of the crate compiles and its
+// tests run on every platform.
 #[cfg(unix)]
 pub mod ipc_socket;
 pub mod indexer;

@@ -83,7 +83,7 @@ The `ApplicationContext` is the central composition point. Every major subsystem
 
 | Category | Description | Services |
 |----------|-------------|----------|
-| `capture_handlers` | Capture handlers implementing `CaptureHandler` trait | BrowserCaptureHandler, ClipboardHandler, ScreenshotHandler, FileDropHandler, WatchFolderHandler, SafariReaderHandler, YouTubeCaptureHandler, GitHubRepositoryHandler, EmailCaptureHandler, BookmarkCaptureHandler, ArticleCaptureHandler |
+| `capture_handlers` | Capture handlers implementing `CaptureHandler` trait | ClipboardHandler, ScreenshotHandler, FileDropHandler, WatchFolderHandler, YouTubeCaptureHandler, GitHubRepositoryHandler, EmailCaptureHandler, BookmarkCaptureHandler |
 | `processors` | Processing pipeline processors implementing `Processor` trait | ContentClassifier, DuplicateDetector, TimelineExtractor, MetadataExtractor, MetadataEnricher, OcrProcessor, PdfTextProcessor, PdfMetadataProcessor, PdfAnnotationProcessor, WhisperProcessor, EmbeddingGenerator, SemanticEnricher, AiSummariser, AutoFiler |
 | `ai_providers` | Future AI provider services | — (reserved) |
 | `ocr_providers` | Future OCR engine services | — (reserved) |
@@ -154,7 +154,7 @@ build_application_context() in src-tauri/src/lib.rs
     │   ├── ContentClassifier, DuplicateDetector, ...
     │   └── Registered in CATEGORY_PROCESSORS
     ├── CaptureEngine::new(event_bus)
-    │   ├── BrowserCaptureHandler, ClipboardHandler, ScreenshotHandler, ...EmailCaptureHandler
+    │   ├── ClipboardHandler, ScreenshotHandler, FileDropHandler, ...EmailCaptureHandler
     │   └── Registered in CATEGORY_CAPTURE_HANDLERS
     ├── JobQueue::new(pipeline, event_bus)
     ├── WorkerPool::new(4, job_queue)
@@ -243,7 +243,7 @@ crate boundaries:
     nabu-core          →  Core library (models, capture, processing, storage,
                            event_bus, registry, plugin, graph, indexer, job_queue)
     src-tauri           →  Tauri application shell (commands, settings, vault,
-                           native_messaging)
+                            ipc_socket)
     nabu-ui             →  Leptos-based UI components (tree, markdown renderer)
 
 ownership:

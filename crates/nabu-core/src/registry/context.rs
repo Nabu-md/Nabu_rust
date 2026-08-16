@@ -17,7 +17,7 @@
 //! │   ├── worker_pool        → WorkerPool
 //! │   ├── vault_graph        → VaultGraph (RwLock)
 //! │   ├── indexer            → Indexer (Tantivy)
-//! │   ├── capture_handlers:  → [BrowserCaptureHandler, ClipboardHandler, …]
+//! │   ├── capture_handlers:  → [ClipboardHandler, ScreenshotHandler, …]
 //! │   ├── processors:        → [ContentClassifier, DuplicateDetector, …]
 //! │   ├── ai_providers:      → [future]
 //! │   ├── ocr_providers:     → [future]

@@ -524,10 +524,9 @@ fn parse_email_to_object(text: &str, request: &CaptureRequest) -> KnowledgeObjec
     object
 }
 
-///
-/// Captures a URL (text pasted into the command palette, browser extension
-/// "bookmark" button, etc.) as a [Bookmark] object. The title is extracted
-/// from the request or from the URL path by the metadata extractor downstream.
+/// Captures a URL (text pasted into the command palette, etc.) as a [Bookmark]
+/// object. The title is extracted from the request or from the URL path by the
+/// metadata extractor downstream.
 pub struct BookmarkCaptureHandler;
 
 #[async_trait]
@@ -570,8 +569,8 @@ impl CaptureHandler for BookmarkCaptureHandler {
 /// Marks a KnowledgeObject for the reading queue by setting the custom
 /// properties that the UI's `queue_get_all` command reads.
 ///
-/// Called by capture handlers that produce readable content (bookmarks,
-/// articles) so that newly-captured items appear in the Reading Queue with
+/// Called by capture handlers that produce readable content (bookmarks) so
+/// that newly-captured items appear in the Reading Queue with
 /// "pending" status — mirroring Karakeep's reading-list behaviour while
 /// staying within the existing CaptureEngine → ProcessingPipeline →
 /// Knowledge Inbox → Storage flow.
