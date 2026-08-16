@@ -43,7 +43,7 @@ use crate::rpc::{JsonRpcError, Router, RpcHandler};
 
 use crate::acp::error::AcpError;
 use crate::acp::handler::AcpHandler;
-use crate::acp::state::{ProtocolState, SessionEntry, SessionStatus};
+use crate::acp::state::{ProtocolState, ServerEntry, SessionStatus};
 use crate::acp::types::{
     decode_params, AgentCapabilities, CloseSessionRequest, CloseSessionResponse,
     InitializeRequest, InitializeResponse, LoadSessionRequest, LoadSessionResponse,
@@ -82,7 +82,7 @@ pub const METHOD_CLOSE_SESSION: &str = "session/close";
 /// ```
 pub struct AcpServer {
     protocol_state: RwLock<ProtocolState>,
-    sessions: RwLock<HashMap<SessionId, SessionEntry>>,
+    sessions: RwLock<HashMap<SessionId, ServerEntry>>,
     handler: Arc<dyn AcpHandler>,
     agent_capabilities: RwLock<AgentCapabilities>,
 }
@@ -213,7 +213,7 @@ impl AcpServer {
         let cwd = req.cwd.clone();
         let resp = self.handler.new_session(req).await?;
 
-        let entry = SessionEntry::new(cwd);
+        let entry = ServerEntry::new(cwd);
         self.sessions.write().await.insert(resp.session_id.clone(), entry);
 
         tracing::debug!(session_id = %resp.session_id, "ACP session created");
@@ -257,7 +257,7 @@ impl AcpServer {
 
         let resp = self.handler.load_session(req).await?;
 
-        let entry = SessionEntry::new(cwd);
+        let entry = ServerEntry::new(cwd);
         self.sessions.write().await.insert(session_id.clone(), entry);
 
         tracing::debug!(session_id = %session_id, "ACP session loaded");
@@ -306,7 +306,7 @@ impl AcpServer {
 
         let resp = self.handler.resume_session(req).await?;
 
-        let entry = SessionEntry::new(cwd);
+        let entry = ServerEntry::new(cwd);
         self.sessions.write().await.insert(session_id.clone(), entry);
 
         tracing::debug!(session_id = %session_id, "ACP session resumed");
