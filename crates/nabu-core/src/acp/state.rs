@@ -18,8 +18,9 @@
 //! None → Pending → Active → Closed
 //! ```
 
+use crate::acp::error::AcpError;
 use crate::acp::types::{ProtocolVersion, SessionId};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -250,9 +251,6 @@ impl ClientState {
 // each session (SessionStatus). The client-side state machine lives above
 // in ClientState / ConnectionState / SessionState.
 
-use chrono::DateTime;
-
-/// The protocol-level state of an ACP server connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ProtocolState {
     /// `initialize` has not yet been called.
@@ -319,14 +317,24 @@ impl SessionStatus {
     }
 }
 
+impl std::fmt::Display for SessionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Created => write!(f, "created"),
+            Self::Active => write!(f, "active"),
+            Self::Closed => write!(f, "closed"),
+        }
+    }
+}
+
 /// Server-side runtime record for a single ACP session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerEntry {
     pub session_id: SessionId,
     pub status: SessionStatus,
     pub cwd: String,
-    pub created_at: DateTime<Utc>,
-    pub last_activity: DateTime<Utc>,
+    pub created_at: chrono::DateTime<Utc>,
+    pub last_activity: chrono::DateTime<Utc>,
 }
 
 impl ServerEntry {

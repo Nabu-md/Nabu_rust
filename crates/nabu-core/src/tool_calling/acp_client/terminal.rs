@@ -24,17 +24,18 @@
 //! ## Lock ordering
 //!
 //! To prevent deadlocks, locks are always acquired in this order:
-//! 1. `child_mutex` (per-terminal) — acquired and released independently
-//! 2. `terminals` (global) — acquired and released independently
+//! 1. `child` mutex (per-terminal) — acquired and released independently
+//! 2. `terminals` mutex (global) — acquired and released independently
 //!
 //! The background task and kill handler never hold both locks simultaneously.
 
 use super::types::{
-    CreateTerminalRequest, CreateTerminalResponse, KillTerminalRequest, KillTerminalResponse,
-    ReleaseTerminalRequest, ReleaseTerminalResponse, TerminalOutputRequest, TerminalOutputResponse,
-    TerminalExitStatus, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+    CreateTerminalRequest, KillTerminalRequest, ReleaseTerminalRequest,
+    TerminalExitStatus, TerminalOutputRequest, TerminalOutputResponse,
+    WaitForTerminalExitRequest, WaitForTerminalExitResponse,
 };
-use crate::tool_calling::{Tool, ToolCall, ToolError, ToolId, ToolSpec, ToolParam, ToolParamSchema};
+use crate::acp::types::EnvVariable;
+use crate::tool_calling::{Tool, ToolCall, ToolError, ToolId, ToolParam, ToolParamSchema, ToolSpec};
 use crate::tool_calling::models::ToolResult;
 use serde_json::json;
 use std::collections::HashMap;
@@ -56,9 +57,8 @@ pub mod error_code {
 
 /// A running or completed terminal session.
 struct TerminalSession {
-    /// The child process handle, stored separately from the main session
-    /// so it can be taken out for killing/waiting without holding the
-    /// global terminals lock.
+    /// The child process handle, stored in a separate mutex so it can be
+    /// taken out for killing/waiting without holding the global terminals lock.
     child: Arc<Mutex<Option<Child>>>,
     /// The accumulated output buffer.
     output: String,
@@ -70,6 +70,29 @@ struct TerminalSession {
     output_byte_limit: Option<usize>,
     /// Notified when the process exits (for wait_for_exit coordination).
     exit_notify: Arc<Notify>,
+}
+
+impl TerminalSession {
+    /// Append output data, truncating from the beginning if over the byte limit.
+    fn append_output(&mut self, data: &str) {
+        if let Some(limit) = self.output_byte_limit {
+            let new_len = self.output.len() + data.len();
+            if new_len > limit {
+                let excess = new_len - limit;
+                let truncate_by = if excess >= self.output.len() {
+                    self.output.len()
+                } else {
+                    let mut idx = excess;
+                    while !self.output.is_char_boundary(idx) && idx > 0 {
+                        idx -= 1;
+                    }
+                    idx
+                };
+                self.output = self.output[truncate_by..].to_string();
+            }
+        }
+        self.output.push_str(data);
+    }
 }
 
 /// Registry of active terminal sessions.
@@ -171,18 +194,16 @@ impl TerminalTool {
 
     /// Spawn a child process and start the output-reading background task.
     ///
-    /// Takes stdout/stderr from the child and spawns a background task that
-    /// reads all output, waits for the child to exit, stores the exit status,
-    /// and notifies any `wait_for_exit` waiters.
-    fn spawn_terminal(
+    /// Returns the terminal ID.
+    async fn spawn_terminal(
         &self,
         command: &str,
         args: &[String],
         cwd: Option<&str>,
-        env: &[crate::acp::types::EnvVariable],
+        env: &[EnvVariable],
         output_byte_limit: Option<u64>,
     ) -> Result<String, ToolError> {
-        let mut cmd = Command::new(command);
+        let mut cmd = tokio::process::Command::new(command);
         cmd.args(args);
 
         if let Some(cwd_str) = cwd {
@@ -209,10 +230,9 @@ impl TerminalTool {
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
 
-        let child_mutex = Arc::new(Mutex::new(Some(child)));
-        let terminals = self.terminals.clone();
+        let child_mutex: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(Some(child)));
 
-        // Generate the terminal ID.
+        // Generate the terminal ID and store the session.
         let terminal_id = {
             let mut guard = self.terminals.lock().await;
             let session = TerminalSession {
@@ -229,7 +249,7 @@ impl TerminalTool {
         tracing::debug!(terminal_id = %terminal_id, "Terminal created");
 
         // Spawn background task for reading output and waiting for exit.
-        let terminals_for_bg = terminals.clone();
+        let terminals_for_bg = self.terminals.clone();
         let terminal_id_for_bg = terminal_id.clone();
         let child_mutex_for_bg = child_mutex.clone();
 
@@ -269,10 +289,17 @@ impl TerminalTool {
         });
 
         Ok(terminal_id)
+    }
 
-    /// Kill the child process for a terminal and wait for it to exit.
-    async fn kill_terminal(&self, terminal_id: &str) -> Result<Option<TerminalExitStatus>, ToolError> {
-        let (exit_status, notify) = {
+    /// Kill the child process for a terminal (without releasing it).
+    ///
+    /// Takes the child from the session mutex, kills it, waits for it to exit,
+    /// and stores the exit status. If the background task has already taken
+    /// the child (process already exited), waits for the exit notification
+    /// instead.
+    async fn kill_terminal(&self, terminal_id: &str) -> Result<TerminalExitStatus, ToolError> {
+        // Try to take the child from the session.
+        let child_opt = {
             let mut guard = self.terminals.lock().await;
             let session = guard.get_mut(terminal_id).ok_or_else(|| {
                 ToolError::new(
@@ -288,68 +315,80 @@ impl TerminalTool {
                 ));
             }
 
-            // Take the child out (for killing) — the bg task may have already taken it.
-            let child_opt = {
-                let mut child_guard = session.child.lock().await;
-                child_guard.take()
-            };
-
-            // If bg task already took it, it's already being processed.
-            // We can't kill it ourselves — let the bg task handle it.
-            // But we still need to wait for exit. Actually, if the bg task
-            // took the child, it's already calling wait(). We just need to
-            // wait for the notify.
-            if child_opt.is_none() {
-                // Child already taken by bg task — get notify and wait later.
-                let notify = session.exit_notify.clone();
-                (None, Some(notify))
-            } else {
-                let notify = session.exit_notify.clone();
-                (Some(child_opt), Some(notify))
+            // If exit status is already set, process already exited.
+            if let Some(ref status) = session.exit_status {
+                return Ok(status.clone());
             }
+
+            // Try to take the child.
+            let mut child_guard = session.child.lock().await;
+            child_guard.take()
         };
 
-        // Kill the child if we have it.
-        let exit_status = if let Some(mut child) = exit_status.unwrap_or(None) {
+        if let Some(mut child) = child_opt {
+            // We have the child — kill and wait.
             let kill_result = child.kill().await;
             let wait_result = child.wait().await;
-            match (kill_result, wait_result) {
-                (_, Ok(status)) => Some(TerminalExitStatus {
+
+            let exit_status = match (kill_result, wait_result) {
+                (Ok(()), Ok(status)) => TerminalExitStatus {
                     exit_code: status.code(),
                     signal: status.signal().map(|s| s.to_string()),
                     _meta: None,
-                }),
-                (Err(e), _) => return Err(ToolError::new(
-                    error_code::TERMINAL_KILL_FAILED,
-                    format!("failed to kill terminal: {}", e),
-                )),
-                (Ok(()), Err(e)) => return Err(ToolError::new(
-                    error_code::TERMINAL_KILL_FAILED,
-                    format!("failed to wait for terminal after kill: {}", e),
-                )),
-                _ => None,
+                },
+                (Err(e), _) => {
+                    return Err(ToolError::new(
+                        error_code::TERMINAL_KILL_FAILED,
+                        format!("failed to kill terminal: {}", e),
+                    ));
+                }
+                (Ok(()), Err(e)) => {
+                    return Err(ToolError::new(
+                        error_code::TERMINAL_KILL_FAILED,
+                        format!("failed to wait for terminal after kill: {}", e),
+                    ));
+                }
+            };
+
+            // Store the exit status.
+            {
+                let mut guard = self.terminals.lock().await;
+                if let Some(session) = guard.get_mut(terminal_id) {
+                    session.exit_status = Some(exit_status.clone());
+                    session.exit_notify.notify_waiters();
+                }
             }
+
+            Ok(exit_status)
         } else {
-            None
-        };
+            // Child was already taken by the background task. Wait for the
+            // exit notification.
+            let (notify, ) = {
+                let guard = self.terminals.lock().await;
+                let session = guard.get(terminal_id).ok_or_else(|| {
+                    ToolError::new(
+                        error_code::TERMINAL_NOT_FOUND,
+                        format!("terminal not found: {}", terminal_id),
+                    )
+                })?;
+                (session.exit_notify.clone(),)
+            };
 
-        // Notify waiters if we got an exit status.
-        if exit_status.is_some() {
-            let mut guard = self.terminals.lock().await;
-            if let Some(session) = guard.get_mut(terminal_id) {
-                session.exit_status = exit_status.clone();
-                session.exit_notify.notify_waiters();
-            }
-        } else if let Some(ref notify) = notify {
             notify.notified().await;
-            // After notify, check for exit status.
-            let guard = self.terminals.lock().await;
-            if let Some(session) = guard.get(terminal_id) {
-                return Ok(session.exit_status.clone());
-            }
-        }
 
-        Ok(exit_status)
+            // Get the exit status.
+            let guard = self.terminals.lock().await;
+            let session = guard.get(terminal_id).ok_or_else(|| {
+                ToolError::new(
+                    error_code::TERMINAL_NOT_FOUND,
+                    format!("terminal not found: {}", terminal_id),
+                )
+            })?;
+            session
+                .exit_status
+                .clone()
+                .ok_or_else(|| ToolError::new("TERMINAL_NO_EXIT_STATUS", "process exited but no status was recorded"))
+        }
     }
 
     /// Wait for a terminal to exit and return its exit status.
@@ -374,41 +413,34 @@ impl TerminalTool {
             if let Some(ref status) = session.exit_status {
                 return Ok(status.clone());
             }
-        }
 
-        // Wait for notification.
-        let (notify, ) = {
-            let mut guard = self.terminals.lock().await;
-            let session = guard.get_mut(terminal_id).ok_or_else(|| {
+            // Not yet exited — get the notify handle.
+            let notify = session.exit_notify.clone();
+            drop(guard);
+
+            // Wait for notification.
+            notify.notified().await;
+
+            // Get the exit status after notification.
+            let guard = self.terminals.lock().await;
+            let session = guard.get(terminal_id).ok_or_else(|| {
                 ToolError::new(
                     error_code::TERMINAL_NOT_FOUND,
                     format!("terminal not found: {}", terminal_id),
                 )
             })?;
-            let notify = session.exit_notify.clone();
-            drop(guard);
-            (notify,)
-        };
-
-        notify.notified().await;
-
-        // Get the exit status after notification.
-        let guard = self.terminals.lock().await;
-        let session = guard.get(terminal_id).ok_or_else(|| {
-            ToolError::new(
-                error_code::TERMINAL_NOT_FOUND,
-                format!("terminal not found: {}", terminal_id),
-            )
-        })?;
-        session
-            .exit_status
-            .clone()
-            .ok_or_else(|| ToolError::new("TERMINAL_WAIT_TIMEOUT", "process exited but no status"))
+            session.exit_status.clone().ok_or_else(|| {
+                ToolError::new(
+                    "TERMINAL_NO_EXIT_STATUS",
+                    "process exited but no status was recorded",
+                )
+            })
+        }
     }
 }
 
 /// Read all available data from a stream into the terminal's output buffer.
-async fn read_stream<R: AsyncRead + Unpin>(
+async fn read_stream<R: AsyncRead + Unpin + Send + 'static>(
     mut stream: Option<R>,
     terminals: &Arc<Mutex<ActiveTerminals>>,
     terminal_id: &str,
@@ -450,32 +482,6 @@ fn normalize_path(path: &Path) -> PathBuf {
 
     result.iter().collect()
 }
-
-impl TerminalSession {
-    /// Append output data, truncating from the beginning if over the byte limit.
-    fn append_output(&mut self, data: &str) {
-        if let Some(limit) = self.output_byte_limit {
-            let new_len = self.output.len() + data.len();
-            if new_len > limit {
-                let excess = new_len - limit;
-                let truncate_by = if excess >= self.output.len() {
-                    self.output.len()
-                } else {
-                    let mut idx = excess;
-                    while !self.output.is_char_boundary(idx) && idx > 0 {
-                        idx -= 1;
-                    }
-                    idx
-                };
-                self.output = self.output[truncate_by..].to_string();
-            }
-        }
-        self.output.push_str(data);
-    }
-}
-
-// Fix the read_stream function to accept the trait object properly.
-// ChildStdout and ChildStderr both implement AsyncRead, but we need a generic approach.
 
 #[async_trait::async_trait]
 impl Tool for TerminalTool {
@@ -538,9 +544,7 @@ impl Tool for TerminalTool {
                     req.cwd.as_deref(),
                     &req.env,
                     req.output_byte_limit,
-                )?;
-
-                tracing::debug!(terminal_id = %terminal_id, "Terminal created");
+                ).await?;
 
                 Ok(ToolResult::success(
                     Some(json!({ "terminal_id": terminal_id })),
@@ -778,6 +782,9 @@ mod tests {
             }),
         );
         tool.call(call).await.unwrap();
+
+        // Give the background task time to finish appending output.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // Read output.
         let call = ToolCall::with_args(

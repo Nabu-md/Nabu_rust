@@ -26,9 +26,17 @@ pub mod state;
 pub mod types;
 
 pub use error::AcpError;
-pub use handler::{AcpHandler, NoopHandler};
+pub use handler::{AcpClientHandler, NoopClientHandler};
+
+// Backwards-compatible aliases for the server-side handler names.
+pub trait AcpHandler: AcpClientHandler {}
+impl<T: AcpClientHandler + ?Sized> AcpHandler for T {}
+pub type NoopHandler = NoopClientHandler;
 pub use server::AcpServer;
-pub use state::{ProtocolState, SessionEntry, SessionStatus};
+pub use state::{
+    ClientState, ConnectionState, NegotiatedCapabilities, ProtocolState, ServerEntry,
+    SessionEntry, SessionState, SessionStatus,
+};
 
 // Re-export method constants.
 pub use server::{
@@ -36,14 +44,17 @@ pub use server::{
     METHOD_PROMPT, METHOD_RESUME_SESSION,
 };
 
+pub use types::decode_params;
+
 // Re-export key protocol types.
 pub use types::{
-    AgentAuthCapabilities, AgentCapabilities, ClientCapabilities, ClientSessionCapabilities,
-    CloseSessionRequest, CloseSessionResponse, ContentBlock, EnvVariable,
-    FileSystemCapabilities, HttpHeader, Implementation, InitializeRequest,
-    InitializeResponse, LoadSessionRequest, LoadSessionResponse, LogoutCapabilities,
-    McpCapabilities, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
-    NewSessionRequest, NewSessionResponse, PromptCapabilities, PromptRequest,
-    PromptResponse, ResumeSessionRequest, ResumeSessionResponse, Role, SessionId,
-    SessionListCapabilities, SessionResumeCapabilities, StopReason, SUPPORTED_PROTOCOL_VERSION,
+    AgentCapabilities, ClientCapabilities, ClientSessionCapabilities,
+    CloseSessionRequest, CloseSessionResponse, ContentBlock, Cost,
+    EnvVariable, FileSystemCapabilities, HttpHeader, Implementation,
+    InitializeRequest, InitializeResponse, LoadSessionRequest, LoadSessionResponse,
+    LogoutCapabilities, McpCapabilities, McpServer, McpServerHttp, McpServerSse,
+    McpServerStdio, NewSessionRequest, NewSessionResponse, PromptCapabilities,
+    PromptRequest, PromptResponse, ResumeSessionRequest, ResumeSessionResponse,
+    Role, SessionId, SessionListCapabilities, SessionResumeCapabilities,
+    StopReason, SUPPORTED_PROTOCOL_VERSION, UsageUpdate,
 };
