@@ -205,7 +205,7 @@ mod tests {
         impl ElicitationHandler for TestElicitationHandler {
             async fn request_elicitation(
                 &self,
-                _id: &str,
+                _id: &ElicitationId,
                 _msg: &str,
                 _schema: &types::ElicitationSchema,
             ) -> types::ElicitationOutcome {
@@ -222,7 +222,7 @@ mod tests {
                 _tool_call_id: &str,
                 _options: &[types::PermissionOption],
             ) -> types::RequestPermissionOutcome {
-                types::RequestPermissionOutcome::Cancelled
+                types::RequestPermissionOutcome::Cancelled { _meta: None }
             }
         }
 

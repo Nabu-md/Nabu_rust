@@ -335,7 +335,10 @@ pub async fn dispatch_agent_request<H: AcpClientHandler + ?Sized>(
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use crate::acp::types::{
+        METHOD_READ_TEXT_FILE, METHOD_REQUEST_PERMISSION, METHOD_WRITE_TEXT_FILE,
+    };
+    use std::sync::Arc;
     /// A handler that records calls for inspection in tests.
     struct RecordingHandler {
         read_file_calls: Arc<tokio::sync::Mutex<Vec<String>>>,
@@ -449,7 +452,4 @@ mod tests {
         let result = dispatch_agent_request(&handler, METHOD_READ_TEXT_FILE, &Some(params)).await;
         assert!(result.is_err());
     }
-
-    // Use Arc import from std for the RecordingHandler
-    use std::sync::Arc;
 }

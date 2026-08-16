@@ -228,7 +228,7 @@ mod tests {
     #[tokio::test]
     async fn permission_cancelled_returns_error() {
         let handler = Arc::new(MockPermissionHandler {
-            outcome: RequestPermissionOutcome::Cancelled,
+            outcome: RequestPermissionOutcome::Cancelled { _meta: None },
         });
         let tool = PermissionTool::new(handler);
 

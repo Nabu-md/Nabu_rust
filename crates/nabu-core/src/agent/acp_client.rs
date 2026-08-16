@@ -367,10 +367,9 @@ impl From<AcpClientError> for AgentManagerError {
 mod tests {
     use super::*;
     use crate::acp::types::*;
-    use crate::event_bus::{EventBus, PipelineEvent};
+    use crate::event_bus::EventBus;
     use crate::rpc::RequestId;
     use std::sync::Arc;
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::process::{Child, Command};
 
     /// A minimal mock ACP server: reads NDJSON requests, writes NDJSON responses.
@@ -429,41 +428,6 @@ for line in sys.stdin:
             .kill_on_drop(true)
             .spawn()
             .expect("failed to spawn mock agent");
-
-        let stdin = child.stdin.take().expect("child has no stdin");
-        let stdout = child.stdout.take().expect("child has no stdout");
-        let channel = StdioChannel::new(stdin, stdout);
-        (child, channel)
-    }
-
-    /// A mock server that reads requests and echoes back a configurable response,
-    /// used for testing notification handling and error responses.
-    async fn spawn_echo_agent(
-        response_fn: impl Fn(&str, &serde_json::Value) -> Option<serde_json::Value> + Send + 'static,
-        ) -> (Child, StdioChannel)
-    {
-        let script = r#"
-import sys, json
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    req = json.loads(line)
-    sys.stderr.write("recv: " + json.dumps(req) + "\n")
-    sys.stderr.flush()
-"#;
-        // We use a simple approach: read a line, parse it, and decide what to echo.
-        // This is done via a Python script that reads from a temp file for
-        // configuration. For simplicity, we use a basic echo approach.
-        let mut child = Command::new("python3")
-            .arg("-c")
-            .arg(script)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .expect("failed to spawn echo agent");
 
         let stdin = child.stdin.take().expect("child has no stdin");
         let stdout = child.stdout.take().expect("child has no stdout");
@@ -556,7 +520,7 @@ for line in sys.stdin:
         assert_eq!(client.session_id().await.as_deref(), Some("test-session-123"));
 
         // --- close ---
-        let close_resp = client.close().await
+        let _close_resp = client.close().await
             .expect("close should succeed");
         assert_eq!(client.session_id().await, None);
     }

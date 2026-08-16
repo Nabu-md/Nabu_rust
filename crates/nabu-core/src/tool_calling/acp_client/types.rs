@@ -704,7 +704,7 @@ mod tests {
         };
         let json = serde_json::to_string(&resp).unwrap();
         let back: RequestPermissionResponse = serde_json::from_str(&json).unwrap();
-        assert!(matches!(back.outcome, RequestPermissionOutcome::Cancelled));
+        assert!(matches!(back.outcome, RequestPermissionOutcome::Cancelled { .. }));
     }
 
     #[test]

@@ -166,6 +166,6 @@ mod tests {
             _meta: None,
         }];
         let outcome = handler.request_permission("sess_1", "tc_1", &options).await;
-        assert!(matches!(outcome, RequestPermissionOutcome::Cancelled));
+        assert!(matches!(outcome, RequestPermissionOutcome::Cancelled { .. }));
     }
 }

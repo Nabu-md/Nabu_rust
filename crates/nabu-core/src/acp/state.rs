@@ -184,7 +184,7 @@ impl ClientState {
     /// Returns an error if the session is unknown or already closed.
     pub fn activate_session(
         &mut self,
-        session_id: &SessionId,
+        session_id: &str,
     ) -> Result<(), crate::acp::error::AcpError> {
         let entry = self
             .sessions
@@ -199,30 +199,30 @@ impl ClientState {
         }
 
         entry.state = SessionState::Active;
-        self.active_session = Some(session_id.clone());
+        self.active_session = Some(session_id.to_string());
         Ok(())
     }
 
     /// Mark a session as `Closed`.
-    pub fn close_session(&mut self, session_id: &SessionId) {
+    pub fn close_session(&mut self, session_id: &str) {
         if let Some(entry) = self.sessions.get_mut(session_id) {
             entry.state = SessionState::Closed;
         }
-        if self.active_session.as_deref() == Some(session_id.as_str()) {
+        if self.active_session.as_deref() == Some(session_id) {
             self.active_session = None;
         }
     }
 
     /// Remove a session from the registry (e.g. after `session/delete`).
-    pub fn remove_session(&mut self, session_id: &SessionId) {
+    pub fn remove_session(&mut self, session_id: &str) {
         self.sessions.remove(session_id);
-        if self.active_session.as_deref() == Some(session_id.as_str()) {
+        if self.active_session.as_deref() == Some(session_id) {
             self.active_session = None;
         }
     }
 
     /// Returns `true` if the named session exists and is `Active`.
-    pub fn is_session_active(&self, session_id: &SessionId) -> bool {
+    pub fn is_session_active(&self, session_id: &str) -> bool {
         self.sessions
             .get(session_id)
             .map(|e| e.state == SessionState::Active)
