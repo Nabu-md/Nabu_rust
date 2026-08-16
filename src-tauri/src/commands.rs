@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
+use uuid::Uuid;
 
 use crate::settings::{AppSettings, SettingsStore};
 

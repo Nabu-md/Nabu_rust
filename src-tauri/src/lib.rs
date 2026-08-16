@@ -575,8 +575,14 @@ pub fn run() {
             crate::commands::thread_list,
             crate::commands::thread_delete,
             crate::commands::thread_update,
-            // Streaming IPC.
+             // Streaming IPC.
             crate::commands::stream_cancel,
+            // ACP session IPC.
+            crate::commands::acp_connect,
+            crate::commands::acp_send_message,
+            crate::commands::acp_cancel,
+            crate::commands::acp_disconnect,
+            crate::commands::acp_list_sessions,
         ])
         .setup(|app| {
             // ------------------------------------------------------------------
