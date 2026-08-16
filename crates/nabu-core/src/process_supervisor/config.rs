@@ -15,6 +15,35 @@ use serde::{Deserialize, Serialize};
 
 use super::policy::RestartPolicy;
 
+/// Controls how stdio (stdin/stdout/stderr) is configured when spawning a process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StdioMode {
+    /// Inherit the parent process's stdin/stdout/stderr.
+    ///
+    /// This is the default and is used for MCP servers and other daemon-style
+    /// processes where stdio is used for logging rather than IPC.
+    Inherit,
+    /// Pipe stdin/stdout/stderr so the caller can read and write them directly.
+    ///
+    /// Used for ACP agents and other JSON-RPC protocols that communicate
+    /// bidirectionally over stdin/stdout.
+    Piped,
+}
+
+impl Default for StdioMode {
+    fn default() -> Self {
+        Self::Inherit
+    }
+}
+
+impl StdioMode {
+    /// Returns `true` if this mode uses piped stdio.
+    pub fn is_piped(self) -> bool {
+        matches!(self, Self::Piped)
+    }
+}
+
 /// A unique, human-readable name for a process.
 ///
 /// Used in event payloads, log messages, and queries. Multiple processes
@@ -82,6 +111,14 @@ pub struct ProcessConfig {
     /// Defaults to `5_000` (5 seconds).
     #[serde(default = "default_grace_period_ms")]
     pub grace_period_ms: u64,
+
+    /// How stdio should be configured when spawning this process.
+    ///
+    /// Defaults to [`StdioMode::Inherit`] (the parent's stdio is inherited).
+    /// Use [`StdioMode::Piped`] for JSON-RPC agents that communicate over
+    /// stdin/stdout.
+    #[serde(default)]
+    pub stdio: StdioMode,
 }
 
 fn default_kill_on_shutdown() -> bool {
@@ -106,6 +143,7 @@ impl ProcessConfig {
             restart_policy: RestartPolicy::default(),
             kill_on_shutdown: true,
             grace_period_ms: 5_000,
+            stdio: StdioMode::default(),
         }
     }
 
@@ -175,6 +213,17 @@ impl ProcessConfig {
         self
     }
 
+    /// Set the stdio mode (`StdioMode::Inherit` or `StdioMode::Piped`).
+    pub fn with_stdio(mut self, stdio: StdioMode) -> Self {
+        self.stdio = stdio;
+        self
+    }
+
+    /// Convenience: configure this process to use piped stdio.
+    pub fn with_piped_stdio(self) -> Self {
+        self.with_stdio(StdioMode::Piped)
+    }
+
     /// Returns the full command line as a display string.
     pub fn command_line(&self) -> String {
         let mut parts = vec![self.command.clone()];
@@ -212,6 +261,21 @@ mod tests {
         assert_eq!(config.restart_policy, RestartPolicy::OnFailure);
         assert_eq!(config.kill_on_shutdown, true);
         assert_eq!(config.grace_period_ms, 5_000);
+        assert_eq!(config.stdio, StdioMode::Inherit);
+    }
+
+    #[test]
+    fn stdio_mode_defaults_to_inherit() {
+        let config = ProcessConfig::new("test", "echo");
+        assert_eq!(config.stdio, StdioMode::Inherit);
+        assert!(!config.stdio.is_piped());
+    }
+
+    #[test]
+    fn stdio_mode_piped() {
+        let config = ProcessConfig::new("test", "echo").with_piped_stdio();
+        assert_eq!(config.stdio, StdioMode::Piped);
+        assert!(config.stdio.is_piped());
     }
 
     #[test]

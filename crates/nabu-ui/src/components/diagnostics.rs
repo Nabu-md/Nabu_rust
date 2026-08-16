@@ -51,6 +51,7 @@ fn diagnostic_item(diag: &Diagnostic) -> Element {
     let source_str = diag.source.clone().unwrap_or_default();
     let cat_str = diag
         .category
+        .as_ref()
         .map(|c| format!("{:?}", c))
         .unwrap_or_default();
     let sev_class = severity_class(diag.severity);
@@ -130,19 +131,21 @@ fn format_range(range: &TextRange) -> String {
 #[component]
 pub fn DiagnosticsPanel(resource_id: String) -> Element {
     let toasts = use_toast();
-    let text = use_signal(String::new);
-    let origin = use_signal(|| "harper".to_string());
+    let mut text = use_signal(String::new);
+    let mut origin = use_signal(|| "harper".to_string());
     let response: Signal<Option<DiagnosticResponse>> = use_signal(|| None);
-    let loading = use_signal(|| false);
-    let error = use_signal(String::new);
+    let mut loading = use_signal(|| false);
+    let mut error = use_signal(String::new);
+
+    let resource_id_for_closure = resource_id.clone();
 
     let run_diagnostics = {
         let text_sig = text.clone();
         let origin_sig = origin.clone();
         let toasts_sig = toasts.clone();
-        let resp_sig = response.clone();
-        let loading_sig = loading.clone();
-        let error_sig = error.clone();
+        let mut resp_sig = response.clone();
+        let mut loading_sig = loading.clone();
+        let mut error_sig = error.clone();
         move |_: MouseEvent| {
             let text_val = text_sig.read().clone();
             let origin_val = origin_sig.read().clone();
@@ -162,9 +165,9 @@ pub fn DiagnosticsPanel(resource_id: String) -> Element {
                 match crate::ipc::tauri_invoke("diagnostic_requested", args).await {
                     Ok(result) => {
                         match serde_wasm_bindgen::from_value::<DiagnosticResponse>(result) {
-                            Ok(resp) => {
-                                resp_sig.set(Some(resp));
+                             Ok(resp) => {
                                 let count = resp.batch.diagnostic_count();
+                                resp_sig.set(Some(resp));
                                 toasts_sig.success(
                                     "Diagnostics complete",
                                     format!("Found {count} issue(s)."),
@@ -209,15 +212,15 @@ pub fn DiagnosticsPanel(resource_id: String) -> Element {
                         option { value: "plugin", "Plugin" }
                     }
                 }
-                div { class: "flex-1",
-                    label { class: "block text-sm text-gray-400 mb-1", "Resource ID" }
-                    input {
-                        class: "input w-full",
-                        r#type: "text",
-                        value: "{resource_id}",
-                        readonly: true,
-                    }
+            div { class: "flex-1",
+                label { class: "block text-sm text-gray-400 mb-1", "Resource ID" }
+                input {
+                    class: "input w-full",
+                    r#type: "text",
+                    value: "{resource_id_for_closure}",
+                    readonly: true,
                 }
+            }
             }
 
             label { class: "block text-sm text-gray-400 mb-1", "Text to analyze" }
@@ -235,7 +238,7 @@ pub fn DiagnosticsPanel(resource_id: String) -> Element {
                     on_click: run_diagnostics,
                     disabled: *loading.read(),
                     variant: ButtonVariant::Primary,
-                    {"{btn_label}"}
+                    "{btn_label}"
                 }
             }
 
@@ -244,7 +247,7 @@ pub fn DiagnosticsPanel(resource_id: String) -> Element {
             }
 
             if *loading.read() && error.read().is_empty() {
-                LoadingBlock { size: SpinnerSize::Md, label: Some("Analyzing...".to_string()) }
+                LoadingBlock { size: SpinnerSize::Md, label: Some("Analyzing...") }
             }
 
             if let Some(data) = &diag_data {

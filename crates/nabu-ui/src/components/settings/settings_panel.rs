@@ -313,7 +313,7 @@ fn open_file_import(settings: Signal<AppSettings>, toasts: ToastContext) {
     };
     input.set_type("file");
     input.set_accept(".json,application/json");
-    input.style().set_property("display", "none");
+    input.set_attribute("style", "display: none;");
 
     let input_for_closure = input.clone();
     let settings_copy = settings;
