@@ -1,284 +1,214 @@
-//! # ACP Error Types
+//! # ACP Client Error Types
 //!
-//! Structured error types for the ACP protocol layer. These errors capture
-//! protocol-level failures (invalid state, unknown sessions, malformed
-//! requests, unsupported operations, invalid transitions) and translate them
-//! into JSON-RPC error objects so they can be serialized through the existing
-//! [`crate::rpc`] infrastructure.
+//! Structured errors for the ACP client, covering protocol failures,
+//! transport errors, state-machine violations, and agent→client
+//! request dispatch errors.
 //!
-//! The ACP layer never uses `unwrap()` or `expect()` as control flow — every
-//! failure is a typed `AcpError` that is converted to a [`JsonRpcError`] when
-//! surfaced over the wire.
+//! All `AcpError` values are convertible into a JSON-RPC error response
+//! via [`AcpError::into_jsonrpc`] so that the client can communicate
+//! failures back to the agent when it is acting as a handler for
+//! agent-originated requests.
 
 use serde::Serialize;
-use std::fmt::{self, Display};
+use std::fmt;
 
-use crate::rpc::{ErrorCode, JsonRpcError};
-
-use super::state::SessionStatus;
-use super::types::SessionId;
-
-/// ACP-specific JSON-RPC error codes.
-///
-/// These occupy the server-error range reserved by JSON-RPC 2.0
-/// (`-32099` to `-32000`) so that ACP protocol failures are distinguishable
-/// on the wire from generic JSON-RPC errors.
-pub mod code {
-    /// Operation is invalid given the current protocol/session state.
-    pub const ACP_INVALID_STATE: i64 = -32000;
-    /// No session with the given ID is known to the server.
-    pub const ACP_UNKNOWN_SESSION: i64 = -32001;
-    /// A session-state transition was rejected by the state machine.
-    pub const ACP_INVALID_TRANSITION: i64 = -32002;
-    /// The requested operation is not advertised/supported by the agent.
-    pub const ACP_UNSUPPORTED_OPERATION: i64 = -32003;
-    /// Request parameters were malformed or could not be deserialized.
-    pub const ACP_MALFORMED_REQUEST: i64 = -32004;
-    /// The `AcpHandler` implementation returned an error.
-    pub const ACP_HANDLER_ERROR: i64 = -32005;
+/// A structured ACP client error.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcpError {
+    /// The error category, suitable for programmatic matching.
+    pub kind: ErrorKind,
+    /// Human-readable description of the error.
+    pub message: String,
+    /// Optional additional structured data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
 }
 
-/// Errors produced by the ACP protocol layer.
-///
-/// Every variant carries enough context to produce a meaningful JSON-RPC error
-/// response. The [`AcpError::into_jsonrpc_error`] method performs the
-/// conversion, preserving the ACP-specific code and embedding useful context
-/// in the `data` field.
-#[derive(Debug, Clone)]
-pub enum AcpError {
-    /// The operation is invalid given the current protocol or session state.
-    ///
-    /// Examples: calling `session/prompt` before `initialize`, or calling
-    /// `session/end` on an already-closed session.
-    InvalidState {
-        message: String,
-        /// The session ID involved, if any.
-        session_id: Option<SessionId>,
-    },
-
-    /// No session with the given ID is known.
-    UnknownSession { session_id: SessionId },
-
-    /// Request parameters were malformed, missing required fields, or could
-    /// not be deserialized into the typed request.
-    MalformedRequest { message: String },
-
-    /// The requested operation is not supported by the agent.
-    ///
-    /// Examples: `session/load` when the agent did not advertise
-    /// `loadSession`, or `session/end` when the agent did not advertise
-    /// `sessionCapabilities.close`.
-    UnsupportedOperation { message: String },
-
-    /// A state-machine transition was explicitly rejected.
-    ///
-    /// This is distinct from [`AcpError::InvalidState`]: this error carries
-    /// the current and attempted target state so callers and logs can report
-    /// exactly what transition was disallowed.
-    InvalidTransition {
-        current: SessionStatus,
-        target: &'static str,
-        message: String,
-    },
-
-    /// An underlying RPC, serialization, or I/O failure occurred.
-    RpcError { message: String },
-
-    /// The [`AcpHandler`](super::AcpHandler) returned an error.
-    HandlerError { message: String },
+/// Categories of ACP client errors.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorKind {
+    /// The transport (stdio pipe) was closed or produced an I/O error.
+    TransportClosed,
+    /// The agent sent a message that could not be parsed as JSON-RPC.
+    JsonRpcParseError,
+    /// The client sent a request in an invalid internal state.
+    InvalidState,
+    /// The protocol version negotiated does not match what the client supports.
+    ProtocolVersionMismatch,
+    /// The agent returned an error response to a request.
+    AgentError,
+    /// The agent's response was missing required fields or had wrong types.
+    MalformedResponse,
+    /// An incoming request/notification had invalid parameters.
+    MalformedRequest,
+    /// The client received an agent→client request for a method it does not
+    /// support.
+    UnsupportedOperation,
+    /// The client could not find a session with the given ID.
+    UnknownSession,
+    /// A pending request was cancelled (either by the client or the agent).
+    RequestCancelled,
+    /// A timeout occurred while waiting for a response.
+    Timeout,
+    /// The agent returned the `method not found` error.
+    MethodNotFound,
+    /// Invalid parameters were sent to an ACP method.
+    InvalidParams,
+    /// An internal error occurred in the ACP client logic.
+    Internal,
 }
 
 impl AcpError {
-    /// Returns the ACP-specific JSON-RPC error code for this error.
-    pub fn code(&self) -> i64 {
-        match self {
-            Self::InvalidState { .. } => code::ACP_INVALID_STATE,
-            Self::UnknownSession { .. } => code::ACP_UNKNOWN_SESSION,
-            Self::InvalidTransition { .. } => code::ACP_INVALID_TRANSITION,
-            Self::UnsupportedOperation { .. } => code::ACP_UNSUPPORTED_OPERATION,
-            Self::MalformedRequest { .. } => code::ACP_MALFORMED_REQUEST,
-            Self::RpcError { .. } => ErrorCode::InternalError.code(),
-            Self::HandlerError { .. } => code::ACP_HANDLER_ERROR,
+    /// Create a new `AcpError` with the given category and message.
+    pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            data: None,
         }
     }
 
-    /// Returns the human-readable message for this error.
-    pub fn message(&self) -> String {
-        match self {
-            Self::InvalidState { message, .. } => message.clone(),
-            Self::UnknownSession { session_id } => {
-                format!("Unknown session: {}", session_id)
-            }
-            Self::MalformedRequest { message } => message.clone(),
-            Self::UnsupportedOperation { message } => message.clone(),
-            Self::InvalidTransition { message, .. } => message.clone(),
-            Self::RpcError { message } => message.clone(),
-            Self::HandlerError { message } => message.clone(),
-        }
+    /// Attach additional structured data to the error.
+    pub fn with_data(mut self, data: serde_json::Value) -> Self {
+        self.data = Some(data);
+        self
     }
 
-    /// Returns structured context data for the JSON-RPC `data` field.
-    fn data(&self) -> Option<serde_json::Value> {
-        #[derive(Serialize)]
-        struct ErrorData {
-            kind: &'static str,
-            session_id: Option<SessionId>,
-            current: Option<String>,
-            target: Option<&'static str>,
-        }
+    /// Convenience: create an `InvalidState` error.
+    pub fn invalid_state(msg: impl Into<String>) -> Self {
+        Self::new(ErrorKind::InvalidState, msg)
+    }
 
-        let data = match self {
-            Self::InvalidState { session_id, .. } => ErrorData {
-                kind: "invalid_state",
-                session_id: session_id.clone(),
-                current: None,
-                target: None,
-            },
-            Self::UnknownSession { session_id } => ErrorData {
-                kind: "unknown_session",
-                session_id: Some(session_id.clone()),
-                current: None,
-                target: None,
-            },
-            Self::MalformedRequest { .. } => ErrorData {
-                kind: "malformed_request",
-                session_id: None,
-                current: None,
-                target: None,
-            },
-            Self::UnsupportedOperation { .. } => ErrorData {
-                kind: "unsupported_operation",
-                session_id: None,
-                current: None,
-                target: None,
-            },
-            Self::InvalidTransition { current, target, .. } => ErrorData {
-                kind: "invalid_transition",
-                session_id: None,
-                current: Some(current.to_string()),
-                target: Some(*target),
-            },
-            Self::RpcError { .. } => ErrorData {
-                kind: "rpc_error",
-                session_id: None,
-                current: None,
-                target: None,
-            },
-            Self::HandlerError { .. } => ErrorData {
-                kind: "handler_error",
-                session_id: None,
-                current: None,
-                target: None,
-            },
+    /// Convenience: create a `ProtocolVersionMismatch` error.
+    pub fn protocol_version_mismatch(
+        expected: crate::acp::types::ProtocolVersion,
+        actual: crate::acp::types::ProtocolVersion,
+    ) -> Self {
+        Self::new(
+            ErrorKind::ProtocolVersionMismatch,
+            format!(
+                "protocol version mismatch: client supports v{}, agent offers v{}",
+                expected, actual
+            ),
+        )
+        .with_data(serde_json::json!({
+            "expected": expected,
+            "actual": actual
+        }))
+    }
+
+    /// Convenience: create a `MalformedRequest` error.
+    pub fn malformed_request(msg: impl Into<String>) -> Self {
+        Self::new(ErrorKind::MalformedRequest, msg)
+    }
+
+    /// Convenience: create a `MalformedResponse` error.
+    pub fn malformed_response(msg: impl Into<String>) -> Self {
+        Self::new(ErrorKind::MalformedResponse, msg)
+    }
+
+    /// Convenience: create an `UnknownSession` error.
+    pub fn unknown_session(session_id: impl Into<String>) -> Self {
+        let sid = session_id.into();
+        Self::new(
+            ErrorKind::UnknownSession,
+            format!("unknown session: {}", sid),
+        )
+        .with_data(serde_json::json!({ "sessionId": sid }))
+    }
+
+    /// Convenience: create an `UnsupportedOperation` error.
+    pub fn unsupported_operation(method: impl Into<String>) -> Self {
+        let m = method.into();
+        Self::new(
+            ErrorKind::UnsupportedOperation,
+            format!("unsupported method: {}", m),
+        )
+        .with_data(serde_json::json!({ "method": m }))
+    }
+
+    /// Convenience: create a `RequestCancelled` error.
+    pub fn request_cancelled(msg: impl Into<String>) -> Self {
+        Self::new(ErrorKind::RequestCancelled, msg)
+    }
+
+    /// Convenience: create a `TransportClosed` error.
+    pub fn transport_closed(msg: impl Into<String>) -> Self {
+        Self::new(ErrorKind::TransportClosed, msg)
+    }
+
+    /// Convenience: create a `Timeout` error.
+    pub fn timeout(msg: impl Into<String>) -> Self {
+        Self::new(ErrorKind::Timeout, msg)
+    }
+
+    /// Convert this ACP error into a JSON-RPC error object, suitable for
+    /// responding to an agent-originated request with an error.
+    ///
+    /// The JSON-RPC error code is derived from the `ErrorKind`:
+    /// - `MethodNotFound` → `-32601`
+    /// - `InvalidParams` / `MalformedRequest` → `-32602`
+    /// - `Timeout` / `TransportClosed` → `-32000` (server error)
+    /// - Everything else → `-32000` (server error)
+    pub fn into_jsonrpc(self) -> crate::rpc::JsonRpcError {
+        let code = match self.kind {
+            ErrorKind::MethodNotFound => -32601,
+            ErrorKind::InvalidParams | ErrorKind::MalformedRequest => -32602,
+            _ => -32000,
         };
 
-        serde_json::to_value(data).ok()
-    }
-
-    /// Converts this ACP error into a [`JsonRpcError`] suitable for returning
-    /// from an [`crate::rpc::RpcHandler`] implementation.
-    pub fn into_jsonrpc_error(self) -> JsonRpcError {
-        let code = self.code();
-        let message = self.message();
-        let data = self.data();
-
-        JsonRpcError {
+        crate::rpc::JsonRpcError {
             code,
-            message,
-            data,
+            message: self.message,
+            data: self.data,
         }
     }
 }
 
-impl Display for AcpError {
+impl fmt::Display for AcpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "[{}] {}", self.code(), self.message())
+        write!(f, "{:?}: {}", self.kind, self.message)?;
+        if let Some(data) = &self.data {
+            write!(f, " ({})", data)?;
+        }
+        Ok(())
     }
 }
 
 impl std::error::Error for AcpError {}
 
-/// Convenience constructors mirroring the patterns used throughout the
-/// `rpc` module (e.g. [`JsonRpcError::invalid_params`]).
-impl AcpError {
-    /// Create an `InvalidState` error with no associated session.
-    pub fn invalid_state(message: impl Into<String>) -> Self {
-        Self::InvalidState {
-            message: message.into(),
-            session_id: None,
-        }
-    }
-
-    /// Create an `InvalidState` error associated with a session.
-    pub fn invalid_state_session(id: &str, message: impl Into<String>) -> Self {
-        Self::InvalidState {
-            message: message.into(),
-            session_id: Some(id.to_string()),
-        }
-    }
-
-    /// Create an `InvalidTransition` error.
-    pub fn invalid_transition(
-        current: SessionStatus,
-        target: &'static str,
-        message: impl Into<String>,
-    ) -> Self {
-        Self::InvalidTransition {
-            current,
-            target,
-            message: message.into(),
-        }
-    }
-
-    /// Create an `UnknownSession` error.
-    pub fn unknown_session(id: &str) -> Self {
-        Self::UnknownSession {
-            session_id: id.to_string(),
-        }
-    }
-
-    /// Create a `MalformedRequest` error.
-    pub fn malformed_request(message: impl Into<String>) -> Self {
-        Self::MalformedRequest {
-            message: message.into(),
-        }
-    }
-
-    /// Create an `UnsupportedOperation` error.
-    pub fn unsupported(message: impl Into<String>) -> Self {
-        Self::UnsupportedOperation {
-            message: message.into(),
-        }
-    }
-
-    /// Create a `HandlerError`.
-    pub fn handler_error(message: impl Into<String>) -> Self {
-        Self::HandlerError {
-            message: message.into(),
-        }
-    }
-
-    /// Create an `RpcError` from any serde_json error.
-    pub fn from_serde_json(err: serde_json::Error) -> Self {
-        Self::RpcError {
-            message: err.to_string(),
-        }
+impl From<crate::rpc::JsonRpcError> for AcpError {
+    fn from(e: crate::rpc::JsonRpcError) -> Self {
+        let kind = match e.code {
+            -32601 => ErrorKind::MethodNotFound,
+            -32602 => ErrorKind::InvalidParams,
+            -32603 | -32000 => ErrorKind::Internal,
+            _ => ErrorKind::AgentError,
+        };
+        Self::new(kind, e.message.clone())
+            .with_data(e.data.clone().unwrap_or(serde_json::Value::Null))
     }
 }
 
-// ---------------------------------------------------------------------------
-// From/Into conversions
-// ---------------------------------------------------------------------------
-
-impl From<AcpError> for JsonRpcError {
-    fn from(err: AcpError) -> Self {
-        err.into_jsonrpc_error()
+impl From<std::io::Error> for AcpError {
+    fn from(e: std::io::Error) -> Self {
+        // Distinguish a broken pipe (transport closed) from other I/O errors.
+        let kind = if e.kind() == std::io::ErrorKind::UnexpectedEof
+            || e.kind() == std::io::ErrorKind::BrokenPipe
+        {
+            ErrorKind::TransportClosed
+        } else {
+            ErrorKind::Internal
+        };
+        Self::new(kind, e.to_string())
     }
 }
 
 impl From<serde_json::Error> for AcpError {
-    fn from(err: serde_json::Error) -> Self {
-        Self::from_serde_json(err)
+    fn from(e: serde_json::Error) -> Self {
+        Self::new(ErrorKind::JsonRpcParseError, e.to_string())
     }
 }
 
@@ -291,75 +221,82 @@ mod tests {
     use super::*;
 
     #[test]
-    fn invalid_state_maps_to_acp_code() {
-        let err = AcpError::invalid_state("not initialized");
-        let rpc = err.into_jsonrpc_error();
-        assert_eq!(rpc.code, code::ACP_INVALID_STATE);
-        assert!(rpc.message.contains("not initialized"));
+    fn into_jsonrpc_maps_error_codes() {
+        let err = AcpError::new(ErrorKind::MethodNotFound, "method not found");
+        let rpc = err.into_jsonrpc();
+        assert_eq!(rpc.code, -32601);
+        assert_eq!(rpc.message, "method not found");
+
+        let err = AcpError::new(ErrorKind::InvalidParams, "bad params");
+        let rpc = err.into_jsonrpc();
+        assert_eq!(rpc.code, -32602);
+
+        let err = AcpError::new(ErrorKind::Timeout, "timed out");
+        let rpc = err.into_jsonrpc();
+        assert_eq!(rpc.code, -32000);
     }
 
     #[test]
-    fn unknown_session_includes_id_in_data() {
-        let err = AcpError::unknown_session("sess_123");
-        let rpc = err.into_jsonrpc_error();
-        assert_eq!(rpc.code, code::ACP_UNKNOWN_SESSION);
-        let data = rpc.data.unwrap();
-        assert_eq!(data["kind"], "unknown_session");
-        assert_eq!(data["session_id"], "sess_123");
+    fn protocol_version_mismatch_message() {
+        let err = AcpError::protocol_version_mismatch(1, 2);
+        assert!(err.message.contains("v1"));
+        assert!(err.message.contains("v2"));
+        assert_eq!(err.kind, ErrorKind::ProtocolVersionMismatch);
     }
 
     #[test]
-    fn malformed_request_uses_invalid_params_code() {
-        let err = AcpError::malformed_request("missing field `protocolVersion`");
-        let rpc = err.into_jsonrpc_error();
-        assert_eq!(rpc.code, code::ACP_MALFORMED_REQUEST);
-        assert!(rpc.message.contains("missing field"));
+    fn unknown_session_message() {
+        let err = AcpError::unknown_session("sess_abc");
+        assert!(err.message.contains("sess_abc"));
+        assert_eq!(err.kind, ErrorKind::UnknownSession);
     }
 
     #[test]
-    fn unsupported_operation_has_correct_code() {
-        let err = AcpError::unsupported("loadSession not advertised");
-        let rpc = err.into_jsonrpc_error();
-        assert_eq!(rpc.code, code::ACP_UNSUPPORTED_OPERATION);
+    fn unsupported_operation_message() {
+        let err = AcpError::unsupported_operation("fs/read_binary_file");
+        assert!(err.message.contains("fs/read_binary_file"));
+        assert_eq!(err.kind, ErrorKind::UnsupportedOperation);
     }
 
     #[test]
-    fn invalid_transition_carries_states_in_data() {
-        let err = AcpError::invalid_transition(
-            SessionStatus::Closed,
-            "prompt",
-            "cannot prompt a closed session",
-        );
-        let rpc = err.into_jsonrpc_error();
-        assert_eq!(rpc.code, code::ACP_INVALID_TRANSITION);
-        let data = rpc.data.unwrap();
-        assert_eq!(data["kind"], "invalid_transition");
-        assert_eq!(data["current"], "Closed");
-        assert_eq!(data["target"], "prompt");
-    }
-
-    #[test]
-    fn handler_error_carries_message() {
-        let err = AcpError::handler_error("agent crashed");
-        let rpc = err.into_jsonrpc_error();
-        assert_eq!(rpc.code, code::ACP_HANDLER_ERROR);
-        assert_eq!(rpc.message, "agent crashed");
-    }
-
-    #[test]
-    fn serde_error_converts_to_rpc_error() {
-        let json = "{ invalid }";
-        let result: Result<serde_json::Value, _> = serde_json::from_str(json);
-        let err = AcpError::from_serde_json(result.unwrap_err());
-        let rpc = err.into_jsonrpc_error();
-        assert_eq!(rpc.code, ErrorCode::InternalError.code());
-    }
-
-    #[test]
-    fn display_includes_code_and_message() {
-        let err = AcpError::invalid_state("test message");
+    fn display_includes_kind_and_message() {
+        let err = AcpError::new(ErrorKind::Timeout, "operation too slow");
         let s = format!("{}", err);
-        assert!(s.contains("-32000"));
-        assert!(s.contains("test message"));
+        assert!(s.contains("Timeout"));
+        assert!(s.contains("operation too slow"));
+    }
+
+    #[test]
+    fn from_io_error_transport_closed_on_eof() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "pipe closed");
+        let err: AcpError = io_err.into();
+        assert_eq!(err.kind, ErrorKind::TransportClosed);
+    }
+
+    #[test]
+    fn from_io_error_internal_on_other() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        let err: AcpError = io_err.into();
+        assert_eq!(err.kind, ErrorKind::Internal);
+    }
+
+    #[test]
+    fn from_jsonrpc_error_method_not_found() {
+        let rpc = crate::rpc::JsonRpcError {
+            code: -32601,
+            message: "method not found".to_string(),
+            data: None,
+        };
+        let err: AcpError = rpc.into();
+        assert_eq!(err.kind, ErrorKind::MethodNotFound);
+    }
+
+    #[test]
+    fn error_is_serializable() {
+        let err = AcpError::new(ErrorKind::Timeout, "timed out")
+            .with_data(serde_json::json!({"ms": 5000}));
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("timeout"));
+        assert!(json.contains("5000"));
     }
 }

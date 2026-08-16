@@ -894,7 +894,7 @@ pub struct Cost {
 }
 
 /// Context window and cost update for a session.
-#[derive(Debug, Clone, PartialEq Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageUpdate {
     pub used: u64,
