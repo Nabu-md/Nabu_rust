@@ -243,13 +243,15 @@ pub fn SmartFoldersPage() -> Element {
                     message: format!("Remove \"{}\"? This cannot be undone.", folder_name),
                     danger: true,
                     confirm_label: Some("Delete"),
-                    on_confirm: move |_: MouseEvent| {
+                    on_confirm: move |_: ()| {
                         let mut nv = nav;
                         remove_smart_folder(nv, &folder_id);
                         toasts.success("Smart folder deleted", "Removed from the backend.");
                     },
                 }
             }
+        } else {
+            rsx! {}
         }}
     }
 }
@@ -263,6 +265,7 @@ fn render_folder_row(
     mut confirm_target: Signal<Option<SmartFolder>>,
 ) -> Element {
     let f_clone = f.clone();
+    let delete_clone = f.clone();
     rsx! {
         div {
             class: "sf-item flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-800/50 border border-gray-700 text-sm group",
@@ -284,7 +287,7 @@ fn render_folder_row(
         button {
             class: "sf-delete rounded px-1.5 py-0.5 text-xs text-gray-400 hover:text-red-400",
             onclick: move |_: MouseEvent| {
-                confirm_target.set(Some(f_clone.clone()));
+                confirm_target.set(Some(delete_clone.clone()));
                 confirm_open.set(true);
             },
             title: "Delete smart folder",

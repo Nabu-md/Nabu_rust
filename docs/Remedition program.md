@@ -55,7 +55,7 @@ src-tauri (Tauri v2 shell)
    ├─ event_bridge (EventBus → "nabu-event" → frontend)  [WIRED]
    ├─ history.rs   (reversible FS ops + in-memory HistoryManager)
    ├─ recovery.rs  (versions/session/crash markers)
-   └─ native_messaging_socket (Unix socket server)
+    └─ ipc_socket (Unix socket server)
         ↓  (Rust calls / wasm-bindgen)
 nabu-ui (Dioxus 0.6 CSR)
    └─ components/{app,note_editor,file_tree,inbox,settings,templates,
@@ -590,19 +590,13 @@ For subphases in the same phase to truly run in parallel without colliding:
 - **Owns:** `processing/processors/ocr_processor.rs`, `pdf_*_processor.rs`, companion-note UI.
 - **Complexity:** medium.
 
-### 2B-3 · Native-messaging host — finish & package (browser-agnostic)
-- **What:** Fix the `captureType` (extension/JS) vs `capture_type` (Rust host) field mismatch so the web→host hop validates; auto-bundle the `native-messaging-host` binary into the app bundle instead of requiring a manual copy; document a single generic install path that works for Chrome/Chromium/Firefox.
-- **Why:** The host + socket server are genuinely real and wired; the hop is currently broken by the field mismatch and the binary isn't packaged.
-- **Owns:** `src-tauri/src/bin/native_messaging_host.rs`, `src-tauri/src/native_messaging.rs`, `src-tauri/src/native_messaging_socket.rs`, bundle config.
-- **Do not touch:** `extensions/**` (owned by 2B-4).
-- **Complexity:** small–medium.
+### 2B-3 · Browser extension host — REMOVED from MVP (see ADR 001)
+- **Status:** The browser-extension subsystem (host binary, socket server, browser extension source) has been removed from the Nabu MVP. See the ADR in `docs/adr/` for the removal decision and how to restore it.
+- **Was:** Fix the `captureType` (extension/JS) vs `capture_type` (Rust host) field mismatch so the web→host hop validates; auto-bundle the host binary into the app bundle instead of requiring a manual copy; document a single generic install path that works for Chrome/Chromium/Firefox.
 
-### 2B-4 · Remove Safari-specific drift
-- **What:** Delete Safari packaging artifacts (`extensions/safari/Info.plist`, `extensions/safari/native-messaging/com.nabu.capture.host.plist`); strip Safari install instructions from the extension README; rename `extensions/safari/` → `extensions/browser/` (it is a generic Manifest-V2 web extension, not Safari-specific code); update README/docs so the claim is "Browser extension (native messaging host)" with no Safari mention.
-- **Why:** Safari packaging is abandoned drift; the generic web-extension + host is what the product actually has.
-- **Owns:** `extensions/safari/**`, README/docs references.
-- **Do not touch:** `src-tauri/src/bin/native_messaging_host.rs`, `native_messaging*.rs` (owned by 2B-3).
-- **Complexity:** trivial–small.
+### 2B-4 · Safari packaging drift — REMOVED with the extension
+- **Status:** The Safari packaging artifacts under `extensions/safari/` have been removed along with the browser-extension subsystem. See ADR 001.
+- **Was:** Delete Safari packaging artifacts; strip Safari install instructions from the extension README; rename `extensions/safari/` → `extensions/browser/`.
 
 ### 2B-5 · Backend wiring for Section 2 (owns shared wiring)
 - **What:** Wire dictation, smart-folder, settings import/export/reset, and diagnostics (`diagnostic_requested`) commands; register anything new in `lib.rs`; remove the now-wired commands from the dead list.

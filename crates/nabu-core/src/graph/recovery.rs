@@ -4,8 +4,7 @@ use crate::graph::persistence::GraphStore;
 use crate::graph::serializer::{GraphSnapshot, SerializedEdge, SerializedNode};
 use crate::graph::version::{BuildSource, GraphVersion};
 use crate::graph::wikilink::{ResolutionIndex, content_as_str, parse_block_references, parse_wiki_links};
-use crate::models::{ObjectContent, ObjectMetadata, ProcessingState};
-use crate::models::KnowledgeObject;
+use crate::models::{KnowledgeObject, ObjectContent, ObjectMetadata};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 

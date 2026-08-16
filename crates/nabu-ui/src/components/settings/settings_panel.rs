@@ -286,7 +286,7 @@ fn download_json(filename: &str, content: &str) {
             }})()"#,
             href, filename
         );
-        let _ = window.eval(&script);
+        let _ = js_sys::eval(&script);
     }
 }
 
@@ -313,7 +313,7 @@ fn open_file_import(settings: Signal<AppSettings>, toasts: ToastContext) {
     };
     input.set_type("file");
     input.set_accept(".json,application/json");
-    input.set_style("display", "none");
+    input.style().set_property("display", "none");
 
     let input_for_closure = input.clone();
     let settings_copy = settings;
@@ -323,7 +323,7 @@ fn open_file_import(settings: Signal<AppSettings>, toasts: ToastContext) {
         if let Some(files) = input_for_closure.files() {
             if files.length() > 0 {
                 if let Some(file) = files.get(0) {
-                    let settings_s = settings_copy;
+                    let mut settings_s = settings_copy;
                     let toasts_s = toasts_copy;
                     spawn_local(async move {
                         match file.array_buffer().await {
@@ -461,7 +461,7 @@ pub fn SettingsPanel() -> Element {
             message: "This will restore all settings to their default values and cannot be undone. Continue?",
             confirm_label: "Reset",
             on_confirm: move |_| {
-                let settings_copy = settings;
+                let mut settings_copy = settings;
                 spawn_local(async move {
                     let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
                     if let Ok(result) = crate::ipc::tauri_invoke("settings_reset", args).await {
@@ -770,7 +770,7 @@ fn diagnostics_settings(_settings: Signal<AppSettings>) -> Element {
     }
 }
 
-fn advanced_settings(settings: Signal<AppSettings>, toasts: ToastContext, confirm_reset: Signal<bool>) -> Element {
+fn advanced_settings(settings: Signal<AppSettings>, toasts: ToastContext, mut confirm_reset: Signal<bool>) -> Element {
     rsx! {
         h2 { class: "text-xl font-bold mb-4", "Advanced" }
         div { class: "space-y-4" }

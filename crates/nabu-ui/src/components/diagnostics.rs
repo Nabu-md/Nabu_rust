@@ -20,7 +20,7 @@ use nabu_core::diagnostic::{
 /// Mirrors the backend `DiagnosticResponse` (commands.rs).
 /// The batch + style map are deserialized from the IPC result so the UI can
 /// render severity-resolved styles without a second round-trip.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct DiagnosticResponse {
     batch: DiagnosticBatch,
     #[allow(dead_code)]
@@ -35,6 +35,7 @@ fn severity_class(sev: DiagnosticSeverity) -> &'static str {
         DiagnosticSeverity::Warning => "text-amber-400",
         DiagnosticSeverity::Error => "text-red-400",
         DiagnosticSeverity::Critical => "text-red-600 font-bold",
+        _ => "text-gray-400",
     }
 }
 
@@ -75,7 +76,7 @@ fn diagnostic_item(diag: &Diagnostic) -> Element {
             if !diag.suggestions.is_empty() {
                 ul { class: "mt-2 space-y-1",
                     for sug in &diag.suggestions {
-                        suggestion_item(sug)
+                        {suggestion_item(sug)}
                     }
                 }
             }
@@ -239,11 +240,11 @@ pub fn DiagnosticsPanel(resource_id: String) -> Element {
             }
 
             if !error.read().is_empty() {
-                ErrorPanel { message: "{error.read()}" }
+                ErrorPanel { title: "Diagnostics Error".to_string(), message: "{error.read()}" }
             }
 
             if *loading.read() && error.read().is_empty() {
-                LoadingBlock { spinner: SpinnerSize::Md, label: Some("Analyzing...".to_string()) }
+                LoadingBlock { size: SpinnerSize::Md, label: Some("Analyzing...".to_string()) }
             }
 
             if let Some(data) = &diag_data {
@@ -300,34 +301,38 @@ fn render_diagnostic_batch(data: &DiagnosticResponse) -> Element {
 
             div { class: "flex flex-wrap gap-2 mb-4",
                 for sev in DiagnosticSeverity::ALL {
-                    let count = *counts.get(&sev).unwrap_or(&0);
-                    let cls = severity_class(*sev);
-                    let lbl = severity_label(*sev);
-                    rsx! {
-                        span { class: "px-2 py-1 bg-gray-800 rounded text-xs",
-                            span { class: "{cls}", "{lbl}" }
-                            span { class: "text-gray-500 ml-1", "({count})" }
+                    {
+                        let count = *counts.get(&sev).unwrap_or(&0);
+                        let cls = severity_class(*sev);
+                        let lbl = severity_label(*sev);
+                        rsx! {
+                            span { class: "px-2 py-1 bg-gray-800 rounded text-xs",
+                                span { class: "{cls}", "{lbl}" }
+                                span { class: "text-gray-500 ml-1", "({count})" }
+                            }
                         }
                     }
                 }
             }
 
             for (sev, group) in &groups {
-                let cls = severity_class(*sev);
-                let lbl = severity_label(*sev);
-                let count = group.len();
-                rsx! {
-                    div { class: "mb-4",
-                        h4 { class: "{cls} text-md font-medium mb-2",
-                            "{lbl} ({count})"
+                {
+                    let cls = severity_class(*sev);
+                    let lbl = severity_label(*sev);
+                    let count = group.len();
+                    rsx! {
+                        div { class: "mb-4",
+                            h4 { class: "{cls} text-md font-medium mb-2",
+                                "{lbl} ({count})"
+                            }
+                            ul { class: "space-y-2",
+                                for diag in group {
+                                    {diagnostic_item(*diag)}
+                                }
+                            }
                         }
-                        ul { class: "space-y-2",
-                            for diag in group {
-                                diagnostic_item(*diag)
                     }
-            }
-    }
-}
+                }
             }
         }
     }
