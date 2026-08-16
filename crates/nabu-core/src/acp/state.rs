@@ -19,6 +19,7 @@
 //! ```
 
 use crate::acp::types::{ProtocolVersion, SessionId};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -237,6 +238,111 @@ impl ClientState {
                 "connection not initialized; call initialize() first",
             )
         })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Server-side state (used by AcpServer)
+// ---------------------------------------------------------------------------
+//
+// These types track the server-side view of an ACP connection: whether
+// `initialize` has been called (ProtocolState) and the lifecycle status of
+// each session (SessionStatus). The client-side state machine lives above
+// in ClientState / ConnectionState / SessionState.
+
+use chrono::DateTime;
+
+/// The protocol-level state of an ACP server connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ProtocolState {
+    /// `initialize` has not yet been called.
+    #[default]
+    Uninitialized,
+    /// `initialize` has completed successfully.
+    Initialized,
+}
+
+impl ProtocolState {
+    /// Returns `true` if the protocol has been initialized.
+    pub fn is_initialized(&self) -> bool {
+        matches!(self, Self::Initialized)
+    }
+
+    /// Attempts to transition to [`Initialized`].
+    pub fn initialize(self) -> Result<Self, AcpError> {
+        match self {
+            Self::Uninitialized => Ok(Self::Initialized),
+            Self::Initialized => Err(AcpError::invalid_state(
+                "ACP protocol is already initialized",
+            )),
+        }
+    }
+}
+
+/// The lifecycle status of a single ACP session (server-side view).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SessionStatus {
+    /// The session exists but no prompt has been processed yet.
+    #[default]
+    Created,
+    /// A prompt turn is in progress.
+    Active,
+    /// The session has been closed.
+    Closed,
+}
+
+impl SessionStatus {
+    /// Returns `true` if the session can accept `session/prompt`.
+    pub fn accepts_prompt(&self) -> bool {
+        matches!(self, Self::Created | Self::Active)
+    }
+
+    /// Returns `true` if the session can be closed.
+    pub fn can_end(&self) -> bool {
+        matches!(self, Self::Created | Self::Active)
+    }
+
+    /// Transition to [`Active`] (after a prompt).
+    pub fn after_prompt(self) -> Result<Self, AcpError> {
+        match self {
+            Self::Created | Self::Active => Ok(Self::Active),
+            Self::Closed => Err(AcpError::invalid_state("session is closed")),
+        }
+    }
+
+    /// Transition to [`Closed`] (after `session/close`).
+    pub fn after_end(self) -> Result<Self, AcpError> {
+        match self {
+            Self::Created | Self::Active => Ok(Self::Closed),
+            Self::Closed => Err(AcpError::invalid_state("session is already closed")),
+        }
+    }
+}
+
+/// Server-side runtime record for a single ACP session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerEntry {
+    pub session_id: SessionId,
+    pub status: SessionStatus,
+    pub cwd: String,
+    pub created_at: DateTime<Utc>,
+    pub last_activity: DateTime<Utc>,
+}
+
+impl ServerEntry {
+    pub fn new(cwd: String) -> Self {
+        let now = Utc::now();
+        Self {
+            session_id: String::new(),
+            status: SessionStatus::Created,
+            cwd,
+            created_at: now,
+            last_activity: now,
+        }
+    }
+
+    pub fn touch(&mut self) {
+        self.last_activity = Utc::now();
     }
 }
 
