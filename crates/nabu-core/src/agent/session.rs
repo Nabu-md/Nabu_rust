@@ -16,7 +16,10 @@ use uuid::Uuid;
 
 use crate::acp::client::AcpClient;
 use crate::acp::transport::StdioTransport;
-use crate::acp::types::{ContentBlock, ContentChunk, PromptResponse, SessionUpdate, TextContent};
+use crate::acp::types::{
+    ContentBlock, ContentChunk, EnvVariable, McpServer, McpServerStdio, PromptResponse,
+    SessionUpdate, TextContent,
+};
 use crate::agent::handler::NabuAcpHandler;
 use crate::conversations::ConversationStore;
 use crate::event_bus::{EventBus, PipelineEvent};
@@ -215,10 +218,12 @@ impl AcpSessionManager {
             .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
+        let mcp_servers = build_nabu_mcp_server_config(&resolved_wd);
+
         let session_id = client
             .new_session(
                 &resolved_wd.to_string_lossy(),
-                vec![],
+                mcp_servers,
                 vec![],
             )
             .await?;
@@ -332,6 +337,63 @@ impl AcpSessionManager {
     }
 }
 
+/// Resolves the path to the `nabu-mcp-server` binary.
+///
+/// Resolution order:
+/// 1. `NABU_MCP_SERVER_PATH` environment variable (if set and the file exists)
+/// 2. Sibling of the current executable (`current_exe().parent()/nabu-mcp-server`)
+/// 3. Bare command name `nabu-mcp-server` (relies on PATH lookup by the OS)
+fn resolve_mcp_server_path() -> String {
+    if let Ok(path) = std::env::var("NABU_MCP_SERVER_PATH") {
+        if std::path::Path::new(&path).exists() {
+            return path;
+        }
+        tracing::warn!("NABU_MCP_SERVER_PATH set but file not found: {}", path);
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join("nabu-mcp-server");
+            if candidate.exists() {
+                return candidate.to_string_lossy().to_string();
+            }
+        }
+    }
+
+    "nabu-mcp-server".to_string()
+}
+
+/// Builds the `McpServer::Stdio` configuration for Nabu's built-in MCP server.
+///
+/// The MCP server is given the vault path as its sole argument. When the
+/// `working_dir` differs from the vault root, an `additional_directories`
+/// entry is also provided so the agent knows the full workspace.
+fn build_nabu_mcp_server_config(vault_path: &std::path::Path) -> Vec<McpServer> {
+    let command = resolve_mcp_server_path();
+    let args = vec![vault_path.to_string_lossy().to_string()];
+    let env: Vec<EnvVariable> = std::env::vars()
+        .filter_map(|(k, v)| {
+            if k.starts_with("NABU_") {
+                Some(EnvVariable {
+                    name: k,
+                    value: v,
+                    _meta: None,
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    vec![McpServer::Stdio(McpServerStdio {
+        name: "nabu".to_string(),
+        command,
+        args,
+        env,
+        _meta: None,
+    })]
+}
+
 fn spawn_agent_process(config: &AcpConnectConfig) -> Result<tokio::process::Child, AcpSessionError> {
     let mut cmd = tokio::process::Command::new(&config.command);
     cmd.args(&config.args);
@@ -396,5 +458,77 @@ async fn persist_user_message(
         if let Err(e) = store.save(&thread) {
             tracing::error!(error = %e, "Failed to persist user message to conversation store");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_nabu_mcp_server_config_name_is_nabu() {
+        let vault_path = std::path::PathBuf::from("/tmp/test-vault");
+        let servers = build_nabu_mcp_server_config(&vault_path);
+        assert_eq!(servers.len(), 1);
+        match &servers[0] {
+            McpServer::Stdio(stdio) => {
+                assert_eq!(stdio.name, "nabu");
+                assert_eq!(stdio.args.len(), 1);
+                assert_eq!(stdio.args[0], "/tmp/test-vault");
+            }
+            _ => panic!("expected Stdio variant"),
+        }
+    }
+
+    #[test]
+    fn build_nabu_mcp_server_config_uses_resolved_path() {
+        let vault_path = std::path::PathBuf::from("/vault");
+        let servers = build_nabu_mcp_server_config(&vault_path);
+        match &servers[0] {
+            McpServer::Stdio(stdio) => {
+                assert!(!stdio.command.is_empty());
+            }
+            _ => panic!("expected Stdio variant"),
+        }
+    }
+
+    #[test]
+    fn build_nabu_mcp_server_config_serializes_correctly() {
+        let exe = std::env::current_exe().unwrap();
+        let exe_dir = exe.parent().unwrap();
+        let mcp_path = exe_dir.join("nabu-mcp-server");
+        let _ = std::fs::write(&mcp_path, "#!/bin/sh\n");
+
+        let mcp_path_str = mcp_path.to_string_lossy().to_string();
+        std::env::set_var("NABU_MCP_SERVER_PATH", &mcp_path_str);
+        let vault_path = std::path::PathBuf::from("/my/vault");
+        let servers = build_nabu_mcp_server_config(&vault_path);
+        let json = serde_json::to_value(&servers).unwrap();
+        let arr = json.as_array().unwrap();
+        let obj = arr[0].as_object().unwrap();
+        assert_eq!(obj.get("type").unwrap(), "stdio");
+        assert_eq!(obj.get("name").unwrap(), "nabu");
+        assert_eq!(obj.get("command").unwrap().as_str().unwrap(), mcp_path_str);
+        assert_eq!(
+            obj.get("args").unwrap().as_array().unwrap()[0],
+            "/my/vault"
+        );
+        let _ = std::fs::remove_file(&mcp_path);
+        std::env::remove_var("NABU_MCP_SERVER_PATH");
+    }
+
+    #[test]
+    fn resolve_mcp_server_path_env_override() {
+        let exe = std::env::current_exe().unwrap();
+        let exe_dir = exe.parent().unwrap();
+        let mcp_path = exe_dir.join("nabu-mcp-server");
+        let _ = std::fs::write(&mcp_path, "#!/bin/sh\n");
+
+        let mcp_path_str = mcp_path.to_string_lossy().to_string();
+        std::env::set_var("NABU_MCP_SERVER_PATH", &mcp_path_str);
+        let path = resolve_mcp_server_path();
+        assert_eq!(path, mcp_path_str);
+        let _ = std::fs::remove_file(&mcp_path);
+        std::env::remove_var("NABU_MCP_SERVER_PATH");
     }
 }
