@@ -41,9 +41,10 @@ use crate::{AgentManagerError, AgentResult};
 use crate::rpc::{JSON_RPC_VERSION, Request, RequestId, Response};
 use crate::acp::types::{
     CloseSessionRequest, CloseSessionResponse, InitializeRequest, InitializeResponse,
+    METHOD_CLOSE_SESSION, METHOD_INITIALIZE, METHOD_NEW_SESSION, METHOD_PROMPT,
     NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
+    SUPPORTED_PROTOCOL_VERSION,
 };
-use crate::acp::server::{METHOD_CLOSE_SESSION, METHOD_INITIALIZE, METHOD_NEW_SESSION, METHOD_PROMPT};
 use crate::streaming::StreamingPipeline;
 
 /// A pending JSON-RPC request awaiting its response.
