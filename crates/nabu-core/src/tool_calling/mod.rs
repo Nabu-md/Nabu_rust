@@ -72,6 +72,16 @@ pub mod models;
 pub mod registry;
 pub mod tool;
 
+/// ACP client-side capability tools.
+///
+/// This submodule provides `Tool` implementations for the ACP protocol's
+/// client-side methods (file-system, terminal, elicitation, permissions).
+/// These tools are registered with the [`ToolRegistry`] and can be dispatched
+/// through the JSON-RPC router when an ACP agent sends requests to Nabu.
+///
+/// See [`acp_client`] for details.
+pub mod acp_client;
+
 pub use models::{
     ToolCall, ToolError, ToolExecutionMeta, ToolId, ToolParam, ToolParamSchema, ToolResult,
     ToolResultStatus, ToolSpec,

@@ -42,7 +42,7 @@ use tokio::sync::RwLock;
 use crate::rpc::{JsonRpcError, Router, RpcHandler};
 
 use crate::acp::error::AcpError;
-use crate::acp::handler::AcpHandler;
+use crate::acp::AcpHandler;
 use crate::acp::state::{ProtocolState, ServerEntry, SessionStatus};
 use crate::acp::types::{
     decode_params, AgentCapabilities, CloseSessionRequest, CloseSessionResponse,

@@ -63,7 +63,7 @@ use crate::acp::types::{
     SUPPORTED_PROTOCOL_VERSION,
 };
 use crate::event_bus::{EventBus, PipelineEvent};
-use crate::process_supervisor::{ProcessConfig, ProcessId, ProcessState, ProcessSupervisor, StdioMode};
+use crate::process_supervisor::{ProcessConfig, ProcessId, ProcessState, ProcessSupervisor};
 use crate::registry::lifecycle::{
     Lifecycle, LifecycleManager, LifecycleStage,
 };
@@ -442,8 +442,8 @@ impl AgentManager {
             .ok_or_else(|| AgentManagerError::Acp("child has no stdout".into()))?;
 
         tokio::spawn(async move {
-            let _child = spawned.child;
-            let _ = _child.wait().await;
+            let mut child = spawned.child;
+            let _ = child.wait().await;
         });
 
         let channel = StdioChannel::new(stdin, stdout);

@@ -1,185 +1,321 @@
-//! # ACP Handler Abstraction
+//! # ACP Client Handler — Agent→Client Request Dispatch
 //!
-//! The [`AcpHandler`] trait is the **delegation boundary** between the ACP
-//! protocol layer (this module) and the agent runtime. The protocol layer
-//! owns session state, validates lifecycle transitions, and serializes
-//! requests/responses over JSON-RPC. The handler owns the *actual* work:
-//! spawning agent processes, connecting to MCP servers, streaming tokens, etc.
+//! When the ACP agent sends a request to Nabu (the client) for a capability
+//! Nabu advertised, the client must dispatch it through a handler trait that
+//! is implemented by the application layer (Phase 3c / Phase 3d).
 //!
-//! This module defines **only** the trait. Concrete implementations live in
-//! the integration layer (Phase 3d+). The protocol layer never imports
-//! [`crate::agent::AgentManager`] or
-//! [`crate::process_supervisor::ProcessSupervisor`].
-
-use async_trait::async_trait;
+//! The handler is the **boundary** between the ACP protocol layer and
+//! Nabu's application logic. The protocol layer knows *that* a request
+//! arrived; the handler knows *what to do* about it.
+//!
+//! ## Agent→client methods
+//!
+//! | Method                    | Handler trait method        |
+//! |---------------------------|-----------------------------|
+//! | `fs/read_text_file`       | `read_text_file`            |
+//! | `fs/write_text_file`      | `write_text_file`           |
+//! | `session/request_permission` | `request_permission`    |
+//! | `terminal/create`         | `terminal_create` (future) |
+//! | `terminal/output`         | `terminal_output` (future)|
+//! | `terminal/release`        | `terminal_release` (future)|
+//! | `terminal/wait_for_exit`  | `terminal_wait_for_exit` (future)|
+//! | `terminal/kill`           | `terminal_kill` (future) |
+//! | `elicitation/create`      | `elicitation_create` (future)|
+//!
+//! Terminal and elicitation methods are included as `#[default]` trait
+//! methods that return an error, so the trait is forward-compatible.
+//! Individual method support is determined by what Nabu advertises in its
+//! `ClientCapabilities` during `initialize`.
 
 use crate::acp::error::AcpError;
 use crate::acp::types::{
-    CloseSessionRequest, CloseSessionResponse, InitializeRequest, InitializeResponse,
-    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse,
-    PromptRequest, PromptResponse, ResumeSessionRequest, ResumeSessionResponse,
+    PermissionOption, PermissionOutcome, ReadTextFileRequest, ReadTextFileResponse,
+    RequestPermissionRequest, SelectedPermissionOutcome, WriteTextFileRequest,
+    WriteTextFileResponse,
 };
 
-/// Handler trait for delegating ACP protocol operations to the agent runtime.
+/// Trait for handling agent→client requests dispatched by the ACP client.
 ///
-/// Implementors of this trait are responsible for the *actual* work behind
-/// each ACP method — process management, MCP connections, LLM calls, etc.
-/// The [`crate::acp::AcpServer`] validates protocol state and lifecycle
-/// transitions before delegating to these methods.
+/// The implementor decides what action to take for each request.
+/// The ACP client calls these methods when it receives an agent-originated
+/// request and automatically wraps the result (or error) back into a
+/// JSON-RPC response sent to the agent.
 ///
-/// ## Threading
-///
-/// Implementations must be `Send + Sync` because the server may be shared
-/// across threads (e.g. registered on the JSON-RPC [`crate::rpc::Router`]).
-///
-/// ## Error handling
-///
-/// Handlers should return [`AcpError`] values for protocol-level failures
-/// (unknown session, unsupported operation) and for runtime failures. The
-/// server converts these into JSON-RPC error responses. Handlers should **not**
-/// panic — use `Result` instead.
-#[async_trait]
-pub trait AcpHandler: Send + Sync {
-    /// Handle the `initialize` method.
-    ///
-    /// Called once at the start of a connection to negotiate the protocol
-    /// version and capabilities. The handler should return its supported
-    /// protocol version (which may be lower than the requested version) and
-    /// the capabilities it advertises.
-    async fn initialize(
+/// All methods except `read_text_file`, `write_text_file`, and
+/// `request_permission` have default implementations that return
+/// `METHOD_NOT_FOUND`, so the trait is forward-compatible with future
+/// ACP methods.
+pub trait AcpClientHandler: Send + Sync {
+    /// Handle `fs/read_text_file` — return the contents of the requested file.
+    fn read_text_file(
         &self,
-        request: InitializeRequest,
-    ) -> Result<InitializeResponse, AcpError>;
+        request: &ReadTextFileRequest,
+    ) -> impl std::future::Future<Output = Result<ReadTextFileResponse, AcpError>> + Send;
 
-    /// Handle the `session/new` method.
-    ///
-    /// Create a new conversation session. The handler is responsible for
-    /// setting up any required state (spawning a process, connecting to MCP
-    /// servers, etc.) and returning a unique session ID.
-    async fn new_session(
+    /// Handle `fs/write_text_file` — write content to the requested path.
+    fn write_text_file(
         &self,
-        request: NewSessionRequest,
-    ) -> Result<NewSessionResponse, AcpError>;
+        request: &WriteTextFileRequest,
+    ) -> impl std::future::Future<Output = Result<WriteTextFileResponse, AcpError>> + Send;
 
-    /// Handle the `session/load` method.
-    ///
-    /// Load a previously persisted session (identified by `session_id`) and
-    /// restore its state. The handler is responsible for reconnecting to MCP
-    /// servers and replaying any necessary history.
-    async fn load_session(
+    /// Handle `session/request_permission` — present options to the user and
+    /// return the selected outcome (or cancellation).
+    fn request_permission(
         &self,
-        request: LoadSessionRequest,
-    ) -> Result<LoadSessionResponse, AcpError>;
+        request: &RequestPermissionRequest,
+    ) -> impl std::future::Future<Output = Result<PermissionOutcome, AcpError>> + Send;
 
-    /// Handle the `session/prompt` method.
-    ///
-    /// Process a user prompt within an existing session. The handler is
-    /// responsible for invoking the agent, streaming output (via
-    /// `session/update` notifications in Phase 3b), and returning the final
-    /// stop reason.
-    ///
-    /// The server guarantees that the session exists and is in a state that
-    /// accepts prompts before calling this method.
-    async fn prompt(
-        &self,
-        request: PromptRequest,
-    ) -> Result<PromptResponse, AcpError>;
+    // -----------------------------------------------------------------------
+    // Terminal methods — default implementations return METHOD_NOT_FOUND.
+    // Available when the client advertises `terminal: true`.
+    // -----------------------------------------------------------------------
 
-    /// Handle the `session/resume` method.
+    /// Handle `terminal/create` — create a new terminal session.
     ///
-    /// Resume an existing session without replaying conversation history.
-    /// The handler is responsible for restoring session context and reconnecting
-    /// to MCP servers. Only called if the agent advertises
-    /// `sessionCapabilities.resume`.
-    async fn resume_session(
+    /// Default: returns an error. Override when terminal capability is
+    /// supported.
+    fn terminal_create(
         &self,
-        request: ResumeSessionRequest,
-    ) -> Result<ResumeSessionResponse, AcpError>;
+        _session_id: &str,
+        _terminal_id: &str,
+        _cwd: Option<&str>,
+    ) -> impl std::future::Future<Output = Result<Option<serde_json::Value>, AcpError>> + Send {
+        async move {
+            Err(AcpError::new(
+                crate::acp::error::ErrorKind::UnsupportedOperation,
+                "terminal/create is not supported by this client",
+            ))
+        }
+    }
 
-    /// Handle the `session/close` method.
-    ///
-    /// Close an active session and free any associated resources. The server
-    /// guarantees that the session exists and can be closed before calling this
-    /// method. Only called if the agent advertises
-    /// `sessionCapabilities.close`.
-    async fn close_session(
+    /// Handle `terminal/output` — receive terminal output.
+    fn terminal_output(
         &self,
-        request: CloseSessionRequest,
-    ) -> Result<CloseSessionResponse, AcpError>;
+        _session_id: &str,
+        _terminal_id: &str,
+        _output: &[u8],
+    ) -> impl std::future::Future<Output = Result<(), AcpError>> + Send {
+        async move { Err(AcpError::new(
+            crate::acp::error::ErrorKind::UnsupportedOperation,
+            "terminal/output is not supported by this client",
+        )) }
+    }
+
+    /// Handle `terminal/release` — release a terminal.
+    fn terminal_release(
+        &self,
+        _session_id: &str,
+        _terminal_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), AcpError>> + Send {
+        async move { Err(AcpError::new(
+            crate::acp::error::ErrorKind::UnsupportedOperation,
+            "terminal/release is not supported by this client",
+        )) }
+    }
+
+    /// Handle `terminal/wait_for_exit` — wait for a terminal to exit.
+    fn terminal_wait_for_exit(
+        &self,
+        _session_id: &str,
+        _terminal_id: &str,
+    ) -> impl std::future::Future<Output = Result<Option<i32>, AcpError>> + Send {
+        async move { Err(AcpError::new(
+            crate::acp::error::ErrorKind::UnsupportedOperation,
+            "terminal/wait_for_exit is not supported by this client",
+        )) }
+    }
+
+    /// Handle `terminal/kill` — kill a terminal.
+    fn terminal_kill(
+        &self,
+        _session_id: &str,
+        _terminal_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), AcpError>> + Send {
+        async move { Err(AcpError::new(
+            crate::acp::error::ErrorKind::UnsupportedOperation,
+            "terminal/kill is not supported by this client",
+        )) }
+    }
+
+    // -----------------------------------------------------------------------
+    // Elicitation methods — default implementations return METHOD_NOT_FOUND.
+    // Available when the client advertises `elicitation` capability.
+    // -----------------------------------------------------------------------
+
+    /// Handle `elicitation/create` — prompt the user for input.
+    ///
+    /// Returns a map of field-id → value.
+    fn elicitation_create(
+        &self,
+        _session_id: &str,
+        _request_id: Option<&str>,
+        _title: &str,
+        _message: Option<&str>,
+        _fields: &[serde_json::Value],
+    ) -> impl std::future::Future<Output = Result<Option<serde_json::Value>, AcpError>> + Send {
+        async move {
+            Err(AcpError::new(
+                crate::acp::error::ErrorKind::UnsupportedOperation,
+                "elicitation/create is not supported by this client",
+            ))
+        }
+    }
 }
 
-// ---------------------------------------------------------------------------
-// A no-op default handler for testing and as a reference implementation.
-// ---------------------------------------------------------------------------
-
-/// A minimal [`AcpHandler`] implementation that fulfills protocol contracts
-/// without spawning any subprocesses.
+/// A no-op handler that returns errors for all agent→client requests.
 ///
-/// This is provided primarily for unit tests and as a reference so that
-/// downstream integrators can see a complete, compilable example. Production
-/// code should provide its own implementation that delegates to the agent
-/// runtime.
-#[derive(Debug, Default)]
-pub struct NoopHandler;
+/// Useful as a default when the client has not implemented any capability
+/// handlers, or for testing.
+pub struct NoopClientHandler;
 
-#[async_trait]
-impl AcpHandler for NoopHandler {
-    async fn initialize(
+impl AcpClientHandler for NoopClientHandler {
+    fn read_text_file(
         &self,
-        request: InitializeRequest,
-    ) -> Result<InitializeResponse, AcpError> {
-        Ok(InitializeResponse {
-            protocol_version: request.protocol_version.min(crate::acp::SUPPORTED_PROTOCOL_VERSION),
-            agent_capabilities: None,
-            agent_info: None,
-            auth_methods: Vec::new(),
-            _meta: None,
-        })
+        _request: &ReadTextFileRequest,
+    ) -> impl std::future::Future<Output = Result<ReadTextFileResponse, AcpError>> + Send {
+        async move { Err(AcpError::transport_closed("noop handler always fails")) }
     }
 
-    async fn new_session(
+    fn write_text_file(
         &self,
-        _request: NewSessionRequest,
-    ) -> Result<NewSessionResponse, AcpError> {
-        use uuid::Uuid;
-        Ok(NewSessionResponse {
-            session_id: format!("sess_{}", Uuid::new_v4()),
-            config_options: None,
-            modes: None,
-            _meta: None,
-        })
+        _request: &WriteTextFileRequest,
+    ) -> impl std::future::Future<Output = Result<WriteTextFileResponse, AcpError>> + Send {
+        async move {
+            Err(AcpError::transport_closed("noop handler always fails"))
+        }
     }
 
-    async fn load_session(
+    fn request_permission(
         &self,
-        _request: LoadSessionRequest,
-    ) -> Result<LoadSessionResponse, AcpError> {
-        Ok(LoadSessionResponse {
-            config_options: None,
-            modes: None,
-            _meta: None,
-        })
+        _request: &RequestPermissionRequest,
+    ) -> impl std::future::Future<Output = Result<PermissionOutcome, AcpError>> + Send {
+        async move { Err(AcpError::transport_closed("noop handler always fails")) }
     }
+}
 
-    async fn resume_session(
-        &self,
-        _request: ResumeSessionRequest,
-    ) -> Result<ResumeSessionResponse, AcpError> {
-        Ok(ResumeSessionResponse::default())
-    }
+/// Dispatch an agent→client request to the appropriate handler method.
+///
+/// Returns the result as a `serde_json::Value` ready to be wrapped in a
+/// JSON-RPC success response, or an `AcpError` to be wrapped as an
+/// error response.
+pub async fn dispatch_agent_request<H: AcpClientHandler + ?Sized>(
+    handler: &H,
+    method: &str,
+    params: &Option<serde_json::Value>,
+) -> Result<serde_json::Value, AcpError> {
+    use crate::acp::types::decode_params;
 
-    async fn prompt(&self, _request: PromptRequest) -> Result<PromptResponse, AcpError> {
-        Ok(PromptResponse {
-            stop_reason: crate::acp::StopReason::EndTurn,
-            _meta: None,
-        })
-    }
-
-    async fn close_session(
-        &self,
-        _request: CloseSessionRequest,
-    ) -> Result<CloseSessionResponse, AcpError> {
-        Ok(CloseSessionResponse::default())
+    match method {
+        crate::acp::types::METHOD_READ_TEXT_FILE => {
+            let req: ReadTextFileRequest = decode_params::<ReadTextFileRequest>(params.clone())?;
+            let resp = handler.read_text_file(&req).await?;
+            Ok(serde_json::to_value(resp)?)
+        }
+        crate::acp::types::METHOD_WRITE_TEXT_FILE => {
+            let req: WriteTextFileRequest = decode_params::<WriteTextFileRequest>(params.clone())?;
+            let resp = handler.write_text_file(&req).await?;
+            Ok(serde_json::to_value(resp)?)
+        }
+        crate::acp::types::METHOD_REQUEST_PERMISSION => {
+            let req: RequestPermissionRequest =
+                decode_params::<RequestPermissionRequest>(params.clone())?;
+            let resp = handler.request_permission(&req).await?;
+            Ok(serde_json::to_value(resp)?)
+        }
+        // Terminal methods
+        "terminal/create" => {
+            let req_val = params.clone().unwrap_or(serde_json::Value::Null);
+            let session_id = req_val
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let terminal_id = req_val
+                .get("terminalId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let cwd = req_val.get("cwd").and_then(|v| v.as_str());
+            let result = handler.terminal_create(session_id, terminal_id, cwd).await?;
+            Ok(result.unwrap_or(serde_json::Value::Null))
+        }
+        "terminal/output" => {
+            let req_val = params.clone().unwrap_or(serde_json::Value::Null);
+            let session_id = req_val
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let terminal_id = req_val
+                .get("terminalId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let output = req_val
+                .get("output")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            handler.terminal_output(session_id, terminal_id, output.as_bytes()).await?;
+            Ok(serde_json::Value::Null)
+        }
+        "terminal/release" => {
+            let req_val = params.clone().unwrap_or(serde_json::Value::Null);
+            let session_id = req_val
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let terminal_id = req_val
+                .get("terminalId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            handler.terminal_release(session_id, terminal_id).await?;
+            Ok(serde_json::Value::Null)
+        }
+        "terminal/wait_for_exit" => {
+            let req_val = params.clone().unwrap_or(serde_json::Value::Null);
+            let session_id = req_val
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let terminal_id = req_val
+                .get("terminalId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let result = handler.terminal_wait_for_exit(session_id, terminal_id).await?;
+            match result {
+                Some(code) => Ok(serde_json::json!({ "exitCode": code })),
+                None => Ok(serde_json::Value::Null),
+            }
+        }
+        "terminal/kill" => {
+            let req_val = params.clone().unwrap_or(serde_json::Value::Null);
+            let session_id = req_val
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let terminal_id = req_val
+                .get("terminalId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            handler.terminal_kill(session_id, terminal_id).await?;
+            Ok(serde_json::Value::Null)
+        }
+        // Elicitation
+        "elicitation/create" => {
+            let req_val = params.clone().unwrap_or(serde_json::Value::Null);
+            let session_id = req_val
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let request_id = req_val.get("requestId").and_then(|v| v.as_str());
+            let title = req_val
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let message = req_val.get("message").and_then(|v| v.as_str());
+            let fields = req_val.get("fields").cloned().unwrap_or_default();
+            let result = handler
+                .elicitation_create(session_id, request_id, title, message, &fields)
+                .await?;
+            Ok(result.unwrap_or(serde_json::Value::Null))
+        }
+        _ => Err(AcpError::unsupported_operation(method)),
     }
 }
 
@@ -190,72 +326,158 @@ impl AcpHandler for NoopHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::acp::types::*;
 
-    #[tokio::test]
-    async fn noop_handler_initialize_returns_min_version() {
-        let handler = NoopHandler;
-        let req = InitializeRequest {
-            protocol_version: 5,
-            client_capabilities: None,
-            client_info: None,
-            _meta: None,
-        };
-        let resp = handler.initialize(req).await.unwrap();
-        assert_eq!(resp.protocol_version, crate::acp::SUPPORTED_PROTOCOL_VERSION);
+    /// A handler that records calls for inspection in tests.
+    struct RecordingHandler {
+        read_file_calls: std::sync::Arc<tokio::sync::Mutex<Vec<String>>>,
+        write_file_calls: std::sync::Arc<tokio::sync::Mutex<Vec<(String, String)>>>,
+        permission_calls: std::sync::Arc<tokio::sync::Mutex<Vec<String>>>,
+    }
+
+    impl RecordingHandler {
+        fn new() -> Self {
+            Self {
+                read_file_calls: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
+                write_file_calls: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
+                permission_calls: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
+            }
+        }
+    }
+
+    impl AcpClientHandler for RecordingHandler {
+        fn read_text_file(
+            &self,
+            request: &ReadTextFileRequest,
+        ) -> impl std::future::Future<Output = Result<ReadTextFileResponse, AcpError>> + Send {
+            let calls = self.read_file_calls.clone();
+            let path = request.path.clone();
+            async move {
+                calls.lock().await.push(path.clone());
+                Ok(ReadTextFileResponse {
+                    content: format!("contents of {}", path),
+                    _meta: None,
+                })
+            }
+        }
+
+        fn write_text_file(
+            &self,
+            request: &WriteTextFileRequest,
+        ) -> impl std::future::Future<Output = Result<WriteTextFileResponse, AcpError>> + Send {
+            let calls = self.write_file_calls.clone();
+            let path = request.path.clone();
+            let content = request.content.clone();
+            async move {
+                calls.lock().await.push((path.clone(), content.clone()));
+                Ok(WriteTextFileResponse { _meta: None })
+            }
+        }
+
+        fn request_permission(
+            &self,
+            _request: &RequestPermissionRequest,
+        ) -> impl std::future::Future<Output = Result<PermissionOutcome, AcpError>> + Send {
+            let calls = self.permission_calls.clone();
+            async move {
+                calls.lock().await.push("permission".to_string());
+                Ok(PermissionOutcome::Cancelled { _meta: None })
+            }
+        }
     }
 
     #[tokio::test]
-    async fn noop_handler_new_session_returns_session_id() {
-        let handler = NoopHandler;
-        let req = NewSessionRequest {
-            cwd: "/tmp".to_string(),
-            mcp_servers: vec![],
-            additional_directories: vec![],
-            _meta: None,
-        };
-        let resp = handler.new_session(req).await.unwrap();
-        assert!(!resp.session_id.is_empty());
+    async fn dispatch_read_text_file() {
+        let handler = RecordingHandler::new();
+        let params = serde_json::json!({"path": "/test/file.txt", "sessionId": "s1"});
+
+        let result = dispatch_agent_request(
+            &handler,
+            METHOD_READ_TEXT_FILE,
+            &Some(params),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result["content"], "contents of /test/file.txt");
+
+        let calls = handler.read_file_calls.lock().await;
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0], "/test/file.txt");
     }
 
     #[tokio::test]
-    async fn noop_handler_prompt_returns_end_turn() {
-        let handler = NoopHandler;
-        let req = PromptRequest {
-            session_id: "sess_test".to_string(),
-            prompt: vec![ContentBlock::Text(TextContent {
-                text: "hi".to_string(),
-                annotations: None,
-                _meta: None,
-            })],
-            _meta: None,
-        };
-        let resp = handler.prompt(req).await.unwrap();
-        assert_eq!(resp.stop_reason, StopReason::EndTurn);
+    async fn dispatch_write_text_file() {
+        let handler = RecordingHandler::new();
+        let params = serde_json::json!({"path": "/out.txt", "content": "hello", "sessionId": "s1"});
+
+        let result = dispatch_agent_request(
+            &handler,
+            METHOD_WRITE_TEXT_FILE,
+            &Some(params),
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_null() || result.is_object());
+
+        let calls = handler.write_file_calls.lock().await;
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0], ("/out.txt".to_string(), "hello".to_string()));
     }
 
     #[tokio::test]
-    async fn noop_handler_close_session_returns_empty() {
-        let handler = NoopHandler;
-        let req = CloseSessionRequest {
-            session_id: "sess_test".to_string(),
-            _meta: None,
-        };
-        let resp = handler.close_session(req).await.unwrap();
-        assert!(resp._meta.is_none());
+    async fn dispatch_request_permission() {
+        let handler = RecordingHandler::new();
+        let params = serde_json::json!({
+            "sessionId": "s1",
+            "toolCall": {"toolCallId": "tc1", "title": "test"},
+            "options": [{"optionId": "allow_once", "name": "Allow once", "kind": "allow_once"}]
+        });
+
+        let result = dispatch_agent_request(
+            &handler,
+            METHOD_REQUEST_PERMISSION,
+            &Some(params),
+        )
+        .await
+        .unwrap();
+
+        assert!(result.get("outcome").is_some());
+
+        let calls = handler.permission_calls.lock().await;
+        assert_eq!(calls.len(), 1);
     }
 
     #[tokio::test]
-    async fn noop_handler_resume_session_returns_ok() {
-        let handler = NoopHandler;
-        let req = ResumeSessionRequest {
-            session_id: "sess_test".to_string(),
-            cwd: "/tmp".to_string(),
-            mcp_servers: vec![],
-            additional_directories: vec![],
-            _meta: None,
-        };
-        let resp = handler.resume_session(req).await.unwrap();
-        assert!(resp._meta.is_none());
+    async fn dispatch_unknown_method_errors() {
+        let handler = RecordingHandler::new();
+        let result = dispatch_agent_request(&handler, "unknown/method", &None).await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::UnsupportedOperation
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_terminal_create_not_supported() {
+        let handler = RecordingHandler::new();
+        let params = serde_json::json!({"sessionId": "s1", "terminalId": "t1", "cwd": "/tmp"});
+
+        let result = dispatch_agent_request(&handler, "terminal/create", &Some(params)).await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().kind,
+            ErrorKind::UnsupportedOperation
+        );
+    }
+
+    #[tokio::test]
+    async fn noop_handler_always_errors() {
+        let handler = NoopClientHandler;
+        let params = serde_json::json!({"path": "/test", "sessionId": "s1"});
+
+        let result = dispatch_agent_request(&handler, METHOD_READ_TEXT_FILE, &Some(params)).await;
+        assert!(result.is_err());
     }
 }

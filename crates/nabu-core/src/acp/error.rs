@@ -9,7 +9,7 @@
 //! failures back to the agent when it is acting as a handler for
 //! agent-originated requests.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A structured ACP client error.
@@ -97,6 +97,28 @@ impl AcpError {
             "expected": expected,
             "actual": actual
         }))
+    }
+
+    /// Convenience: create an `InvalidState` error for a specific session.
+    pub fn invalid_state_session(session_id: &str, msg: impl Into<String>) -> Self {
+        Self::new(
+            ErrorKind::InvalidState,
+            format!("session '{}': {}", session_id, msg.into()),
+        )
+        .with_data(serde_json::json!({ "sessionId": session_id }))
+    }
+
+    /// Convenience: create an `InvalidState` error for an invalid transition.
+    pub fn invalid_transition(current: impl std::fmt::Debug, target: &str, msg: impl Into<String>) -> Self {
+        Self::new(
+            ErrorKind::InvalidState,
+            format!("invalid transition from {:?} to '{}': {}", current, target, msg.into()),
+        )
+    }
+
+    /// Convenience: create an `UnsupportedOperation` error.
+    pub fn unsupported(msg: impl Into<String>) -> Self {
+        Self::unsupported_operation(msg)
     }
 
     /// Convenience: create a `MalformedRequest` error.
