@@ -375,13 +375,13 @@ fn capture_engine_preserves_handlers_through_lifecycle() {
     use nabu_core::capture::build_default_capture_engine;
 
     let engine = build_default_capture_engine(None, None);
-    assert_eq!(engine.handler_count(), 11);
+    assert_eq!(engine.handler_count(), 8);
 
     assert!(engine.start().is_ok());
-    assert_eq!(engine.handler_count(), 11);
+    assert_eq!(engine.handler_count(), 8);
 
     assert!(engine.shutdown().is_ok());
-    assert_eq!(engine.handler_count(), 11);
+    assert_eq!(engine.handler_count(), 8);
 }
 
 // ---------------------------------------------------------------------------

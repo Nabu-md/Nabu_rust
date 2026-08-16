@@ -10,7 +10,7 @@
 #   2. Run `cargo tauri icon` from the master -> `src-tauri/icons/`
 #      (icns, ico, PNGs, plus iOS and Android sets).
 #   3. Sync derived assets that are also generated from the master:
-#      `resources/icon.png` (512) and the browser extension PNGs + SVG embeds.
+#      `resources/icon.png` (512).
 #
 # Run from anywhere; resolves the repo root via its own location.
 set -euo pipefail
@@ -54,27 +54,5 @@ Image.open(src).convert("RGBA").resize((size, size), Image.LANCZOS).save(dst)
 print("    wrote", dst)
 PY
 
-echo "==> Syncing browser extension icons (PNG + SVG embeds)"
-python3 - "$MASTER" "$ROOT/extensions/browser/icons" <<'PY'
-import base64, io, sys
-from PIL import Image
-
-master, out_dir = sys.argv[1], sys.argv[2]
-for size in (16, 32, 64, 128):
-    im = Image.open(master).convert("RGBA").resize((size, size), Image.LANCZOS)
-    im.save(f"{out_dir}/icon-{size}.png")
-    buf = io.BytesIO()
-    im.save(buf, "PNG")
-    b64 = base64.b64encode(buf.getvalue()).decode()
-    svg = (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" '
-        f'viewBox="0 0 {size} {size}">\n'
-        f'  <image width="{size}" height="{size}" href="data:image/png;base64,{b64}"/>\n'
-        f"</svg>\n"
-    )
-    with open(f"{out_dir}/icon-{size}.svg", "w") as f:
-        f.write(svg)
-    print(f"    icon-{size}.png/.svg")
-PY
 
 echo "Done. Icon set refreshed from resources/icon-master.png."
