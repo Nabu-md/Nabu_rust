@@ -1,163 +1,126 @@
-//! # ACP — Agent Communication Protocol
+//! # ACP Client Module — Nabu as an ACP Client
 //!
-//! This module implements the ACP v1 protocol layer for the Nabu Capability
-//! Platform. It provides:
+//! Nabu is the **ACP client** (editor). The external process is the ACP
+//! **agent** (coding agent).
 //!
-//! - [`AcpServer`]: The protocol coordinator — owns session state, validates
-//!   lifecycle transitions, and delegates to an [`AcpHandler`].
-//! - [`AcpHandler`]: The delegation boundary between the protocol layer and
-//!   the agent runtime.
-//! - [`NoopHandler`]: A minimal reference implementation for testing.
-//! - [`AcpError`]: Structured protocol-level errors with JSON-RPC mappings.
-//! - [`decode_params`]: Convenience deserialiser for ACP request parameters.
+//! ## Architecture
 //!
-//! ## Integration
+//! ```text
+//! Nabu (ACP client)
+//!   │
+//!   │ JSON-RPC 2.0 over stdio
+//!   │
+//!   ▼
+//! ACP Agent
+//!   │
+//!   ├── responses to client requests
+//!   ├── session/update notifications
+//!   └── agent → client requests (fs/read_text_file, terminal/*, etc.)
+//! ```
 //!
-//! After creating an [`AcpServer`] with a concrete [`AcpHandler`]
-//! implementation, call [`AcpServer::register_handlers`] to register all ACP
-//! method handlers on a [`crate::rpc::Router`]. The router then dispatches
-//! incoming JSON-RPC requests through the per-operation handler structs
-//! (`InitializeHandler`, `NewSessionHandler`, etc.).
+//! ## Module layout
+//!
+//! - [`types`] — ACP v1 protocol types (requests, responses, notifications,
+//!   capabilities, content blocks)
+//! - [`error`] — Structured client-side error types
+//! - [`state`] — Client connection and session state machine
+//! - [`events`] — Inbound message classification and agent→client request
+//!   dispatch enum
+//! - [`transport`] — Transport trait and concrete implementations (stdio,
+//!   mock channels)
+//! - [`handler`] — `AcpClientHandler` trait for dispatching agent→client
+//!   requests to application logic
+//! - [`client`] — The `AcpClient` struct: sends requests, runs the message
+//!   loop, dispatches responses/notifications/requests
+//!
+//! ## Usage
+//!
+//! ```no_run
+//! use nabu_core::acp::{AcpClient, NoopClientHandler, MockTransport};
+//! use std::sync::Arc;
+//! use nabu_core::acp::types::{
+//!     Implementation, ClientCapabilities, FileSystemCapabilities,
+//! };
+//!
+//! let (transport, _peer) = MockTransport::pair();
+//! let handler = Arc::new(NoopClientHandler);
+//! let mut client = AcpClient::new(transport, handler);
+//!
+//! // Initialize the connection
+//! let _init = client.initialize(
+//!     Some(Implementation {
+//!         name: "nabu".to_string(),
+//!         title: Some("Nabu".to_string()),
+//!         version: "0.1.0".to_string(),
+//!         _meta: None,
+//!     }),
+//!     Some(ClientCapabilities {
+//!         fs: Some(FileSystemCapabilities {
+//!             read_text_file: true,
+//!             write_text_file: true,
+//!             _meta: None,
+//!         }),
+//!         terminal: true,
+//!         session: None,
+//!         _meta: None,
+//!     }),
+//! ).await;
+//! ```
 
+pub mod client;
 pub mod error;
+pub mod events;
 pub mod handler;
-pub mod server;
 pub mod state;
+pub mod transport;
 pub mod types;
 
-pub use error::AcpError;
-pub use handler::{AcpClientHandler, NoopClientHandler};
-
-// Backwards-compatible alias for the server-side handler trait.
-// This trait is separate from AcpClientHandler to maintain dyn-compatibility
-// (the client handler uses RPIT impl Future which is not object-safe).
-#[async_trait::async_trait]
-pub trait AcpHandler: Send + Sync {
-    /// Handle the `initialize` method.
-    async fn initialize(
-        &self,
-        request: crate::acp::types::InitializeRequest,
-    ) -> Result<crate::acp::types::InitializeResponse, AcpError>;
-
-    /// Handle the `session/new` method.
-    async fn new_session(
-        &self,
-        request: crate::acp::types::NewSessionRequest,
-    ) -> Result<crate::acp::types::NewSessionResponse, AcpError>;
-
-    /// Handle the `session/load` method.
-    async fn load_session(
-        &self,
-        request: crate::acp::types::LoadSessionRequest,
-    ) -> Result<crate::acp::types::LoadSessionResponse, AcpError>;
-
-    /// Handle the `session/resume` method.
-    async fn resume_session(
-        &self,
-        request: crate::acp::types::ResumeSessionRequest,
-    ) -> Result<crate::acp::types::ResumeSessionResponse, AcpError>;
-
-    /// Handle the `session/prompt` method.
-    async fn prompt(
-        &self,
-        request: crate::acp::types::PromptRequest,
-    ) -> Result<crate::acp::types::PromptResponse, AcpError>;
-
-    /// Handle the `session/close` method.
-    async fn close_session(
-        &self,
-        request: crate::acp::types::CloseSessionRequest,
-    ) -> Result<crate::acp::types::CloseSessionResponse, AcpError>;
-}
-
-pub type NoopHandler = NoopClientHandler;
-pub use server::AcpServer;
-pub use state::{
-    ClientState, ConnectionState, NegotiatedCapabilities, ProtocolState, ServerEntry,
-    SessionEntry, SessionState, SessionStatus,
+// Re-exports
+pub use client::AcpClient;
+pub use error::{AcpError, ErrorKind};
+pub use handler::{dispatch_agent_request, AcpClientHandler, NoopClientHandler};
+pub use state::{ClientState, ConnectionState, NegotiatedCapabilities, SessionEntry, SessionState};
+pub use transport::{
+    MockPeer, MockTransport, StdioTransport, Transport, TransportRead, TransportWrite,
 };
+pub use types::*;
 
-// Re-export method constants.
-pub use server::{
-    METHOD_CLOSE_SESSION, METHOD_INITIALIZE, METHOD_LOAD_SESSION, METHOD_NEW_SESSION,
-    METHOD_PROMPT, METHOD_RESUME_SESSION,
-};
+// Re-export key RPC types used by the ACP client
+pub use crate::rpc::{JsonRpcError, RequestId};
 
-pub use types::decode_params;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-// Re-export key protocol types.
-pub use types::{
-    AgentCapabilities, ClientCapabilities, ClientSessionCapabilities,
-    CloseSessionRequest, CloseSessionResponse, ContentBlock, Cost,
-    EnvVariable, FileSystemCapabilities, HttpHeader, Implementation,
-    InitializeRequest, InitializeResponse, LoadSessionRequest, LoadSessionResponse,
-    LogoutCapabilities, McpCapabilities, McpServer, McpServerHttp, McpServerSse,
-    McpServerStdio, NewSessionRequest, NewSessionResponse, PromptCapabilities,
-    PromptRequest, PromptResponse, ResumeSessionRequest, ResumeSessionResponse,
-    Role, SessionId, SessionListCapabilities, SessionResumeCapabilities,
-    StopReason, SUPPORTED_PROTOCOL_VERSION, UsageUpdate,
-};
-
-// Blanket impl: any type that implements AcpClientHandler can be used as
-// an AcpHandler. The NoopClientHandler provides no-op implementations.
-#[async_trait::async_trait]
-impl AcpHandler for NoopClientHandler {
-    async fn initialize(
-        &self,
-        _request: crate::acp::types::InitializeRequest,
-    ) -> Result<crate::acp::types::InitializeResponse, AcpError> {
-        Ok(crate::acp::types::InitializeResponse {
-            protocol_version: crate::acp::types::SUPPORTED_PROTOCOL_VERSION,
-            agent_capabilities: Some(crate::acp::types::AgentCapabilities {
-                load_session: false,
-                ..Default::default()
-            }),
-            agent_info: None,
-            auth_methods: vec![],
-            _meta: None,
-        })
+    #[tokio::test]
+    async fn method_constants_are_correct() {
+        assert_eq!(METHOD_INITIALIZE, "initialize");
+        assert_eq!(METHOD_NEW_SESSION, "session/new");
+        assert_eq!(METHOD_PROMPT, "session/prompt");
+        assert_eq!(METHOD_CANCEL, "session/cancel");
+        assert_eq!(METHOD_CLOSE_SESSION, "session/close");
+        assert_eq!(METHOD_DELETE_SESSION, "session/delete");
+        assert_eq!(METHOD_LIST_SESSIONS, "session/list");
+        assert_eq!(METHOD_LOAD_SESSION, "session/load");
+        assert_eq!(METHOD_RESUME_SESSION, "session/resume");
+        assert_eq!(METHOD_READ_TEXT_FILE, "fs/read_text_file");
+        assert_eq!(METHOD_WRITE_TEXT_FILE, "fs/write_text_file");
+        assert_eq!(METHOD_REQUEST_PERMISSION, "session/request_permission");
+        assert_eq!(CANCEL_REQUEST_METHOD, "$/cancel_request");
+        assert_eq!(SUPPORTED_PROTOCOL_VERSION, 1);
     }
 
-    async fn new_session(
-        &self,
-        _request: crate::acp::types::NewSessionRequest,
-    ) -> Result<crate::acp::types::NewSessionResponse, AcpError> {
-        Ok(crate::acp::types::NewSessionResponse {
-            session_id: uuid::Uuid::new_v4().to_string(),
-            config_options: None,
-            modes: None,
-            _meta: None,
-        })
-    }
-
-    async fn load_session(
-        &self,
-        _request: crate::acp::types::LoadSessionRequest,
-    ) -> Result<crate::acp::types::LoadSessionResponse, AcpError> {
-        Ok(crate::acp::types::LoadSessionResponse::default())
-    }
-
-    async fn resume_session(
-        &self,
-        _request: crate::acp::types::ResumeSessionRequest,
-    ) -> Result<crate::acp::types::ResumeSessionResponse, AcpError> {
-        Ok(crate::acp::types::ResumeSessionResponse::default())
-    }
-
-    async fn prompt(
-        &self,
-        _request: crate::acp::types::PromptRequest,
-    ) -> Result<crate::acp::types::PromptResponse, AcpError> {
-        Ok(crate::acp::types::PromptResponse {
-            stop_reason: crate::acp::types::StopReason::EndTurn,
-            _meta: None,
-        })
-    }
-
-    async fn close_session(
-        &self,
-        _request: crate::acp::types::CloseSessionRequest,
-    ) -> Result<crate::acp::types::CloseSessionResponse, AcpError> {
-        Ok(crate::acp::types::CloseSessionResponse::default())
+    #[tokio::test]
+    async fn noop_handler_implements_trait() {
+        let handler: Arc<dyn AcpClientHandler> = Arc::new(NoopClientHandler);
+        let _ = handler
+            .read_text_file(&ReadTextFileRequest {
+                path: "/test".to_string(),
+                session_id: "s1".to_string(),
+                limit: None,
+                line: None,
+                _meta: None,
+            })
+            .await;
     }
 }

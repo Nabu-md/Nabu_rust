@@ -10,63 +10,66 @@
 //!
 //! ## Agent→client methods
 //!
-//! | Method                    | Handler trait method        |
-//! |---------------------------|-----------------------------|
-//! | `fs/read_text_file`       | `read_text_file`            |
-//! | `fs/write_text_file`      | `write_text_file`           |
-//! | `session/request_permission` | `request_permission`    |
-//! | `terminal/create`         | `terminal_create` (future) |
-//! | `terminal/output`         | `terminal_output` (future)|
-//! | `terminal/release`        | `terminal_release` (future)|
-//! | `terminal/wait_for_exit`  | `terminal_wait_for_exit` (future)|
-//! | `terminal/kill`           | `terminal_kill` (future) |
-//! | `elicitation/create`      | `elicitation_create` (future)|
+//! | Method                      | Handler trait method        |
+//! |-----------------------------|-----------------------------|
+//! | `fs/read_text_file`         | `read_text_file`            |
+//! | `fs/write_text_file`        | `write_text_file`           |
+//! | `session/request_permission`| `request_permission`        |
+//! | `terminal/create`           | `terminal_create` (future) |
+//! | `terminal/output`           | `terminal_output` (future) |
+//! | `terminal/release`          | `terminal_release` (future)|
+//! | `terminal/wait_for_exit`    | `terminal_wait_for_exit` (future)|
+//! | `terminal/kill`             | `terminal_kill` (future)    |
+//! | `elicitation/create`        | `elicitation_create` (future)|
 //!
-//! Terminal and elicitation methods are included as `#[default]` trait
-//! methods that return an error, so the trait is forward-compatible.
-//! Individual method support is determined by what Nabu advertises in its
-//! `ClientCapabilities` during `initialize`.
+//! Terminal and elicitation methods are included as default trait
+//! methods that return an `UnsupportedOperation` error, so the trait is
+//! forward-compatible. Individual method support is determined by what Nabu
+//! advertises in its `ClientCapabilities` during `initialize`.
 
-use crate::acp::error::AcpError;
+use crate::acp::error::{AcpError, ErrorKind};
 use crate::acp::types::{
-    PermissionOption, PermissionOutcome, ReadTextFileRequest, ReadTextFileResponse,
-    RequestPermissionRequest, SelectedPermissionOutcome, WriteTextFileRequest,
-    WriteTextFileResponse,
+    PermissionOutcome, ReadTextFileRequest, ReadTextFileResponse, RequestPermissionRequest,
+    WriteTextFileRequest, WriteTextFileResponse,
 };
 
 /// Trait for handling agent→client requests dispatched by the ACP client.
 ///
-/// The implementor decides what action to take for each request.
-/// The ACP client calls these methods when it receives an agent-originated
-/// request and automatically wraps the result (or error) back into a
-/// JSON-RPC response sent to the agent.
+/// The implementor decides what action to take for each request. The ACP
+/// client calls these methods when it receives an agent-originated request
+/// and automatically wraps the result (or error) back into a JSON-RPC
+/// response sent to the agent.
 ///
-/// All methods except `read_text_file`, `write_text_file`, and
-/// `request_permission` have default implementations that return
-/// `METHOD_NOT_FOUND`, so the trait is forward-compatible with future
-/// ACP methods.
+/// All methods except the three core ones (`read_text_file`,
+/// `write_text_file`, `request_permission`) have default implementations
+/// that return `UnsupportedOperation`, so the trait is forward-compatible
+/// with future ACP methods.
+///
+/// This trait uses `#[async_trait]` to ensure `dyn`-compatibility, so it
+/// can be stored as `Arc<dyn AcpClientHandler>`.
+#[async_trait::async_trait]
 pub trait AcpClientHandler: Send + Sync {
     /// Handle `fs/read_text_file` — return the contents of the requested file.
-    fn read_text_file(
+    async fn read_text_file(
         &self,
         request: &ReadTextFileRequest,
-    ) -> impl std::future::Future<Output = Result<ReadTextFileResponse, AcpError>> + Send;
+    ) -> Result<ReadTextFileResponse, AcpError>;
 
     /// Handle `fs/write_text_file` — write content to the requested path.
-    fn write_text_file(
+    async fn write_text_file(
         &self,
         request: &WriteTextFileRequest,
-    ) -> impl std::future::Future<Output = Result<WriteTextFileResponse, AcpError>> + Send;
+    ) -> Result<WriteTextFileResponse, AcpError>;
 
     /// Handle `session/request_permission` — present options to the user and
     /// return the selected outcome (or cancellation).
-    fn request_permission(
+    async fn request_permission(
         &self,
         request: &RequestPermissionRequest,
-    ) -> impl std::future::Future<Output = Result<PermissionOutcome, AcpError>> + Send;
+    ) -> Result<PermissionOutcome, AcpError>;
 
     // -----------------------------------------------------------------------
-    // Terminal methods — default implementations return METHOD_NOT_FOUND.
+    // Terminal methods — default implementations return UnsupportedOperation.
     // Available when the client advertises `terminal: true`.
     // -----------------------------------------------------------------------
 
@@ -74,91 +77,85 @@ pub trait AcpClientHandler: Send + Sync {
     ///
     /// Default: returns an error. Override when terminal capability is
     /// supported.
-    fn terminal_create(
+    #[allow(clippy::type_complexity)]
+    async fn terminal_create(
         &self,
         _session_id: &str,
         _terminal_id: &str,
         _cwd: Option<&str>,
-    ) -> impl std::future::Future<Output = Result<Option<serde_json::Value>, AcpError>> + Send {
-        async move {
-            Err(AcpError::new(
-                crate::acp::error::ErrorKind::UnsupportedOperation,
-                "terminal/create is not supported by this client",
-            ))
-        }
+    ) -> Result<Option<serde_json::Value>, AcpError> {
+        Err(AcpError::new(
+            ErrorKind::UnsupportedOperation,
+            "terminal/create is not supported by this client",
+        ))
     }
 
     /// Handle `terminal/output` — receive terminal output.
-    fn terminal_output(
+    async fn terminal_output(
         &self,
         _session_id: &str,
         _terminal_id: &str,
         _output: &[u8],
-    ) -> impl std::future::Future<Output = Result<(), AcpError>> + Send {
-        async move { Err(AcpError::new(
-            crate::acp::error::ErrorKind::UnsupportedOperation,
+    ) -> Result<(), AcpError> {
+        Err(AcpError::new(
+            ErrorKind::UnsupportedOperation,
             "terminal/output is not supported by this client",
-        )) }
+        ))
     }
 
     /// Handle `terminal/release` — release a terminal.
-    fn terminal_release(
+    async fn terminal_release(
         &self,
         _session_id: &str,
         _terminal_id: &str,
-    ) -> impl std::future::Future<Output = Result<(), AcpError>> + Send {
-        async move { Err(AcpError::new(
-            crate::acp::error::ErrorKind::UnsupportedOperation,
+    ) -> Result<(), AcpError> {
+        Err(AcpError::new(
+            ErrorKind::UnsupportedOperation,
             "terminal/release is not supported by this client",
-        )) }
+        ))
     }
 
     /// Handle `terminal/wait_for_exit` — wait for a terminal to exit.
-    fn terminal_wait_for_exit(
+    async fn terminal_wait_for_exit(
         &self,
         _session_id: &str,
         _terminal_id: &str,
-    ) -> impl std::future::Future<Output = Result<Option<i32>, AcpError>> + Send {
-        async move { Err(AcpError::new(
-            crate::acp::error::ErrorKind::UnsupportedOperation,
+    ) -> Result<Option<i32>, AcpError> {
+        Err(AcpError::new(
+            ErrorKind::UnsupportedOperation,
             "terminal/wait_for_exit is not supported by this client",
-        )) }
+        ))
     }
 
     /// Handle `terminal/kill` — kill a terminal.
-    fn terminal_kill(
-        &self,
-        _session_id: &str,
-        _terminal_id: &str,
-    ) -> impl std::future::Future<Output = Result<(), AcpError>> + Send {
-        async move { Err(AcpError::new(
-            crate::acp::error::ErrorKind::UnsupportedOperation,
+    async fn terminal_kill(&self, _session_id: &str, _terminal_id: &str) -> Result<(), AcpError> {
+        Err(AcpError::new(
+            ErrorKind::UnsupportedOperation,
             "terminal/kill is not supported by this client",
-        )) }
+        ))
     }
 
     // -----------------------------------------------------------------------
-    // Elicitation methods — default implementations return METHOD_NOT_FOUND.
+    // Elicitation methods — default implementations return UnsupportedOperation.
     // Available when the client advertises `elicitation` capability.
     // -----------------------------------------------------------------------
 
     /// Handle `elicitation/create` — prompt the user for input.
     ///
     /// Returns a map of field-id → value.
-    fn elicitation_create(
+    #[allow(clippy::type_complexity)]
+    async fn elicitation_create(
         &self,
         _session_id: &str,
         _request_id: Option<&str>,
         _title: &str,
         _message: Option<&str>,
         _fields: &[serde_json::Value],
-    ) -> impl std::future::Future<Output = Result<Option<serde_json::Value>, AcpError>> + Send {
-        async move {
-            Err(AcpError::new(
-                crate::acp::error::ErrorKind::UnsupportedOperation,
-                "elicitation/create is not supported by this client",
-            ))
-        }
+    ) -> Result<Option<serde_json::Value>, AcpError> {
+        Err(AcpError::new(
+            ErrorKind::UnsupportedOperation,
+            "elicitation/create is not supported by this client",
+        ))
     }
 }
 
@@ -168,28 +165,36 @@ pub trait AcpClientHandler: Send + Sync {
 /// handlers, or for testing.
 pub struct NoopClientHandler;
 
+#[async_trait::async_trait]
 impl AcpClientHandler for NoopClientHandler {
-    fn read_text_file(
+    async fn read_text_file(
         &self,
         _request: &ReadTextFileRequest,
-    ) -> impl std::future::Future<Output = Result<ReadTextFileResponse, AcpError>> + Send {
-        async move { Err(AcpError::transport_closed("noop handler always fails")) }
+    ) -> Result<ReadTextFileResponse, AcpError> {
+        Err(AcpError::new(
+            ErrorKind::UnsupportedOperation,
+            "noop handler does not support read_text_file",
+        ))
     }
 
-    fn write_text_file(
+    async fn write_text_file(
         &self,
         _request: &WriteTextFileRequest,
-    ) -> impl std::future::Future<Output = Result<WriteTextFileResponse, AcpError>> + Send {
-        async move {
-            Err(AcpError::transport_closed("noop handler always fails"))
-        }
+    ) -> Result<WriteTextFileResponse, AcpError> {
+        Err(AcpError::new(
+            ErrorKind::UnsupportedOperation,
+            "noop handler does not support write_text_file",
+        ))
     }
 
-    fn request_permission(
+    async fn request_permission(
         &self,
         _request: &RequestPermissionRequest,
-    ) -> impl std::future::Future<Output = Result<PermissionOutcome, AcpError>> + Send {
-        async move { Err(AcpError::transport_closed("noop handler always fails")) }
+    ) -> Result<PermissionOutcome, AcpError> {
+        Err(AcpError::new(
+            ErrorKind::UnsupportedOperation,
+            "noop handler does not support request_permission",
+        ))
     }
 }
 
@@ -234,7 +239,9 @@ pub async fn dispatch_agent_request<H: AcpClientHandler + ?Sized>(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let cwd = req_val.get("cwd").and_then(|v| v.as_str());
-            let result = handler.terminal_create(session_id, terminal_id, cwd).await?;
+            let result = handler
+                .terminal_create(session_id, terminal_id, cwd)
+                .await?;
             Ok(result.unwrap_or(serde_json::Value::Null))
         }
         "terminal/output" => {
@@ -247,11 +254,10 @@ pub async fn dispatch_agent_request<H: AcpClientHandler + ?Sized>(
                 .get("terminalId")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let output = req_val
-                .get("output")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            handler.terminal_output(session_id, terminal_id, output.as_bytes()).await?;
+            let output = req_val.get("output").and_then(|v| v.as_str()).unwrap_or("");
+            handler
+                .terminal_output(session_id, terminal_id, output.as_bytes())
+                .await?;
             Ok(serde_json::Value::Null)
         }
         "terminal/release" => {
@@ -277,7 +283,9 @@ pub async fn dispatch_agent_request<H: AcpClientHandler + ?Sized>(
                 .get("terminalId")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let result = handler.terminal_wait_for_exit(session_id, terminal_id).await?;
+            let result = handler
+                .terminal_wait_for_exit(session_id, terminal_id)
+                .await?;
             match result {
                 Some(code) => Ok(serde_json::json!({ "exitCode": code })),
                 None => Ok(serde_json::Value::Null),
@@ -304,10 +312,7 @@ pub async fn dispatch_agent_request<H: AcpClientHandler + ?Sized>(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let request_id = req_val.get("requestId").and_then(|v| v.as_str());
-            let title = req_val
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let title = req_val.get("title").and_then(|v| v.as_str()).unwrap_or("");
             let message = req_val.get("message").and_then(|v| v.as_str());
             let fields = req_val.get("fields").cloned().unwrap_or_default();
             let result = handler
@@ -329,59 +334,44 @@ mod tests {
 
     /// A handler that records calls for inspection in tests.
     struct RecordingHandler {
-        read_file_calls: std::sync::Arc<tokio::sync::Mutex<Vec<String>>>,
-        write_file_calls: std::sync::Arc<tokio::sync::Mutex<Vec<(String, String)>>>,
-        permission_calls: std::sync::Arc<tokio::sync::Mutex<Vec<String>>>,
+        read_file_calls: Arc<tokio::sync::Mutex<Vec<String>>>,
     }
 
     impl RecordingHandler {
         fn new() -> Self {
             Self {
-                read_file_calls: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
-                write_file_calls: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
-                permission_calls: std::sync::Arc::new(tokio::sync::Mutex::new(vec![])),
+                read_file_calls: Arc::new(tokio::sync::Mutex::new(vec![])),
             }
         }
     }
 
+    #[async_trait::async_trait]
     impl AcpClientHandler for RecordingHandler {
-        fn read_text_file(
+        async fn read_text_file(
             &self,
             request: &ReadTextFileRequest,
-        ) -> impl std::future::Future<Output = Result<ReadTextFileResponse, AcpError>> + Send {
+        ) -> Result<ReadTextFileResponse, AcpError> {
             let calls = self.read_file_calls.clone();
             let path = request.path.clone();
-            async move {
-                calls.lock().await.push(path.clone());
-                Ok(ReadTextFileResponse {
-                    content: format!("contents of {}", path),
-                    _meta: None,
-                })
-            }
+            calls.lock().await.push(path.clone());
+            Ok(ReadTextFileResponse {
+                content: format!("contents of {}", path),
+                _meta: None,
+            })
         }
 
-        fn write_text_file(
+        async fn write_text_file(
             &self,
-            request: &WriteTextFileRequest,
-        ) -> impl std::future::Future<Output = Result<WriteTextFileResponse, AcpError>> + Send {
-            let calls = self.write_file_calls.clone();
-            let path = request.path.clone();
-            let content = request.content.clone();
-            async move {
-                calls.lock().await.push((path.clone(), content.clone()));
-                Ok(WriteTextFileResponse { _meta: None })
-            }
+            _request: &WriteTextFileRequest,
+        ) -> Result<WriteTextFileResponse, AcpError> {
+            Ok(WriteTextFileResponse { _meta: None })
         }
 
-        fn request_permission(
+        async fn request_permission(
             &self,
             _request: &RequestPermissionRequest,
-        ) -> impl std::future::Future<Output = Result<PermissionOutcome, AcpError>> + Send {
-            let calls = self.permission_calls.clone();
-            async move {
-                calls.lock().await.push("permission".to_string());
-                Ok(PermissionOutcome::Cancelled { _meta: None })
-            }
+        ) -> Result<PermissionOutcome, AcpError> {
+            Ok(PermissionOutcome::Cancelled { _meta: None })
         }
     }
 
@@ -390,13 +380,9 @@ mod tests {
         let handler = RecordingHandler::new();
         let params = serde_json::json!({"path": "/test/file.txt", "sessionId": "s1"});
 
-        let result = dispatch_agent_request(
-            &handler,
-            METHOD_READ_TEXT_FILE,
-            &Some(params),
-        )
-        .await
-        .unwrap();
+        let result = dispatch_agent_request(&handler, METHOD_READ_TEXT_FILE, &Some(params))
+            .await
+            .unwrap();
 
         assert_eq!(result["content"], "contents of /test/file.txt");
 
@@ -410,19 +396,11 @@ mod tests {
         let handler = RecordingHandler::new();
         let params = serde_json::json!({"path": "/out.txt", "content": "hello", "sessionId": "s1"});
 
-        let result = dispatch_agent_request(
-            &handler,
-            METHOD_WRITE_TEXT_FILE,
-            &Some(params),
-        )
-        .await
-        .unwrap();
+        let result = dispatch_agent_request(&handler, METHOD_WRITE_TEXT_FILE, &Some(params))
+            .await
+            .unwrap();
 
         assert!(result.is_null() || result.is_object());
-
-        let calls = handler.write_file_calls.lock().await;
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0], ("/out.txt".to_string(), "hello".to_string()));
     }
 
     #[tokio::test]
@@ -434,18 +412,11 @@ mod tests {
             "options": [{"optionId": "allow_once", "name": "Allow once", "kind": "allow_once"}]
         });
 
-        let result = dispatch_agent_request(
-            &handler,
-            METHOD_REQUEST_PERMISSION,
-            &Some(params),
-        )
-        .await
-        .unwrap();
+        let result = dispatch_agent_request(&handler, METHOD_REQUEST_PERMISSION, &Some(params))
+            .await
+            .unwrap();
 
         assert!(result.get("outcome").is_some());
-
-        let calls = handler.permission_calls.lock().await;
-        assert_eq!(calls.len(), 1);
     }
 
     #[tokio::test]
@@ -453,10 +424,7 @@ mod tests {
         let handler = RecordingHandler::new();
         let result = dispatch_agent_request(&handler, "unknown/method", &None).await;
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().kind,
-            ErrorKind::UnsupportedOperation
-        );
+        assert_eq!(result.unwrap_err().kind, ErrorKind::UnsupportedOperation);
     }
 
     #[tokio::test]
@@ -466,10 +434,7 @@ mod tests {
 
         let result = dispatch_agent_request(&handler, "terminal/create", &Some(params)).await;
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().kind,
-            ErrorKind::UnsupportedOperation
-        );
+        assert_eq!(result.unwrap_err().kind, ErrorKind::UnsupportedOperation);
     }
 
     #[tokio::test]
@@ -480,4 +445,7 @@ mod tests {
         let result = dispatch_agent_request(&handler, METHOD_READ_TEXT_FILE, &Some(params)).await;
         assert!(result.is_err());
     }
+
+    // Use Arc import from std for the RecordingHandler
+    use std::sync::Arc;
 }

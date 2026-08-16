@@ -42,7 +42,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Child;
 use tokio::sync::{Mutex, Notify};
 
@@ -330,11 +330,7 @@ impl TerminalTool {
             let wait_result = child.wait().await;
 
             let exit_status = match (kill_result, wait_result) {
-                (Ok(()), Ok(status)) => TerminalExitStatus {
-                    exit_code: status.code(),
-                    signal: status.signal().map(|s| s.to_string()),
-                    _meta: None,
-                },
+                (Ok(()), Ok(status)) => exit_status_to_terminal(status),
                 (Err(e), _) => {
                     return Err(ToolError::new(
                         error_code::TERMINAL_KILL_FAILED,
@@ -440,7 +436,7 @@ impl TerminalTool {
 
 /// Read all available data from a stream into the terminal's output buffer.
 async fn read_stream<R: AsyncRead + Unpin + Send + 'static>(
-    mut stream: Option<R>,
+    stream: Option<R>,
     terminals: &Arc<Mutex<ActiveTerminals>>,
     terminal_id: &str,
 ) {
@@ -463,7 +459,7 @@ async fn read_stream<R: AsyncRead + Unpin + Send + 'static>(
 }
 
 /// Convert a `tokio::process::ExitStatus` into an ACP `TerminalExitStatus`.
-fn exit_status_to_terminal(exit_status: tokio::process::ExitStatus) -> TerminalExitStatus {
+fn exit_status_to_terminal(exit_status: std::process::ExitStatus) -> TerminalExitStatus {
     TerminalExitStatus {
         exit_code: exit_status.code().map(|c| c as i64),
         #[cfg(unix)]

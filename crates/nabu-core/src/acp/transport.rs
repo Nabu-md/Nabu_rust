@@ -1,7 +1,7 @@
 //! # ACP Transport Abstraction
 //!
-//! Provides transport implementations for sending and receiving JSON-RPC 2.0
-//! messages over the Agent Communication Protocol.
+//! Provides a transport trait and concrete implementations for sending and
+//! receiving JSON-RPC 2.0 messages over the Agent Communication Protocol.
 //!
 //! Nabu is the ACP **client**. The transport connects to an external ACP
 //! **agent** process. For local agents, the transport is stdio — messages
@@ -13,7 +13,7 @@
 //! Callers provide either:
 //! - Pre-connected `std::process::Child` stdin/stdout handles (via tokio
 //!   async wrappers)
-//! - A `tokio::io::duplex` pipe pair for testing
+//! - A `tokio::io::duplex` pipe pair for in-process testing
 //!
 //! ## Wire format
 //!
@@ -24,16 +24,16 @@
 //!
 //! ## Concurrency model
 //!
-//! The [`StdioTransport`] wraps an `AsyncRead + AsyncWrite` pair. It can be
-//! split into a [`TransportReader`] and [`TransportWriter`] via
-//! [`StdioTransport::split`], allowing the ACP client to spawn a background
-//! message loop task with the reader while retaining the writer for sending
-//! requests.
+//! The [`StdioTransport`] can be used directly (with `&mut self` for both
+//! read and write) or split into separate [`StdioReader`] and [`StdioWriter`]
+//! halves via [`StdioTransport::split`], allowing the ACP client to spawn a
+//! background message loop with the reader while retaining the writer for
+//! sending requests. Both halves are `Send + Unpin`.
 
 use crate::acp::error::{AcpError, ErrorKind};
 use serde::Serialize;
 use serde_json::Value;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
 // ===========================================================================
@@ -68,48 +68,6 @@ pub trait Transport: Send + Unpin {
 }
 
 // ===========================================================================
-// Read/write half traits — allow splitting a transport
-// ===========================================================================
-
-/// A readable half of a transport — can receive JSON-RPC messages as lines.
-pub trait TransportRead: Send + Unpin {
-    /// Read the next JSON-RPC message line. Returns `None` at EOF.
-    fn read_line(
-        &mut self,
-    ) -> impl std::future::Future<Output = Result<Option<String>, AcpError>> + Send;
-}
-
-/// A writable half of a transport — can send JSON-RPC messages as lines.
-pub trait TransportWrite: Send + Unpin {
-    /// Send a JSON value as a single newline-terminated line.
-    fn send_json(
-        &mut self,
-        msg: &Value,
-    ) -> impl std::future::Future<Output = Result<(), AcpError>> + Send;
-
-    /// Send a pre-serialized JSON string as a single newline-terminated line.
-    fn send_raw(
-        &mut self,
-        json: String,
-    ) -> impl std::future::Future<Output = Result<(), AcpError>> + Send {
-        async move {
-            let line = if !json.ends_with('\n') {
-                format!("{}\n", json)
-            } else {
-                json
-            };
-            self.send_bytes(line.as_bytes()).await
-        }
-    }
-
-    /// Send raw bytes (including any framing) to the transport.
-    fn send_bytes(
-        &mut self,
-        bytes: &[u8],
-    ) -> impl std::future::Future<Output = Result<(), AcpError>> + Send;
-}
-
-// ===========================================================================
 // StdioTransport — real pipes
 // ===========================================================================
 
@@ -124,10 +82,9 @@ pub trait TransportWrite: Send + Unpin {
 ///
 /// ## Splitting for concurrency
 ///
-/// Use [`StdioTransport::split`] to obtain a [`TransportReader`] and
-/// [`TransportWriter`] for concurrent read/write access. The reader can be
-/// moved to a background task (the ACP message loop) while the writer is
-/// kept by the ACP client for sending requests.
+/// Use [`StdioTransport::split`] to obtain separate reader and writer handles
+/// for concurrent read/write access. The reader can be moved to a background
+/// task (the message loop) while the writer is kept by the ACP client.
 pub struct StdioTransport<R, W> {
     reader: BufReader<R>,
     writer: W,
@@ -136,7 +93,7 @@ pub struct StdioTransport<R, W> {
 impl<R, W> StdioTransport<R, W>
 where
     R: AsyncRead + Unpin + Send + 'static,
-    W: AsyncWrite + Unpin + Send + Send + 'static,
+    W: AsyncWrite + Unpin + Send + 'static,
 {
     /// Create a new stdio transport from pre-connected read/write halves.
     pub fn new(reader: R, writer: W) -> Self {
@@ -146,18 +103,18 @@ where
         }
     }
 
-    /// Split the transport into separate read and write halves.
+    /// Split the transport into separate reader and writer halves.
     ///
     /// The two halves can be moved into different async tasks. This is the
     /// recommended way to use `StdioTransport` with the `AcpClient`, which
     /// needs concurrent reading (for the message loop) and writing (for
     /// sending requests).
-    pub fn split(self) -> (TransportReader<R>, TransportWriter<W>) {
+    pub fn split(self) -> (StdioReader<R>, StdioWriter<W>) {
         (
-            TransportReader {
+            StdioReader {
                 reader: self.reader,
             },
-            TransportWriter {
+            StdioWriter {
                 writer: self.writer,
             },
         )
@@ -168,12 +125,21 @@ where
 ///
 /// Reads newline-delimited JSON-RPC messages from the agent's stdout.
 /// Can be moved to a background task.
-pub struct TransportReader<R> {
+pub struct StdioReader<R> {
     reader: BufReader<R>,
 }
 
-impl<R: AsyncRead + Unpin + Send> TransportRead for TransportReader<R> {
-    async fn read_line(&mut self) -> Result<Option<String>, AcpError> {
+/// Writer half of a split [`StdioTransport`].
+///
+/// Sends JSON-RPC messages to the agent's stdin. Can be moved to a
+/// different task than the reader.
+pub struct StdioWriter<W> {
+    writer: W,
+}
+
+impl<R: AsyncRead + Unpin + Send> StdioReader<R> {
+    /// Read the next complete message line. Returns `None` at EOF.
+    async fn read_line_inner(&mut self) -> Result<Option<String>, AcpError> {
         let mut line = String::new();
         let n = self
             .reader
@@ -183,33 +149,38 @@ impl<R: AsyncRead + Unpin + Send> TransportRead for TransportReader<R> {
         if n == 0 {
             return Ok(None); // EOF
         }
-        let line = line.trim_end_matches(['\n', '\r']).to_string();
-        if line.is_empty() {
-            self.read_line().await
+        let trimmed = line.trim_end_matches(['\n', '\r']).to_string();
+        if trimmed.is_empty() {
+            self.read_line_inner().await
         } else {
-            Ok(Some(line))
+            Ok(Some(trimmed))
         }
     }
 }
 
-impl<R: AsyncRead + Unpin + Send> Transport for TransportReader<R> {}
-
-/// Writer half of a split [`StdioTransport`].
-///
-/// Sends JSON-RPC messages to the agent's stdin. Can be moved to a
-/// different task than the reader.
-pub struct TransportWriter<W> {
-    writer: W,
-}
-
-impl<W: AsyncWrite + Unpin + Send> TransportWrite for TransportWriter<W> {
-    async fn send_json(&mut self, msg: &Value) -> Result<(), AcpError> {
-        let json = serde_json::to_string(msg)
-            .map_err(|e| AcpError::new(ErrorKind::MalformedRequest, e.to_string()))?;
-        self.send_bytes(json.as_bytes()).await
+impl<R: AsyncRead + Unpin + Send> Transport for StdioReader<R> {
+    async fn send_json(&mut self, _msg: &Value) -> Result<(), AcpError> {
+        Err(AcpError::new(
+            ErrorKind::Internal,
+            "StdioReader does not support sending",
+        ))
     }
 
-    async fn send_bytes(&mut self, bytes: &[u8]) -> Result<(), AcpError> {
+    async fn send_bytes(&mut self, _bytes: &[u8]) -> Result<(), AcpError> {
+        Err(AcpError::new(
+            ErrorKind::Internal,
+            "StdioReader does not support sending",
+        ))
+    }
+
+    async fn read_line(&mut self) -> Result<Option<String>, AcpError> {
+        self.read_line_inner().await
+    }
+}
+
+impl<W: AsyncWrite + Unpin + Send> StdioWriter<W> {
+    /// Send raw bytes (including any framing) to the transport.
+    async fn send_bytes_inner(&mut self, bytes: &[u8]) -> Result<(), AcpError> {
         let mut data = bytes.to_vec();
         if !data.ends_with(b"\n") {
             data.push(b'\n');
@@ -220,21 +191,41 @@ impl<W: AsyncWrite + Unpin + Send> TransportWrite for TransportWriter<W> {
     }
 }
 
-impl<W: AsyncWrite + Unpin + Send> Transport for TransportWriter<W> {}
-
-// ===========================================================================
-// StdioTransport as a combined Transport (no split)
-// ===========================================================================
-
-impl<R, W> Transport for StdioTransport<R, W>
-where
-    R: AsyncRead + Unpin + Send + 'static,
-    W: AsyncWrite + Unpin + Send + 'static,
-{
+impl<W: AsyncWrite + Unpin + Send> Transport for StdioWriter<W> {
     async fn send_json(&mut self, msg: &Value) -> Result<(), AcpError> {
         let json = serde_json::to_string(msg)
             .map_err(|e| AcpError::new(ErrorKind::MalformedRequest, e.to_string()))?;
         self.send_bytes(json.as_bytes()).await
+    }
+
+    async fn send_bytes(&mut self, bytes: &[u8]) -> Result<(), AcpError> {
+        self.send_bytes_inner(bytes).await
+    }
+
+    async fn read_line(&mut self) -> Result<Option<String>, AcpError> {
+        Err(AcpError::new(
+            ErrorKind::Internal,
+            "StdioWriter does not support reading",
+        ))
+    }
+}
+
+// Full StdioTransport also implements Transport (both read and write)
+impl<R, W> Transport for StdioTransport<R, W>
+where
+    R: AsyncRead + Unpin + Send,
+    W: AsyncWrite + Unpin + Send,
+{
+    async fn send_json(&mut self, msg: &Value) -> Result<(), AcpError> {
+        let json = serde_json::to_string(msg)
+            .map_err(|e| AcpError::new(ErrorKind::MalformedRequest, e.to_string()))?;
+        let mut data = json.into_bytes();
+        if !data.ends_with(b"\n") {
+            data.push(b'\n');
+        }
+        self.writer.write_all(&data).await.map_err(AcpError::from)?;
+        self.writer.flush().await.map_err(AcpError::from)?;
+        Ok(())
     }
 
     async fn send_bytes(&mut self, bytes: &[u8]) -> Result<(), AcpError> {
@@ -257,11 +248,11 @@ where
         if n == 0 {
             return Ok(None);
         }
-        let line = line.trim_end_matches(['\n', '\r']).to_string();
-        if line.is_empty() {
+        let trimmed = line.trim_end_matches(['\n', '\r']).to_string();
+        if trimmed.is_empty() {
             self.read_line().await
         } else {
-            Ok(Some(line))
+            Ok(Some(trimmed))
         }
     }
 }
@@ -308,10 +299,11 @@ impl MockTransport {
     }
 
     /// Feed a raw JSON string to the client from the peer (agent).
+    #[allow(dead_code)]
     pub fn feed(&self, json: &str) -> Result<(), AcpError> {
         self.outbound
             .send(json.to_string())
-            .map_err(|_| AcpError::transport_closed("mock transport closed"))?;
+            .map_err(|_| AcpError::transport_closed("channel transport closed"))?;
         Ok(())
     }
 }
@@ -421,7 +413,6 @@ impl Transport for MockPeer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json;
 
     #[tokio::test]
     async fn mock_transport_roundtrip() {
@@ -493,49 +484,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mock_transport_feed_json_object() {
-        let (mut client, peer) = MockTransport::pair();
-        let val = serde_json::json!({"jsonrpc":"2.0","id":1,"result":{}});
-        peer.feed(&val).unwrap();
-
-        let line = client.read_line().await.unwrap().unwrap();
-        assert!(line.contains("result"));
-    }
-
-    #[tokio::test]
     async fn stdio_transport_with_duplex() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt as Awe};
-
-        let (client_read, mut agent_write) = tokio::io::duplex(8192);
+        let (client_read, agent_write) = tokio::io::duplex(8192);
         let (agent_read, client_write) = tokio::io::duplex(8192);
 
         let mut transport = StdioTransport::new(client_read, client_write);
 
         // Simulate agent writing
         tokio::spawn(async move {
-            agent_write
-                .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n")
+            let mut writer = agent_write;
+            writer
+                .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n")
                 .await
                 .unwrap();
-            agent_write.flush().await.unwrap();
+            writer.flush().await.unwrap();
         });
 
         let line = transport.read_line().await.unwrap();
         assert!(line.is_some());
-        assert!(line.unwrap().contains("result"));
+        assert!(line.unwrap().contains("ok"));
     }
 
     #[tokio::test]
-    async fn stdio_transport_split() {
+    async fn stdio_transport_split_read_write() {
         let (client_read, agent_write) = tokio::io::duplex(8192);
         let (agent_read, client_write) = tokio::io::duplex(8192);
 
         let transport = StdioTransport::new(client_read, client_write);
         let (mut reader, mut writer) = transport.split();
 
-        // Write from writer
+        // Agent writes a message
         tokio::spawn(async move {
-            use tokio::io::AsyncWriteExt;
             let mut w = agent_write;
             w.write_all(b"hello from agent\n").await.unwrap();
             w.flush().await.unwrap();
@@ -543,5 +522,13 @@ mod tests {
 
         let line = reader.read_line().await.unwrap();
         assert_eq!(line, Some("hello from agent".to_string()));
+
+        // Writer writes to agent's stdin
+        writer.send_raw("hello to agent".to_string()).await.unwrap();
+
+        let mut buf = [0u8; 256];
+        let n = agent_read.read(&mut buf).await.unwrap();
+        let received = std::str::from_utf8(&buf[..n]).unwrap();
+        assert_eq!(received, "hello to agent\n");
     }
 }
