@@ -151,7 +151,7 @@ pub enum ObjectType {
     Repository,
     /// YouTube video reference
     YouTubeVideo,
-    /// Article (readability-extracted web content)
+    /// Article content (e.g. extracted reading-material)
     Article,
     /// Email capture
     Email,
@@ -211,7 +211,7 @@ impl ObjectType {
 pub enum ObjectContent {
     /// Markdown body text
     Markdown(String),
-    /// Rich HTML content (e.g., extracted articles)
+    /// Rich HTML content
     RichHtml(String),
     /// Raw text (no formatting)
     PlainText(String),
@@ -337,19 +337,15 @@ pub enum ProcessingState {
 /// Capture source types
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CaptureSource {
-    Browser,
     Clipboard,
     Screenshot,
     FileDrop,
     WatchFolder,
-    SafariReader,
     YouTube,
     GitHub,
     /// Email capture (`.eml` files, email text, forwarded messages)
     Email,
     Url,
-    /// Reader-mode / readability-extracted article content.
-    Article,
     Manual,
     Api,
     Plugin,

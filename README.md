@@ -75,7 +75,6 @@ Download a prebuilt DMG from the [GitHub Releases](https://github.com/Nabu/Nabu/
 - **macOS Vision OCR** — automatic text extraction from images
 - **PDF annotation** — dedicated viewer with highlight-to-note conversion
 - **Whisper.cpp dictation** — local speech-to-text with configurable model sizes
-- **Native messaging host** — Unix socket server for browser extension integration
 
 ---
 
@@ -86,7 +85,6 @@ Download a prebuilt DMG from the [GitHub Releases](https://github.com/Nabu/Nabu/
 │                    src-tauri/ (Tauri v2)                  │
 │  ── IPC commands ──────── 60+ Tauri invoke handlers     │
 │  ── Event bridge ──────── EventBus → frontend (nabu-event)  │
-│  ── Native messaging ─── Unix socket server              │
 └────────┬─────────────────────────────────────────────────┘
          │ WASM / cdylib
 ┌────────┴─────────────────────────────────────────────────┐
@@ -113,7 +111,7 @@ Download a prebuilt DMG from the [GitHub Releases](https://github.com/Nabu/Nabu/
 ### Data Flow
 
 ```
-Capture (clipboard, file, folder, browser)
+Capture (clipboard, file, folder)
     │
     ▼
 CaptureEngine → WorkQueue → WorkerPool
