@@ -119,7 +119,7 @@ pub use registry::{AgentRegistry, RegistryError, RegistryResult};
 pub use stdio_channel::StdioChannel;
 pub use acp_client::{AcpClient, AcpClientError};
 pub use handler::NabuAcpHandler;
-pub use session::AcpSessionManager;
+pub use session::{AcpConnectConfig, AcpSessionError, AcpSessionManager};
 
 // Re-export ProcessId from the event_bus module for convenience.
 pub use crate::event_bus::ProcessId;
