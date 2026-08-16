@@ -1,5 +1,5 @@
 //! # ACP Client
-use crate::acp::error::{AcpError, ErrorKind};
+use crate::acp::error::AcpError;
 use crate::acp::events::{
     classify_message, classify_notification, InboundMessage, NotificationKind,
 };
@@ -334,15 +334,15 @@ impl<T: Transport + 'static> AcpClient<T> {
                     method, timeout_duration
                 )))
             }
-            // Cancelled (oneshot sender was dropped)
+            // Cancelled (oneshot sender was dropped or channel closed)
             Ok(Err(_)) => Err(AcpError::request_cancelled(format!(
                 "request '{}' was cancelled",
                 method
             ))),
-            // Got a result
-            Ok(Ok(result)) => Ok(Some(result)),
-            // Got an RPC error
-            Ok(Err(rpc_err)) => Err(AcpError::from(rpc_err)),
+            // Got a success result
+            Ok(Ok(Ok(value))) => Ok(Some(value)),
+            // Got an RPC error response
+            Ok(Ok(Err(rpc_err))) => Err(AcpError::from(rpc_err)),
         }
     }
 

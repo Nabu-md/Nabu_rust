@@ -33,7 +33,7 @@
 use crate::acp::error::{AcpError, ErrorKind};
 use serde::Serialize;
 use serde_json::Value;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
 // ===========================================================================
