@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["sync", "time", "rt", "macros", "process", "io-util", "net", "io-std"] }
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
@@ -30,6 +30,12 @@ tracing-appender = "0.2"
 # (it wraps platform-specific kernel notification APIs); the watcher module
 # is gated to `cfg(not(target_arch = "wasm32"))` accordingly.
 notify = "8"
+
+# tokio process/IO/net features are native-only (UNIX sockets, subprocesses).
+# On wasm they pull in `mio::net`, which does not compile for
+# wasm32-unknown-unknown. Features unify with the base tokio dependency above
+# on native targets, so the desktop build is unchanged.
+tokio = { version = "1", features = ["process", "io-util", "net", "io-std"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # uuid's `v4` feature needs an explicit randomness source on wasm32-unknown-unknown.

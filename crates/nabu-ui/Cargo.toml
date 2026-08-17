@@ -31,6 +31,9 @@ wasm-bindgen-futures = "0.4.50"
 # instead; chrono is only used for RFC 3339 parsing (no clock needed).
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 getrandom = { version = "0.2", features = ["js"] }
+# Unify the transitively-pulled getrandom 0.3 (via rand_core in the Dioxus
+# tree) and enable its `wasm_js` backend so the wasm32 frontend builds cleanly.
+getrandom03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 console_error_panic_hook = "0.1.7"
 # Frontend diagnostics for the event layer (and future real-time features).
 # Mirrors `nabu_core::diagnostics` on the backend — routes `tracing` macros to
