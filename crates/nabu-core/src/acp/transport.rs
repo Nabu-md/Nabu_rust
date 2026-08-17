@@ -291,17 +291,17 @@ impl MockTransport {
     /// - `client_transport`: what the ACP client reads/writes
     /// - `peer`: what tests use to feed responses and read requests
     pub fn pair() -> (Self, MockPeer) {
-        let (tx_to_client, rx_from_peer) = mpsc::unbounded_channel::<String>();
-        let (tx_from_client, rx_to_peer) = mpsc::unbounded_channel::<String>();
+        let (tx_to_peer, rx_from_peer) = mpsc::unbounded_channel::<String>();
+        let (tx_from_peer, rx_to_client) = mpsc::unbounded_channel::<String>();
 
         let client = Self {
-            inbound: rx_from_peer,
-            outbound: tx_to_client,
+            inbound: rx_to_client,
+            outbound: tx_to_peer,
         };
 
         let peer = MockPeer {
-            inbound: rx_to_peer,
-            outbound: tx_from_client,
+            inbound: rx_from_peer,
+            outbound: tx_from_peer,
         };
 
         (client, peer)
