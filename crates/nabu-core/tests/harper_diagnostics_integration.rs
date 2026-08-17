@@ -7,7 +7,7 @@
 //! 4. A subscriber receives the `DiagnosticEvent::BatchPublished` event.
 
 use nabu_core::diagnostic::{Diagnostic, DiagnosticBatch, DiagnosticEvent};
-use nabu_core::diagnostic::{DiagnosticSeverity, TextRange, TextPosition};
+use nabu_core::diagnostic::{DiagnosticSeverity, TextPosition, TextRange};
 use nabu_core::event_bus::kinds;
 use nabu_core::event_bus::{EventBus, PipelineEvent};
 use nabu_core::models::{KnowledgeObject, ObjectContent, ObjectType};
@@ -25,7 +25,11 @@ async fn harper_processor_produces_diagnostics_for_text_content() {
     let processor = nabu_core::processing::processors::HarperProcessor;
 
     let result = processor
-        .process(&ctx, nabu_core::jobs::workers::progress::ProgressReporter::noop(), nabu_core::jobs::cancellation::CancellationToken::new())
+        .process(
+            &ctx,
+            nabu_core::jobs::workers::progress::ProgressReporter::noop(),
+            nabu_core::jobs::cancellation::CancellationToken::new(),
+        )
         .await;
 
     // Harper should detect at least one issue in this text.
@@ -58,7 +62,11 @@ async fn harper_processor_skips_uri_objects() {
     let processor = nabu_core::processing::processors::HarperProcessor;
 
     let result = processor
-        .process(&ctx, nabu_core::jobs::workers::progress::ProgressReporter::noop(), nabu_core::jobs::cancellation::CancellationToken::new())
+        .process(
+            &ctx,
+            nabu_core::jobs::workers::progress::ProgressReporter::noop(),
+            nabu_core::jobs::cancellation::CancellationToken::new(),
+        )
         .await;
 
     assert!(!result.modified);
@@ -73,16 +81,21 @@ async fn pipeline_publishes_harper_diagnostics_through_event_bus() {
     let received_clone = received.clone();
 
     // Subscribe to diagnostic events from the Harper processor.
-    bus.subscribe(kinds::DIAGNOSTIC_BATCH_PUBLISHED, move |pe: &PipelineEvent| {
-        if let PipelineEvent::Diagnostic(e) = pe {
-            if e.origin() == "harper_processor" {
-                received_clone.lock().unwrap().push(e.clone());
+    bus.subscribe(
+        kinds::DIAGNOSTIC_BATCH_PUBLISHED,
+        move |pe: &PipelineEvent| {
+            if let PipelineEvent::Diagnostic(e) = pe {
+                if e.origin() == "harper_processor" {
+                    received_clone.lock().unwrap().push(e.clone());
+                }
             }
-        }
-    });
+        },
+    );
 
     let mut pipeline = nabu_core::processing::pipeline::ProcessingPipeline::with_event_bus(bus);
-    pipeline.register(std::sync::Arc::new(nabu_core::processing::processors::HarperProcessor));
+    pipeline.register(std::sync::Arc::new(
+        nabu_core::processing::processors::HarperProcessor,
+    ));
 
     let obj = KnowledgeObject::new(
         ObjectType::Note,
@@ -103,7 +116,11 @@ async fn pipeline_publishes_harper_diagnostics_through_event_bus() {
         // We still verify the result ran without panic.
         assert!(!result.modified || result.error.is_none());
     } else {
-        assert_eq!(stored.len(), 1, "expected exactly one diagnostic batch event");
+        assert_eq!(
+            stored.len(),
+            1,
+            "expected exactly one diagnostic batch event"
+        );
 
         let event = &stored[0];
         match event {
@@ -127,30 +144,35 @@ async fn pipeline_does_not_publish_empty_diagnostic_batches() {
     let published_clone = published.clone();
     let cleared_clone = cleared.clone();
 
-    bus.subscribe(kinds::DIAGNOSTIC_BATCH_PUBLISHED, move |pe: &PipelineEvent| {
-        if let PipelineEvent::Diagnostic(e) = pe {
+    bus.subscribe(
+        kinds::DIAGNOSTIC_BATCH_PUBLISHED,
+        move |pe: &PipelineEvent| {
+            if let PipelineEvent::Diagnostic(e) = pe {
                 if e.origin() == "harper_processor" {
                     *published_clone.lock().unwrap() += 1;
                 }
-        }
-    });
-
-    bus.subscribe(kinds::DIAGNOSTIC_BATCH_CLEARED, move |pe: &PipelineEvent| {
-        if let PipelineEvent::Diagnostic(e) = pe {
-            if e.origin() == "harper_processor" {
-                *cleared_clone.lock().unwrap() += 1;
             }
-        }
-    });
+        },
+    );
+
+    bus.subscribe(
+        kinds::DIAGNOSTIC_BATCH_CLEARED,
+        move |pe: &PipelineEvent| {
+            if let PipelineEvent::Diagnostic(e) = pe {
+                if e.origin() == "harper_processor" {
+                    *cleared_clone.lock().unwrap() += 1;
+                }
+            }
+        },
+    );
 
     let mut pipeline = nabu_core::processing::pipeline::ProcessingPipeline::with_event_bus(bus);
-    pipeline.register(std::sync::Arc::new(nabu_core::processing::processors::HarperProcessor));
+    pipeline.register(std::sync::Arc::new(
+        nabu_core::processing::processors::HarperProcessor,
+    ));
 
     // Empty text should produce no diagnostics.
-    let obj = KnowledgeObject::new(
-        ObjectType::Note,
-        ObjectContent::PlainText(String::new()),
-    );
+    let obj = KnowledgeObject::new(ObjectType::Note, ObjectContent::PlainText(String::new()));
 
     let progress = nabu_core::jobs::workers::progress::ProgressReporter::noop();
     let cancellation = nabu_core::jobs::cancellation::CancellationToken::new();
@@ -159,12 +181,14 @@ async fn pipeline_does_not_publish_empty_diagnostic_batches() {
 
     assert!(!result.has_diagnostics());
     assert_eq!(
-        *published.lock().unwrap(), 0,
+        *published.lock().unwrap(),
+        0,
         "no batch events should be published for empty diagnostics"
     );
     // Harper is a diagnostic producer, so BatchCleared should fire.
     assert_eq!(
-        *cleared.lock().unwrap(), 1,
+        *cleared.lock().unwrap(),
+        1,
         "BatchCleared should be published for diagnostic producers with zero findings"
     );
 }
@@ -188,7 +212,10 @@ fn convert_lint_produces_valid_diagnostic() {
     let diag = convert_lint(&lint, &source).unwrap();
 
     assert_eq!(diag.severity, DiagnosticSeverity::Error);
-    assert_eq!(diag.category, Some(nabu_core::diagnostic::DiagnosticCategory::SpellCheck));
+    assert_eq!(
+        diag.category,
+        Some(nabu_core::diagnostic::DiagnosticCategory::SpellCheck)
+    );
     assert_eq!(diag.source, Some("harper".to_string()));
     assert_eq!(diag.range.start, TextPosition::new(0, 0));
     assert_eq!(diag.range.end, TextPosition::new(0, 3));
@@ -204,11 +231,7 @@ fn diagnostic_batch_serializes_with_harper_diagnostics() {
     .with_source("harper")
     .with_code("Spelling");
 
-    let batch = DiagnosticBatch::new(
-        "harper_processor",
-        "vault:notes/test.md",
-        vec![diag],
-    );
+    let batch = DiagnosticBatch::new("harper_processor", "vault:notes/test.md", vec![diag]);
 
     let json = serde_json::to_string(&batch).expect("serialize batch");
     let back: DiagnosticBatch = serde_json::from_str(&json).expect("deserialize batch");

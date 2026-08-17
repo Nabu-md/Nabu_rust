@@ -175,12 +175,15 @@ mod tests {
     #[async_trait]
     impl Tool for EchoTool {
         fn spec(&self) -> ToolSpec {
-            ToolSpec::new("nabu:echo", "Echo", "Echoes input")
-                .with_param(ToolParam::required("msg", ToolParamSchema::of_type("string")))
+            ToolSpec::new("nabu:echo", "Echo", "Echoes input").with_param(ToolParam::required(
+                "msg",
+                ToolParamSchema::of_type("string"),
+            ))
         }
 
         async fn call(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
-            let msg = call.arguments
+            let msg = call
+                .arguments
                 .as_ref()
                 .and_then(|v| v.get("msg"))
                 .and_then(|v| v.as_str())

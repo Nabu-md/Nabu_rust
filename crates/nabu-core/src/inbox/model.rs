@@ -301,32 +301,25 @@ mod tests {
         ] {
             set_status(&mut obj, status);
             assert_eq!(inbox_item_status(&obj), status, "status {raw} round-trips");
-            assert_eq!(obj.custom_property_text("inbox_status").as_deref(), Some(raw));
+            assert_eq!(
+                obj.custom_property_text("inbox_status").as_deref(),
+                Some(raw)
+            );
         }
     }
 
     #[test]
     fn classify_ready_distinguishes_ready_from_pending() {
-        let ready = with_status(
-            ObjectContent::Markdown(".".into()),
-            "R",
-            "ready",
-        );
+        let ready = with_status(ObjectContent::Markdown(".".into()), "R", "ready");
         assert!(classify_ready(&ready), "ready status is ready");
 
-        let pending = with_status(
-            ObjectContent::Markdown(".".into()),
-            "P",
-            "pending",
-        );
+        let pending = with_status(ObjectContent::Markdown(".".into()), "P", "pending");
         assert!(!classify_ready(&pending), "pending is not ready");
 
         // Legacy capture: no `inbox_status`, but a `suggested_folder` marker →
         // advertised as ready by the back-compat branch.
-        let mut legacy = KnowledgeObject::new(
-            ObjectType::Note,
-            ObjectContent::Markdown(".".into()),
-        );
+        let mut legacy =
+            KnowledgeObject::new(ObjectType::Note, ObjectContent::Markdown(".".into()));
         legacy.metadata.title = Some("legacy".into());
         legacy.custom_properties.insert(
             "suggested_folder".to_string(),
@@ -380,8 +373,10 @@ mod tests {
         assert_eq!(resolve_destination(&obj), "Writing/Notes");
 
         // Empty after trimming → default Inbox.
-        obj.custom_properties
-            .insert("destination_folder".to_string(), CustomPropertyValue::Text("///".into()));
+        obj.custom_properties.insert(
+            "destination_folder".to_string(),
+            CustomPropertyValue::Text("///".into()),
+        );
         assert_eq!(resolve_destination(&obj), "Inbox");
     }
 
@@ -408,7 +403,8 @@ mod tests {
 
     #[test]
     fn render_markdown_turns_uri_into_bookmark() {
-        let mut obj = KnowledgeObject::new(ObjectType::Note, ObjectContent::Uri("https://x.com".into()));
+        let mut obj =
+            KnowledgeObject::new(ObjectType::Note, ObjectContent::Uri("https://x.com".into()));
         obj.metadata.title = Some("Bookmark".into());
         assert_eq!(
             render_markdown(&obj),

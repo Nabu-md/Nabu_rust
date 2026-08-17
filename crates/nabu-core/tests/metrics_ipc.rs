@@ -83,8 +83,12 @@ fn metrics_aggregates_from_multiple_services() {
         }
     }
 
-    let agg_a = Arc::new(MockAggregator { name: "svc_a".to_string() });
-    let agg_b = Arc::new(MockAggregator { name: "svc_b".to_string() });
+    let agg_a = Arc::new(MockAggregator {
+        name: "svc_a".to_string(),
+    });
+    let agg_b = Arc::new(MockAggregator {
+        name: "svc_b".to_string(),
+    });
 
     ctx.register("svc_a", agg_a.clone());
     ctx.register_metrics_aggregator("svc_a", agg_a);

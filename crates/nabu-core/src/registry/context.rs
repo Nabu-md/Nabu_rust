@@ -58,9 +58,9 @@ use crate::registry::lifecycle::{Lifecycle, LifecycleError, LifecycleManager, Li
 use crate::registry::metrics::{MetricsAggregator, RuntimeMetrics};
 use crate::registry::ServiceRegistry;
 
+use crate::conversations::ConversationStore;
 use crate::diagnostics::PerformanceMonitor;
 use crate::jobs;
-use crate::conversations::ConversationStore;
 
 // ---------------------------------------------------------------------------
 // Forward type aliases — prevents circular crate dependencies.
@@ -328,7 +328,10 @@ impl ApplicationContext {
         &self,
         request: crate::plugin::PluginInvocationRequest,
     ) -> crate::plugin::PluginInvocationResponse {
-        let pm = self.plugin_manager.read().expect("plugin manager lock poisoned");
+        let pm = self
+            .plugin_manager
+            .read()
+            .expect("plugin manager lock poisoned");
         pm.invoke_capability(request)
     }
 
@@ -438,7 +441,9 @@ impl ApplicationContext {
     }
 
     /// Returns the universal history manager if registered.
-    pub fn history_manager(&self) -> Option<Arc<std::sync::RwLock<crate::history::HistoryManager>>> {
+    pub fn history_manager(
+        &self,
+    ) -> Option<Arc<std::sync::RwLock<crate::history::HistoryManager>>> {
         self.resolve("history_manager")
     }
 
@@ -557,9 +562,7 @@ impl ApplicationContext {
         );
 
         // ── 3. Capability count (separate lock, acquired independently) ─
-        let capability_count = self
-            .capability_registry()
-            .capability_count();
+        let capability_count = self.capability_registry().capability_count();
 
         // ── 4. Collect per-service lifecycle for known managed services ─
         let mut services: Vec<ServiceEntry> = Vec::new();
@@ -633,7 +636,10 @@ impl ApplicationContext {
 
         // PluginManager (behind RwLock — always constructed, may be Created)
         {
-            let pm = self.plugin_manager.read().expect("plugin manager lock poisoned");
+            let pm = self
+                .plugin_manager
+                .read()
+                .expect("plugin manager lock poisoned");
             record_service("plugin_manager", pm.lifecycle_stage());
         }
 
@@ -718,9 +724,7 @@ impl ApplicationContext {
                 Err(_) => {
                     tracing::error!("Registry lock poisoned during metrics collection");
                     result.error_count += 1;
-                    result
-                        .errors
-                        .push("registry: lock poisoned".to_string());
+                    result.errors.push("registry: lock poisoned".to_string());
                     return result;
                 }
             };
@@ -757,7 +761,7 @@ impl ApplicationContext {
 
         result
     }
-    
+
     ///
     /// The `required` list defines service keys that MUST be registered for
     /// the application to function. Missing required services are reported
@@ -802,7 +806,13 @@ impl ApplicationContext {
     pub fn validate_core_services(&self) -> ValidationReport {
         self.validate_services(
             &["event_bus", "capture_engine", "pipeline", "storage_manager"],
-            &["job_queue", "worker_pool", "vault_graph", "indexer", "conversation_store"],
+            &[
+                "job_queue",
+                "worker_pool",
+                "vault_graph",
+                "indexer",
+                "conversation_store",
+            ],
         )
     }
 
@@ -945,7 +955,10 @@ impl ApplicationContext {
         }
 
         // --- PluginManager (foundation — no plugin discovery/loading) ---
-        let pm = self.plugin_manager.read().expect("plugin manager lock poisoned");
+        let pm = self
+            .plugin_manager
+            .read()
+            .expect("plugin manager lock poisoned");
         if let Err(e) = pm.initialize() {
             tracing::error!(error = %e, "Failed to initialize PluginManager");
             errors.push(format!("PluginManager: {}", e));
@@ -1291,12 +1304,7 @@ impl ApplicationContextBuilder {
         }
 
         tracing::info!("PluginManager created");
-        let ctx = ApplicationContext::new(
-            registry,
-            event_bus,
-            capability_registry,
-            plugin_manager,
-        );
+        let ctx = ApplicationContext::new(registry, event_bus, capability_registry, plugin_manager);
         tracing::info!("PluginManager registered");
 
         ctx
@@ -1336,15 +1344,9 @@ pub fn build_standard_application_context() -> ApplicationContext {
     // PluginUnloaded, PluginError) flow through the shared plugin event
     // contract. No plugin discovery or loading occurs — only manager
     // preparation.
-    let plugin_manager = PluginManager::for_application()
-        .with_event_bus((*event_bus).clone());
+    let plugin_manager = PluginManager::for_application().with_event_bus((*event_bus).clone());
 
-    let ctx = ApplicationContext::new(
-        registry,
-        event_bus,
-        capability_registry,
-        plugin_manager,
-    );
+    let ctx = ApplicationContext::new(registry, event_bus, capability_registry, plugin_manager);
 
     tracing::info!(
         capabilities = ctx.capability_registry().capability_count(),
@@ -1516,7 +1518,10 @@ mod tests {
         let ctx = ApplicationContext::builder().build();
         let pm = ctx.plugin_manager();
         assert_eq!(pm.name(), "plugin_manager");
-        assert_eq!(pm.nabu_version(), &Version::parse(crate::APPLICATION_VERSION).unwrap_or(Version::new(0, 1, 0)));
+        assert_eq!(
+            pm.nabu_version(),
+            &Version::parse(crate::APPLICATION_VERSION).unwrap_or(Version::new(0, 1, 0))
+        );
     }
 
     #[test]

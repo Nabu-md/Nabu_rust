@@ -295,7 +295,9 @@ impl ToolRegistry {
                 );
                 ToolResult::error(
                     err,
-                    Some(super::models::ToolExecutionMeta::from_duration(tool_id, duration)),
+                    Some(super::models::ToolExecutionMeta::from_duration(
+                        tool_id, duration,
+                    )),
                 )
             }
         }
@@ -328,7 +330,9 @@ impl ToolRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tool_calling::models::{ToolError, ToolParam, ToolParamSchema, ToolResultStatus, ToolSpec};
+    use crate::tool_calling::models::{
+        ToolError, ToolParam, ToolParamSchema, ToolResultStatus, ToolSpec,
+    };
     use async_trait::async_trait;
     use serde_json::json;
 
@@ -350,11 +354,14 @@ mod tests {
     #[async_trait]
     impl Tool for EchoTool {
         fn spec(&self) -> ToolSpec {
-            ToolSpec::new("nabu:echo", "Echo", "Echoes input")
-                .with_param(ToolParam::required("msg", ToolParamSchema::of_type("string")))
+            ToolSpec::new("nabu:echo", "Echo", "Echoes input").with_param(ToolParam::required(
+                "msg",
+                ToolParamSchema::of_type("string"),
+            ))
         }
         async fn call(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
-            let msg = call.arguments
+            let msg = call
+                .arguments
                 .as_ref()
                 .and_then(|v| v.get("msg"))
                 .and_then(|v| v.as_str())
@@ -381,8 +388,18 @@ mod tests {
                 .with_param(ToolParam::required("b", ToolParamSchema::of_type("number")))
         }
         async fn call(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
-            let a = call.arguments.as_ref().and_then(|v| v.get("a")).and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let b = call.arguments.as_ref().and_then(|v| v.get("b")).and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let a = call
+                .arguments
+                .as_ref()
+                .and_then(|v| v.get("a"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            let b = call
+                .arguments
+                .as_ref()
+                .and_then(|v| v.get("b"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
             Ok(ToolResult::success(Some(json!(a + b)), None))
         }
     }
@@ -489,10 +506,9 @@ mod tests {
         let registry = ToolRegistry::new();
         registry.register(Arc::new(AddTool)).await;
 
-        let result = registry.call_with_args(
-            "nabu:add",
-            Some(json!({ "a": 3.0, "b": 4.0 })),
-        ).await;
+        let result = registry
+            .call_with_args("nabu:add", Some(json!({ "a": 3.0, "b": 4.0 })))
+            .await;
         assert!(result.is_success());
         assert_eq!(result.result, Some(json!(7.0)));
     }
@@ -539,7 +555,9 @@ mod tests {
 #[cfg(test)]
 mod tool_calling {
     use super::*;
-    use crate::tool_calling::models::{ToolCall, ToolError, ToolParam, ToolParamSchema, ToolResultStatus, ToolSpec};
+    use crate::tool_calling::models::{
+        ToolCall, ToolError, ToolParam, ToolParamSchema, ToolResultStatus, ToolSpec,
+    };
     use crate::tool_calling::{ToolRegistry, ToolResult};
     use async_trait::async_trait;
     use serde_json::json;
@@ -595,16 +613,24 @@ mod tool_calling {
     impl Tool for ParamsTool {
         fn spec(&self) -> ToolSpec {
             ToolSpec::new("nabu:params", "Params", "Requires named params")
-                .with_param(ToolParam::required("name", ToolParamSchema::of_type("string")))
-                .with_param(ToolParam::optional("greeting", ToolParamSchema::of_type("string")))
+                .with_param(ToolParam::required(
+                    "name",
+                    ToolParamSchema::of_type("string"),
+                ))
+                .with_param(ToolParam::optional(
+                    "greeting",
+                    ToolParamSchema::of_type("string"),
+                ))
         }
         async fn call(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
-            let name = call.arguments
+            let name = call
+                .arguments
                 .as_ref()
                 .and_then(|v| v.get("name"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
-            let greeting = call.arguments
+            let greeting = call
+                .arguments
                 .as_ref()
                 .and_then(|v| v.get("greeting"))
                 .and_then(|v| v.as_str())
@@ -620,7 +646,9 @@ mod tool_calling {
     async fn full_lifecycle_register_call_unregister() {
         let registry = ToolRegistry::new();
         let counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let tool = Arc::new(CounterTool { calls: counter.clone() });
+        let tool = Arc::new(CounterTool {
+            calls: counter.clone(),
+        });
 
         // Register
         registry.register(tool).await;
@@ -644,7 +672,9 @@ mod tool_calling {
     #[tokio::test]
     async fn tool_not_found_returns_not_found_status() {
         let registry = ToolRegistry::new();
-        let result = registry.call(ToolCall::without_args("nabu:nonexistent")).await;
+        let result = registry
+            .call(ToolCall::without_args("nabu:nonexistent"))
+            .await;
         assert_eq!(result.status, ToolResultStatus::ToolNotFound);
         assert_eq!(result.error.as_ref().unwrap().code, "TOOL_NOT_FOUND");
     }
@@ -675,10 +705,7 @@ mod tool_calling {
             .call_with_args("nabu:params", Some(json!({ "name": "World" })))
             .await;
         assert!(result.is_success());
-        assert_eq!(
-            result.result,
-            Some(json!({ "message": "Hello, World!" }))
-        );
+        assert_eq!(result.result, Some(json!({ "message": "Hello, World!" })));
     }
 
     #[tokio::test]
@@ -687,13 +714,13 @@ mod tool_calling {
         registry.register(Arc::new(ParamsTool)).await;
 
         let result = registry
-            .call_with_args("nabu:params", Some(json!({ "name": "World", "greeting": "Hi" })))
+            .call_with_args(
+                "nabu:params",
+                Some(json!({ "name": "World", "greeting": "Hi" })),
+            )
             .await;
         assert!(result.is_success());
-        assert_eq!(
-            result.result,
-            Some(json!({ "message": "Hi, World!" }))
-        );
+        assert_eq!(result.result, Some(json!({ "message": "Hi, World!" })));
     }
 
     #[tokio::test]
@@ -784,9 +811,7 @@ mod tool_calling {
         registry.register(Arc::new(PingTool)).await;
 
         // Tool with no params; arguments = None should work
-        let result = registry
-            .call_with_args("nabu:ping", None)
-            .await;
+        let result = registry.call_with_args("nabu:ping", None).await;
         assert!(result.is_success());
         assert_eq!(result.result, Some(json!("pong")));
     }
@@ -795,17 +820,19 @@ mod tool_calling {
     async fn concurrent_calls_are_supported() {
         let registry = Arc::new(ToolRegistry::new());
         let counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        registry.register(Arc::new(CounterTool { calls: counter.clone() })).await;
+        registry
+            .register(Arc::new(CounterTool {
+                calls: counter.clone(),
+            }))
+            .await;
 
         // Spawn 10 concurrent calls
         let calls: Vec<_> = (0..10)
             .map(|_| {
                 let registry = Arc::clone(&registry);
-                tokio::spawn(async move {
-                    registry
-                        .call(ToolCall::without_args("nabu:counter"))
-                        .await
-                })
+                tokio::spawn(
+                    async move { registry.call(ToolCall::without_args("nabu:counter")).await },
+                )
             })
             .collect();
 

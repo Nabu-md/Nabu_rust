@@ -49,9 +49,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// The numeric [`level`](Self::level) value is stable and suitable for
 /// persistence, IPC, and cross-process comparison.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[repr(u8)]
 #[non_exhaustive]
 pub enum DiagnosticSeverity {
@@ -245,7 +243,8 @@ mod tests {
     fn serialization_round_trips() {
         for &sev in DiagnosticSeverity::ALL {
             let json = serde_json::to_string(&sev).expect("serialize severity");
-            let back: DiagnosticSeverity = serde_json::from_str(&json).expect("deserialize severity");
+            let back: DiagnosticSeverity =
+                serde_json::from_str(&json).expect("deserialize severity");
             assert_eq!(sev, back, "round-trip failed for {:?}", sev);
             // Serialized value must equal the kebab-case name.
             assert_eq!(json, format!("\"{}\"", sev.name()));

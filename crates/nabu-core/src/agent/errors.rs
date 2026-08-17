@@ -9,7 +9,8 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::process_supervisor::{ProcessState, ProcessSupervisorError};use crate::registry::lifecycle::LifecycleStage;
+use crate::process_supervisor::{ProcessState, ProcessSupervisorError};
+use crate::registry::lifecycle::LifecycleStage;
 
 /// Errors that can occur during agent process management.
 #[derive(Debug, Clone, Error, PartialEq, Eq, Serialize, Deserialize)]
@@ -49,8 +50,8 @@ pub enum AgentManagerError {
         /// The agent name.
         name: String,
         /// The current process state.
-    #[allow(private_interfaces)]
-    state: ProcessState,
+        #[allow(private_interfaces)]
+        state: ProcessState,
     },
 
     /// A restart was requested but the agent is already running or in a
@@ -60,8 +61,8 @@ pub enum AgentManagerError {
         /// The agent name.
         name: String,
         /// The current process state.
-    #[allow(private_interfaces)]
-    state: ProcessState,
+        #[allow(private_interfaces)]
+        state: ProcessState,
     },
 
     /// The agent manager is shutting down and cannot accept new operations.

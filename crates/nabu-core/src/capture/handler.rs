@@ -830,16 +830,14 @@ mod tests {
     #[tokio::test]
     async fn test_email_handler_rejects_non_email_text() {
         let handler = EmailCaptureHandler;
-        let request =
-            CaptureRequest::new(CaptureData::Text("Hello, world!".to_string()));
+        let request = CaptureRequest::new(CaptureData::Text("Hello, world!".to_string()));
         assert!(handler.capture(&request).await.is_none());
     }
 
     #[tokio::test]
     async fn test_email_handler_rejects_non_eml_file() {
         let handler = EmailCaptureHandler;
-        let request =
-            CaptureRequest::new(CaptureData::File("/tmp/somefile.txt".to_string()));
+        let request = CaptureRequest::new(CaptureData::File("/tmp/somefile.txt".to_string()));
         assert!(handler.capture(&request).await.is_none());
     }
 
@@ -860,13 +858,14 @@ mod tests {
     #[tokio::test]
     async fn test_bookmark_capture_marks_reading_queue() {
         let handler = BookmarkCaptureHandler;
-        let request = CaptureRequest::new(CaptureData::Uri(
-            "https://example.com/article".to_string(),
-        ));
+        let request =
+            CaptureRequest::new(CaptureData::Uri("https://example.com/article".to_string()));
         let result = handler.capture(&request).await.unwrap();
         assert_eq!(
             result.object.custom_properties.get("reading_status"),
-            Some(&crate::models::CustomPropertyValue::Text("pending".to_string()))
+            Some(&crate::models::CustomPropertyValue::Text(
+                "pending".to_string()
+            ))
         );
     }
 
@@ -874,10 +873,13 @@ mod tests {
     async fn test_clipboard_note_no_reading_queue() {
         // Notes (not bookmarks/articles) should NOT be marked for reading queue.
         let handler = ClipboardHandler;
-        let request =
-            CaptureRequest::new(CaptureData::Text("Hello, world!".to_string()));
+        let request = CaptureRequest::new(CaptureData::Text("Hello, world!".to_string()));
         let result = handler.capture(&request).await.unwrap();
-        assert!(result.object.custom_properties.get("reading_status").is_none());
+        assert!(result
+            .object
+            .custom_properties
+            .get("reading_status")
+            .is_none());
     }
 
     // ── Screenshot screen capture test ────────────────────────────────
@@ -885,9 +887,7 @@ mod tests {
     #[tokio::test]
     async fn test_screenshot_handler_screen_capture_variant() {
         let handler = ScreenshotHandler;
-        let request = CaptureRequest::new(CaptureData::ScreenCapture {
-            selection: None,
-        });
+        let request = CaptureRequest::new(CaptureData::ScreenCapture { selection: None });
         // On non-macOS or without screencapture, this may return None —
         // the test just verifies the variant is routed correctly.
         let result = handler.capture(&request).await;

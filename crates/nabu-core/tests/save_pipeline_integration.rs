@@ -25,7 +25,9 @@ use nabu_core::storage::StorageManager;
 /// Returns clones of the Arc-wrapped services so tests can interact with
 /// them. The EventBus subscriber captures copies of the Arcs, keeping the
 /// services alive for the test duration.
-fn build_pipeline(vault_path: std::path::PathBuf) -> (
+fn build_pipeline(
+    vault_path: std::path::PathBuf,
+) -> (
     EventBus<PipelineEvent>,
     Arc<StorageManager>,
     Arc<Mutex<Indexer>>,
@@ -399,10 +401,7 @@ fn note_save_pipeline() {
     let cached = storage_ref.find_by_path(&path);
     assert!(cached.is_some(), "Object should be in storage cache");
     let cached_obj = cached.unwrap();
-    assert_eq!(
-        cached_obj.content,
-        ObjectContent::Markdown(content.clone())
-    );
+    assert_eq!(cached_obj.content, ObjectContent::Markdown(content.clone()));
     assert_eq!(
         cached_obj.metadata.vault_path.as_deref(),
         Some(path.as_str())
@@ -558,7 +557,11 @@ fn lifecycle_registration_all_services() {
 
     // All can be initialized through the trait
     for svc in &services {
-        assert!(svc.initialize().is_ok(), "{} failed to initialize", svc.name());
+        assert!(
+            svc.initialize().is_ok(),
+            "{} failed to initialize",
+            svc.name()
+        );
         assert_eq!(svc.name(), svc.name());
     }
 

@@ -117,23 +117,22 @@ pub mod version;
 // Re-exports
 pub use capability::CapabilityRegistry;
 pub use events::{
-    CapabilityRegisteredEvent, CapabilityRemovedEvent, EventSource, PluginApiVersion, PluginErrorEvent,
-    PluginEvent, PluginEventCategory, PluginEventContract, PluginEventError, PluginEventSeverity,
-    PluginLifecycleState, PluginLoadedEvent, PluginRegisteredEvent, PluginRequestEvent,
-    PluginResponseEvent, PluginResponseStatus, PluginStartedEvent, PluginStoppedEvent,
-    PluginUnloadedEvent, PluginUnregisteredEvent, PluginWarningEvent, publish_plugin_event,
+    publish_plugin_event, CapabilityRegisteredEvent, CapabilityRemovedEvent, EventSource,
+    PluginApiVersion, PluginErrorEvent, PluginEvent, PluginEventCategory, PluginEventContract,
+    PluginEventError, PluginEventSeverity, PluginLifecycleState, PluginLoadedEvent,
+    PluginRegisteredEvent, PluginRequestEvent, PluginResponseEvent, PluginResponseStatus,
+    PluginStartedEvent, PluginStoppedEvent, PluginUnloadedEvent, PluginUnregisteredEvent,
+    PluginWarningEvent,
 };
 pub use features::{FeatureFlag, FeatureRegistry, FeatureStage};
 pub use invocation::{
-    CapabilityId, ExecutionMetadata, InvocationMetadata, MethodId, PluginId,
-    PluginInvocationError, PluginInvocationRequest, PluginInvocationResponse,
-    PluginInvocationStatus,
+    CapabilityId, ExecutionMetadata, InvocationMetadata, MethodId, PluginId, PluginInvocationError,
+    PluginInvocationRequest, PluginInvocationResponse, PluginInvocationStatus,
 };
 pub use lifecycle::{PluginLifecycle, PluginLifecycleEvent, PluginStage};
 pub use manager::{
     InstallationReport, ManagerError, ManagerReport, PluginManager, RegistrationIssue,
 };
-pub use provider::{CapabilityProvider, ProviderError, SharedProvider};
 pub use manifest::{
     CompatibilityCheck, ManifestError, PluginDependency, PluginEntryType, PluginFeatureFlag,
     PluginManifest, PluginPermission,
@@ -142,4 +141,5 @@ pub use permissions::{
     Permission, PermissionCheck, PermissionEvaluator, PermissionSet, PermissionValidation,
     RiskLevel,
 };
+pub use provider::{CapabilityProvider, ProviderError, SharedProvider};
 pub use version::{CompatibilityResult, Version, VersionError, VersionRequirement};

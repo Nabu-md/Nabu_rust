@@ -3,7 +3,9 @@ use crate::graph::loader::{load_graph, upgrade_snapshot, LoadResult};
 use crate::graph::persistence::GraphStore;
 use crate::graph::serializer::{GraphSnapshot, SerializedEdge, SerializedNode};
 use crate::graph::version::{BuildSource, GraphVersion};
-use crate::graph::wikilink::{ResolutionIndex, content_as_str, parse_block_references, parse_wiki_links};
+use crate::graph::wikilink::{
+    content_as_str, parse_block_references, parse_wiki_links, ResolutionIndex,
+};
 use crate::models::{KnowledgeObject, ObjectContent, ObjectMetadata};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -217,7 +219,10 @@ pub fn extract_edges(object: &KnowledgeObject) -> Vec<SerializedEdge> {
 /// Extract content-derived edges (wiki-links, block references) from a
 /// KnowledgeObject's Markdown content, using a resolution index to map
 /// targets to UUIDs. Each edge is tagged with content_derived = true.
-pub fn extract_content_edges(object: &KnowledgeObject, index: &ResolutionIndex) -> Vec<SerializedEdge> {
+pub fn extract_content_edges(
+    object: &KnowledgeObject,
+    index: &ResolutionIndex,
+) -> Vec<SerializedEdge> {
     let mut edges = Vec::new();
     let content_str = content_as_str(&object.content);
 
@@ -316,9 +321,7 @@ pub fn read_sidecar_content(vault_root: &Path, vault_path: &str) -> Option<Strin
 /// Build a complete graph snapshot by reading canonical Markdown sources
 /// from the vault. This is the startup rebuild path that derives content
 /// edges from wiki-links and block references.
-pub fn build_graph_from_vault(
-    vault_root: &Path,
-) -> Result<GraphSnapshot, String> {
+pub fn build_graph_from_vault(vault_root: &Path) -> Result<GraphSnapshot, String> {
     use crate::models::ObjectType;
 
     // Collect all objects from sidecars
@@ -329,8 +332,9 @@ pub fn build_graph_from_vault(
 
     for sidecar_path in &sidecar_paths {
         if let Some(sidecar) = read_sidecar(sidecar_path) {
-            let content_str = read_sidecar_content(vault_root, sidecar.vault_path.as_deref().unwrap_or(""))
-                .unwrap_or_default();
+            let content_str =
+                read_sidecar_content(vault_root, sidecar.vault_path.as_deref().unwrap_or(""))
+                    .unwrap_or_default();
             sidecars.push((sidecar, content_str));
         }
     }
@@ -379,7 +383,6 @@ pub fn build_graph_from_vault(
 
     Ok(snapshot)
 }
-
 
 #[cfg(test)]
 mod tests {

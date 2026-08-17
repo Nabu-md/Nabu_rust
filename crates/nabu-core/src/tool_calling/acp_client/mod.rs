@@ -121,21 +121,17 @@ pub async fn register_acp_client_tools(
 
     // Elicitation tool.
     let elicitation_tool = Arc::new(ElicitationTool::new(
-        elicitation_handler
-            .unwrap_or_else(|| Arc::new(DenyElicitationHandler)),
+        elicitation_handler.unwrap_or_else(|| Arc::new(DenyElicitationHandler)),
     ));
     registry.register(elicitation_tool).await;
 
     // Permission tool.
     let permission_tool = Arc::new(PermissionTool::new(
-        permission_handler
-            .unwrap_or_else(|| Arc::new(AllowPermissionHandler)),
+        permission_handler.unwrap_or_else(|| Arc::new(AllowPermissionHandler)),
     ));
     registry.register(permission_tool).await;
 
-    tracing::info!(
-        "Registered ACP client tools: fs, terminal, elicitation, permission"
-    );
+    tracing::info!("Registered ACP client tools: fs, terminal, elicitation, permission");
 }
 
 /// Build the default [`crate::acp::ClientCapabilities`] for Nabu.
@@ -183,14 +179,7 @@ mod tests {
         let storage = Arc::new(StorageManager::new(dir.path()));
         let registry = ToolRegistry::new();
 
-        register_acp_client_tools(
-            &registry,
-            storage,
-            dir.path().to_path_buf(),
-            None,
-            None,
-        )
-        .await;
+        register_acp_client_tools(&registry, storage, dir.path().to_path_buf(), None, None).await;
 
         assert_eq!(registry.tool_count().await, 4);
         assert!(registry.has_tool("nabu:fs").await);
@@ -253,6 +242,13 @@ mod tests {
             _meta: None,
         };
         let acp_caps = caps.to_acp_client_capabilities();
-        assert!(matches!(acp_caps, ClientCapabilities { fs: Some(_), terminal: true, .. }));
+        assert!(matches!(
+            acp_caps,
+            ClientCapabilities {
+                fs: Some(_),
+                terminal: true,
+                ..
+            }
+        ));
     }
 }

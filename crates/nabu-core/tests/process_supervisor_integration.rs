@@ -49,7 +49,10 @@ fn spawn_requires_runtime() {
     let result = supervisor.spawn(echo_config("orphan"));
     assert!(result.is_err());
     assert!(
-        matches!(result.unwrap_err(), nabu_core::process_supervisor::ProcessSupervisorError::NoRuntime),
+        matches!(
+            result.unwrap_err(),
+            nabu_core::process_supervisor::ProcessSupervisorError::NoRuntime
+        ),
         "should be NoRuntime error"
     );
 
@@ -64,7 +67,9 @@ fn spawn_and_wait_for_exit() {
         assert!(supervisor.initialize().is_ok());
         assert!(supervisor.start().is_ok());
 
-        let id = supervisor.spawn(echo_config("quick")).expect("spawn should succeed");
+        let id = supervisor
+            .spawn(echo_config("quick"))
+            .expect("spawn should succeed");
 
         // Wait for the process to exit on its own (echo exits immediately)
         tokio::time::sleep(Duration::from_millis(500)).await;

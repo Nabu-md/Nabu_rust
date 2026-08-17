@@ -1,21 +1,21 @@
-use crate::diagnostic::{Diagnostic, DiagnosticCategory, DiagnosticSeverity, TextPosition, TextRange};
+use crate::diagnostic::{
+    Diagnostic, DiagnosticCategory, DiagnosticSeverity, TextPosition, TextRange,
+};
 use crate::jobs::cancellation::CancellationToken;
 use crate::jobs::workers::progress::ProgressReporter;
 use crate::models::{CustomPropertyValue, ObjectContent, ObjectType};
 use crate::native::NativeError;
-use crate::processing::processor::{ProcessingContext, ProcessingResult, Processor, ProcessingStats};
+use crate::processing::processor::{
+    ProcessingContext, ProcessingResult, ProcessingStats, Processor,
+};
 use async_trait::async_trait;
 use std::time::Instant;
 
 fn pdf_diag(severity: DiagnosticSeverity, message: String, code: &str) -> Diagnostic {
-    Diagnostic::new(
-        severity,
-        TextRange::empty(TextPosition::new(0, 0)),
-        message,
-    )
-    .with_code(code.to_string())
-    .with_source("pdf_metadata_processor".to_string())
-    .with_category(DiagnosticCategory::Metadata)
+    Diagnostic::new(severity, TextRange::empty(TextPosition::new(0, 0)), message)
+        .with_code(code.to_string())
+        .with_source("pdf_metadata_processor".to_string())
+        .with_category(DiagnosticCategory::Metadata)
 }
 
 /// Extracts metadata from PDF files (title, author, pages, etc.) via the
@@ -58,10 +58,9 @@ impl Processor for PdfMetadataProcessor {
         let mut object = context.object.clone();
         let start = Instant::now();
 
-        let engine_result = tokio::task::spawn_blocking(move || {
-            crate::native::pdfkit::extract_metadata(&pdf_data)
-        })
-        .await;
+        let engine_result =
+            tokio::task::spawn_blocking(move || crate::native::pdfkit::extract_metadata(&pdf_data))
+                .await;
         let duration_ms = start.elapsed().as_millis() as u64;
 
         let metadata = match engine_result {
@@ -199,12 +198,11 @@ impl Processor for PdfMetadataProcessor {
         );
 
         progress.set_progress(1.0);
-        ProcessingResult::new(object)
-            .with_stats(
-                ProcessingStats::new()
-                    .with_duration_ms(duration_ms)
-                    .with_metric("pdf_pages".to_string(), metadata.page_count.to_string()),
-            )
+        ProcessingResult::new(object).with_stats(
+            ProcessingStats::new()
+                .with_duration_ms(duration_ms)
+                .with_metric("pdf_pages".to_string(), metadata.page_count.to_string()),
+        )
     }
 
     fn supports(&self, object_type: &ObjectType) -> bool {
@@ -276,10 +274,16 @@ mod tests {
                 parsed["metadata_extracted"].as_bool().unwrap_or(false),
                 "metadata_extracted must be true"
             );
-            assert!(parsed["page_count"].is_number(), "page_count must be a number");
+            assert!(
+                parsed["page_count"].is_number(),
+                "page_count must be a number"
+            );
         } else {
             // Non-macOS: PlatformMicrophone unavailable, pdf_info warning is recorded.
-            assert!(result.modified, "object should be modified to record platform warning");
+            assert!(
+                result.modified,
+                "object should be modified to record platform warning"
+            );
             let pdf_info = result
                 .object
                 .custom_properties
@@ -290,9 +294,11 @@ mod tests {
                     }
                     _ => None,
                 });
-            assert!(pdf_info.is_some(), "pdf_info must be stored even on failure");
-            let warning = pdf_info
-                .and_then(|v| v["warning"].as_str().map(|s| s.to_string()));
+            assert!(
+                pdf_info.is_some(),
+                "pdf_info must be stored even on failure"
+            );
+            let warning = pdf_info.and_then(|v| v["warning"].as_str().map(|s| s.to_string()));
             assert!(warning.is_some(), "warning must be set on non-macOS");
         }
     }

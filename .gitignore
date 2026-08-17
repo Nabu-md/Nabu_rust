@@ -11,6 +11,12 @@ out/
 generated/
 *.rs.bk
 
+# ── Stray screen-capture artifact ────────────────────────────
+# macOS `screencapture` (used by crates/nabu-core native/screenshot.rs)
+# historically wrote a PNG to a file literally named "-" in the cwd; that
+# file must never be tracked. (The capture code now uses a temp file.)
+crates/nabu-core/-
+
 # ── Test / lint artifacts ────────────────────────────────────
 test-results/
 playwright-report/

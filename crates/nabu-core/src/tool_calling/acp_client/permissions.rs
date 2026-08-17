@@ -24,11 +24,11 @@
 //! that surfaces specific permission dialogs for sensitive operations.
 
 use super::callbacks::PermissionHandler;
-use super::types::{
-    PermissionOption, RequestPermissionOutcome, RequestPermissionResponse,
-};
-use crate::tool_calling::{Tool, ToolCall, ToolError, ToolId, ToolParam, ToolParamSchema, ToolSpec};
+use super::types::{PermissionOption, RequestPermissionOutcome, RequestPermissionResponse};
 use crate::tool_calling::models::ToolResult;
+use crate::tool_calling::{
+    Tool, ToolCall, ToolError, ToolId, ToolParam, ToolParamSchema, ToolSpec,
+};
 use serde_json::json;
 use std::sync::Arc;
 
@@ -57,9 +57,7 @@ impl PermissionTool {
     /// The default handler selects the first "allow" option, falling back
     /// to cancellation if no allow option is available.
     pub fn with_default_handler() -> Self {
-        Self::new(Arc::new(
-            super::callbacks::AllowPermissionHandler,
-        ))
+        Self::new(Arc::new(super::callbacks::AllowPermissionHandler))
     }
 }
 
@@ -140,12 +138,10 @@ impl Tool for PermissionTool {
                     )),
                 ))
             }
-            RequestPermissionOutcome::Cancelled { .. } => {
-                Ok(error_result(ToolError::new(
-                    error_code::PERMISSION_CANCELLED,
-                    "user cancelled the permission request",
-                )))
-            }
+            RequestPermissionOutcome::Cancelled { .. } => Ok(error_result(ToolError::new(
+                error_code::PERMISSION_CANCELLED,
+                "user cancelled the permission request",
+            ))),
         }
     }
 
@@ -257,10 +253,7 @@ mod tests {
 
         let result = tool.call(call).await.unwrap();
         assert!(result.is_error());
-        assert_eq!(
-            result.error.unwrap().code,
-            error_code::PERMISSION_CANCELLED
-        );
+        assert_eq!(result.error.unwrap().code, error_code::PERMISSION_CANCELLED);
     }
 
     #[tokio::test]
@@ -306,9 +299,6 @@ mod tests {
 
         let result = tool.call(call).await.unwrap();
         assert!(result.is_error());
-        assert_eq!(
-            result.error.unwrap().code,
-            error_code::PERMISSION_CANCELLED
-        );
+        assert_eq!(result.error.unwrap().code, error_code::PERMISSION_CANCELLED);
     }
 }

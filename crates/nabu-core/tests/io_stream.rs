@@ -18,18 +18,16 @@
 //!
 //! Run with: `cargo test io_stream`
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use nabu_core::io_stream::{
-    AsyncStdinReader, AsyncStdoutWriter, StdioTransport, TransportConfig,
-};
+use nabu_core::io_stream::{AsyncStdinReader, AsyncStdoutWriter, StdioTransport, TransportConfig};
 use nabu_core::registry::lifecycle::{Lifecycle, LifecycleStage};
-use nabu_core::rpc::{JsonRpcError, Request, RequestId, Response, RpcHandler, Router};
+use nabu_core::rpc::{JsonRpcError, Request, RequestId, Response, Router, RpcHandler};
 
 // ---------------------------------------------------------------------------
 // Test handlers
@@ -216,9 +214,7 @@ async fn io_stream_reader_handles_eof_gracefully() {
     writer.shutdown().await.unwrap();
 
     let result = stdin_reader
-        .run(&mut reader_buf, |_req: Request| {
-            async move {}
-        })
+        .run(&mut reader_buf, |_req: Request| async move {})
         .await;
 
     assert!(result.is_ok());
@@ -230,7 +226,10 @@ async fn io_stream_reader_skips_blank_lines() {
     let mut reader_buf = tokio::io::BufReader::new(reader);
 
     writer.write_all(b"\n\n\n").await.unwrap();
-    writer.write_all(&encode_request(1, "ping", None)).await.unwrap();
+    writer
+        .write_all(&encode_request(1, "ping", None))
+        .await
+        .unwrap();
     writer.write_all(b"\n\n").await.unwrap();
 
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -283,9 +282,7 @@ async fn io_stream_reader_detects_message_too_large() {
     writer.shutdown().await.unwrap();
 
     let result = stdin_reader
-        .run(&mut reader_buf, |_req: Request| {
-            async move {}
-        })
+        .run(&mut reader_buf, |_req: Request| async move {})
         .await;
 
     assert!(result.is_ok());
@@ -302,7 +299,10 @@ async fn io_stream_reader_respects_shutdown_flag() {
     let config = TransportConfig::default();
     let shutdown_clone = shutdown.clone();
 
-    writer.write_all(&encode_request(1, "ping", None)).await.unwrap();
+    writer
+        .write_all(&encode_request(1, "ping", None))
+        .await
+        .unwrap();
 
     let stdin_reader = AsyncStdinReader::new(config, shutdown, shutdown_notify.clone());
     let received = Arc::new(AtomicUsize::new(0));
@@ -601,12 +601,18 @@ async fn io_stream_bidirectional_multiple_requests() {
     transport.initialize().unwrap();
     transport.start_transport().unwrap();
 
-    stdin_writer.write_all(&encode_request(1, "ping", None)).await.unwrap();
+    stdin_writer
+        .write_all(&encode_request(1, "ping", None))
+        .await
+        .unwrap();
     stdin_writer
         .write_all(&encode_request(2, "echo", Some(json!("hello"))))
         .await
         .unwrap();
-    stdin_writer.write_all(&encode_request(3, "ping", None)).await.unwrap();
+    stdin_writer
+        .write_all(&encode_request(3, "ping", None))
+        .await
+        .unwrap();
 
     stdin_writer.shutdown().await.unwrap();
     transport.run().await.unwrap();

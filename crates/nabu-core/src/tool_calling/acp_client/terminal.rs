@@ -30,18 +30,20 @@
 //! The background task and kill handler never hold both locks simultaneously.
 
 use super::types::{
-    CreateTerminalRequest, KillTerminalRequest, ReleaseTerminalRequest,
-    TerminalExitStatus, TerminalOutputRequest, TerminalOutputResponse,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+    CreateTerminalRequest, KillTerminalRequest, ReleaseTerminalRequest, TerminalExitStatus,
+    TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse,
 };
 use crate::acp::types::EnvVariable;
-use crate::tool_calling::{Tool, ToolCall, ToolError, ToolId, ToolParam, ToolParamSchema, ToolSpec};
 use crate::tool_calling::models::ToolResult;
+use crate::tool_calling::{
+    Tool, ToolCall, ToolError, ToolId, ToolParam, ToolParamSchema, ToolSpec,
+};
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Child;
 use tokio::sync::{Mutex, Notify};
@@ -361,7 +363,7 @@ impl TerminalTool {
         } else {
             // Child was already taken by the background task. Wait for the
             // exit notification.
-            let (notify, ) = {
+            let (notify,) = {
                 let guard = self.terminals.lock().await;
                 let session = guard.get(terminal_id).ok_or_else(|| {
                     ToolError::new(
@@ -382,15 +384,20 @@ impl TerminalTool {
                     format!("terminal not found: {}", terminal_id),
                 )
             })?;
-            session
-                .exit_status
-                .clone()
-                .ok_or_else(|| ToolError::new("TERMINAL_NO_EXIT_STATUS", "process exited but no status was recorded"))
+            session.exit_status.clone().ok_or_else(|| {
+                ToolError::new(
+                    "TERMINAL_NO_EXIT_STATUS",
+                    "process exited but no status was recorded",
+                )
+            })
         }
     }
 
     /// Wait for a terminal to exit and return its exit status.
-    async fn wait_for_exit_inner(&self, terminal_id: &str) -> Result<TerminalExitStatus, ToolError> {
+    async fn wait_for_exit_inner(
+        &self,
+        terminal_id: &str,
+    ) -> Result<TerminalExitStatus, ToolError> {
         // First check if already exited.
         {
             let guard = self.terminals.lock().await;
@@ -549,10 +556,9 @@ impl Tool for TerminalTool {
 
         match operation {
             "create" => {
-                let req: CreateTerminalRequest =
-                    serde_json::from_value(args).map_err(|e| {
-                        ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
-                    })?;
+                let req: CreateTerminalRequest = serde_json::from_value(args).map_err(|e| {
+                    ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
+                })?;
 
                 if let Some(ref cwd) = req.cwd {
                     if let Err(e) = self.validate_cwd(cwd) {
@@ -560,13 +566,16 @@ impl Tool for TerminalTool {
                     }
                 }
 
-                let terminal_id = match self.spawn_terminal(
-                    &req.command,
-                    &req.args,
-                    req.cwd.as_deref(),
-                    &req.env,
-                    req.output_byte_limit,
-                ).await {
+                let terminal_id = match self
+                    .spawn_terminal(
+                        &req.command,
+                        &req.args,
+                        req.cwd.as_deref(),
+                        &req.env,
+                        req.output_byte_limit,
+                    )
+                    .await
+                {
                     Ok(id) => id,
                     Err(e) => return Ok(error_result(e)),
                 };
@@ -580,10 +589,9 @@ impl Tool for TerminalTool {
                 ))
             }
             "kill" => {
-                let req: KillTerminalRequest =
-                    serde_json::from_value(args).map_err(|e| {
-                        ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
-                    })?;
+                let req: KillTerminalRequest = serde_json::from_value(args).map_err(|e| {
+                    ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
+                })?;
 
                 match self.kill_terminal(&req.terminal_id).await {
                     Ok(status) => {
@@ -601,10 +609,9 @@ impl Tool for TerminalTool {
                 }
             }
             "output" => {
-                let req: TerminalOutputRequest =
-                    serde_json::from_value(args).map_err(|e| {
-                        ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
-                    })?;
+                let req: TerminalOutputRequest = serde_json::from_value(args).map_err(|e| {
+                    ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
+                })?;
 
                 let guard = self.terminals.lock().await;
                 let session = match guard.get(&req.terminal_id) {
@@ -661,7 +668,10 @@ impl Tool for TerminalTool {
 
                         Ok(ToolResult::success(
                             Some(serde_json::to_value(resp).map_err(|e| {
-                                ToolError::new("SERIALIZATION_ERROR", format!("failed to serialize: {}", e))
+                                ToolError::new(
+                                    "SERIALIZATION_ERROR",
+                                    format!("failed to serialize: {}", e),
+                                )
                             })?),
                             Some(crate::tool_calling::ToolExecutionMeta::from_duration(
                                 ToolId::new(tool_id),
@@ -673,10 +683,9 @@ impl Tool for TerminalTool {
                 }
             }
             "release" => {
-                let req: ReleaseTerminalRequest =
-                    serde_json::from_value(args).map_err(|e| {
-                        ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
-                    })?;
+                let req: ReleaseTerminalRequest = serde_json::from_value(args).map_err(|e| {
+                    ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
+                })?;
 
                 // Kill if still running, then remove.
                 self.kill_terminal(&req.terminal_id).await.ok();
@@ -831,8 +840,7 @@ mod tests {
 
         let result = tool.call(call).await.unwrap();
         assert!(result.is_success());
-        let resp: TerminalOutputResponse =
-            serde_json::from_value(result.result.unwrap()).unwrap();
+        let resp: TerminalOutputResponse = serde_json::from_value(result.result.unwrap()).unwrap();
         assert!(resp.output.contains("hello world"));
         assert!(resp.exit_status.is_some());
     }
@@ -935,9 +943,6 @@ mod tests {
 
         let result = tool.call(call).await.unwrap();
         assert!(result.is_error());
-        assert_eq!(
-            result.error.unwrap().code,
-            error_code::TERMINAL_NOT_FOUND
-        );
+        assert_eq!(result.error.unwrap().code, error_code::TERMINAL_NOT_FOUND);
     }
 }

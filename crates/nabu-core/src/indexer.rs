@@ -122,8 +122,7 @@ impl Indexer {
         );
         // Load persisted index from disk if a vault path is configured.
         self.load()?;
-        self.lifecycle
-            .transition_to(LifecycleStage::Initialized)?;
+        self.lifecycle.transition_to(LifecycleStage::Initialized)?;
         tracing::info!(
             subsystem = "indexer",
             component = "indexer",
@@ -142,13 +141,10 @@ impl Indexer {
     /// subscribes to document events via the EventBus.
     pub fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         if self.lifecycle.is_shutdown() {
-            return Err(
-                "Indexer has been shut down and cannot be restarted".into(),
-            );
+            return Err("Indexer has been shut down and cannot be restarted".into());
         }
         if self.lifecycle.stage() == LifecycleStage::Created {
-            self.lifecycle
-                .transition_to(LifecycleStage::Initialized)?;
+            self.lifecycle.transition_to(LifecycleStage::Initialized)?;
         }
         self.lifecycle.transition_to(LifecycleStage::Running)?;
         tracing::info!(
@@ -182,8 +178,7 @@ impl Indexer {
             operation = "shutdown",
             "Indexer shutdown complete"
         );
-        self.lifecycle
-            .transition_to(LifecycleStage::Shutdown)?;
+        self.lifecycle.transition_to(LifecycleStage::Shutdown)?;
         Ok(())
     }
 
@@ -467,9 +462,9 @@ fn tokenize_object(object: &KnowledgeObject) -> Vec<String> {
 fn tokenize_content(content: &ObjectContent) -> Vec<String> {
     match content {
         ObjectContent::RichHtml(s) => tokenize_str(&strip_html_tags(s)),
-        ObjectContent::Markdown(s)
-        | ObjectContent::PlainText(s)
-        | ObjectContent::Uri(s) => tokenize_str(s),
+        ObjectContent::Markdown(s) | ObjectContent::PlainText(s) | ObjectContent::Uri(s) => {
+            tokenize_str(s)
+        }
         ObjectContent::Binary { filename, .. } => {
             filename.as_deref().map(tokenize_str).unwrap_or_default()
         }
@@ -550,9 +545,7 @@ mod tests {
         let indexer = Indexer::new();
         let obj = KnowledgeObject::new(
             ObjectType::Note,
-            ObjectContent::Markdown(
-                "This body contains a unique bodytoken123 word".to_string(),
-            ),
+            ObjectContent::Markdown("This body contains a unique bodytoken123 word".to_string()),
         )
         .with_metadata(ObjectMetadata {
             title: Some("Some Title".to_string()),
@@ -585,9 +578,7 @@ mod tests {
         // Re-index the SAME object (same id) with updated body content.
         let obj_updated = KnowledgeObject {
             id: obj.id,
-            content: ObjectContent::Markdown(
-                "Body with newtoken111 content".to_string(),
-            ),
+            content: ObjectContent::Markdown("Body with newtoken111 content".to_string()),
             ..obj.clone()
         };
         indexer.index_object(&obj_updated).unwrap();
@@ -654,21 +645,23 @@ mod tests {
         });
 
         indexer.index_object(&obj_a).unwrap();
-        assert!(
-            indexer
-                .search("alphaonlyterm")
-                .contains(&obj_a.id.to_string())
-        );
+        assert!(indexer
+            .search("alphaonlyterm")
+            .contains(&obj_a.id.to_string()));
 
         // Rebuild the index with only obj_b - obj_a must disappear.
         indexer.reindex(&[obj_b.clone()]).unwrap();
 
         assert!(
-            !indexer.search("alphaonlyterm").contains(&obj_a.id.to_string()),
+            !indexer
+                .search("alphaonlyterm")
+                .contains(&obj_a.id.to_string()),
             "Reindex should drop documents not in the new set"
         );
         assert!(
-            indexer.search("betaonlyterm").contains(&obj_b.id.to_string()),
+            indexer
+                .search("betaonlyterm")
+                .contains(&obj_b.id.to_string()),
             "Reindex should index documents in the new set"
         );
     }
@@ -679,9 +672,7 @@ mod tests {
         // Body-only term (not present in title/description/tags/type).
         let obj = KnowledgeObject::new(
             ObjectType::Note,
-            ObjectContent::Markdown(
-                "Persistent bodytoken456 search content".to_string(),
-            ),
+            ObjectContent::Markdown("Persistent bodytoken456 search content".to_string()),
         )
         .with_metadata(ObjectMetadata {
             title: Some("Persistent Search Test".to_string()),
@@ -725,9 +716,7 @@ mod tests {
 
         let obj = KnowledgeObject::new(
             ObjectType::Note,
-            ObjectContent::Markdown(
-                "The body holds a unique restartterm789 word".to_string(),
-            ),
+            ObjectContent::Markdown("The body holds a unique restartterm789 word".to_string()),
         )
         .with_metadata(ObjectMetadata {
             title: Some("Restart Test".to_string()),

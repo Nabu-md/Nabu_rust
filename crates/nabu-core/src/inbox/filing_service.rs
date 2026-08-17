@@ -21,8 +21,8 @@ use crate::models::{CustomPropertyValue, KnowledgeObject, ObjectContent, Process
 use crate::storage::StorageManager;
 
 use super::model::{
-    InboxItemStatus, binary_extension, inbox_item_status, render_markdown, resolve_destination,
-    set_status, sha256_hex, slugify,
+    binary_extension, inbox_item_status, render_markdown, resolve_destination, set_status,
+    sha256_hex, slugify, InboxItemStatus,
 };
 
 // ---------------------------------------------------------------------------
@@ -108,8 +108,7 @@ impl FilingService {
         let mut obj = self.storage.load(id).ok_or(FilingError::NotFound(id))?;
 
         // Idempotent: an already-filed item is left as-is.
-        if inbox_item_status(&obj) == InboxItemStatus::Approved
-            && obj.metadata.vault_path.is_some()
+        if inbox_item_status(&obj) == InboxItemStatus::Approved && obj.metadata.vault_path.is_some()
         {
             return Ok(FilingResult {
                 object_id: id,
@@ -189,11 +188,7 @@ impl FilingService {
 
     /// Reject an inbox item, optionally recording a reason, and hide it from
     /// the *active* work queue (status → `rejected`).
-    pub fn reject(
-        &self,
-        id: Uuid,
-        reason: Option<String>,
-    ) -> Result<FilingResult, FilingError> {
+    pub fn reject(&self, id: Uuid, reason: Option<String>) -> Result<FilingResult, FilingError> {
         let mut obj = self.storage.load(id).ok_or(FilingError::NotFound(id))?;
         set_status(&mut obj, InboxItemStatus::Rejected);
         if let Some(reason) = reason {
@@ -290,11 +285,9 @@ mod tests {
     use super::{FilingService, FilingStatus};
     use crate::event_bus::kinds::ITEM_STORED;
     use crate::event_bus::{EventBus, PipelineEvent};
+    use crate::inbox::model::{build_inbox_object, inbox_item_status, set_status, InboxItemStatus};
     use crate::indexer::Indexer;
-    use crate::inbox::model::{InboxItemStatus, build_inbox_object, inbox_item_status, set_status};
-    use crate::models::{
-        CustomPropertyValue, KnowledgeObject, ObjectContent, ProcessingState,
-    };
+    use crate::models::{CustomPropertyValue, KnowledgeObject, ObjectContent, ProcessingState};
     use crate::storage::StorageManager;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
@@ -306,9 +299,16 @@ mod tests {
     /// public API boundary (no modification to `indexer.rs`).
     fn build_pipeline(
         vault: PathBuf,
-    ) -> (EventBus<PipelineEvent>, Arc<StorageManager>, Arc<Mutex<Indexer>>) {
+    ) -> (
+        EventBus<PipelineEvent>,
+        Arc<StorageManager>,
+        Arc<Mutex<Indexer>>,
+    ) {
         let event_bus = EventBus::<PipelineEvent>::new();
-        let storage = Arc::new(StorageManager::with_event_bus(vault.clone(), event_bus.clone()));
+        let storage = Arc::new(StorageManager::with_event_bus(
+            vault.clone(),
+            event_bus.clone(),
+        ));
         let indexer = Arc::new(Mutex::new(Indexer::with_vault_path_and_event_bus(
             vault,
             event_bus.clone(),
@@ -379,7 +379,10 @@ mod tests {
             ProcessingState::Completed,
             "filing must complete processing state"
         );
-        assert!(filed.content_hash.is_some(), "filed object must carry a content hash");
+        assert!(
+            filed.content_hash.is_some(),
+            "filed object must carry a content hash"
+        );
         assert_eq!(filed.content, ObjectContent::Markdown(body.to_string()));
 
         // The filed item has left the *active* inbox queue.
@@ -477,7 +480,10 @@ mod tests {
         service.delete(id).expect("delete should succeed");
 
         // Gone from storage, cache, AND disk.
-        assert!(!storage.exists(id), "deleted object must vanish from storage");
+        assert!(
+            !storage.exists(id),
+            "deleted object must vanish from storage"
+        );
         assert!(service.get(id).is_none(), "deleted object must not load");
         assert!(!sidecar.exists(), "sidecar must be removed on delete");
         assert!(!content.exists(), "content file must be removed on delete");
@@ -504,8 +510,10 @@ mod tests {
                 "processing_warnings".to_string(),
                 CustomPropertyValue::Text("low light".to_string()),
             );
-            obj.custom_properties
-                .insert("classification_confidence".to_string(), CustomPropertyValue::Number(0.2));
+            obj.custom_properties.insert(
+                "classification_confidence".to_string(),
+                CustomPropertyValue::Number(0.2),
+            );
             storage.save(&obj).unwrap();
         }
 
@@ -525,13 +533,18 @@ mod tests {
             "retry must reset processing state to pending"
         );
         assert!(
-            !retried.custom_properties.contains_key("processing_warnings"),
+            !retried
+                .custom_properties
+                .contains_key("processing_warnings"),
             "retry must clear stale warnings"
         );
 
         // And it is active again.
         let active: Vec<_> = service.queue().into_iter().map(|o| o.id).collect();
-        assert!(active.contains(&id), "retried item must rejoin the active queue");
+        assert!(
+            active.contains(&id),
+            "retried item must rejoin the active queue"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -559,10 +572,7 @@ mod tests {
         }
 
         let active: Vec<_> = service.queue().into_iter().map(|o| o.id).collect();
-        assert!(
-            active.contains(&pending),
-            "pending item must be active"
-        );
+        assert!(active.contains(&pending), "pending item must be active");
         assert!(
             !active.contains(&rejected) && !active.contains(&failed),
             "terminal items must be excluded from the active queue"

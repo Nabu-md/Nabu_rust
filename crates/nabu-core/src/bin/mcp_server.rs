@@ -42,10 +42,7 @@ fn parse_args() -> PathBuf {
 async fn main() {
     let vault_path = parse_args();
 
-    eprintln!(
-        "Nabu MCP server starting — vault: {}",
-        vault_path.display()
-    );
+    eprintln!("Nabu MCP server starting — vault: {}", vault_path.display());
 
     let storage = Arc::new(StorageManager::new(&vault_path));
     if let Err(e) = storage.initialize() {
@@ -78,7 +75,9 @@ async fn main() {
 
     let transport = StdioTransport::new(router);
     transport.initialize().expect("transport initialize failed");
-    transport.start_transport().expect("transport start_transport failed");
+    transport
+        .start_transport()
+        .expect("transport start_transport failed");
 
     match transport.run().await {
         Ok(()) => {

@@ -95,20 +95,35 @@ mod tests {
         );
         assert_eq!(serde_json::to_string(&Role::System).unwrap(), "\"system\"");
         assert_eq!(serde_json::to_string(&Role::Plugin).unwrap(), "\"plugin\"");
-        assert_eq!(serde_json::to_string(&Role::Service).unwrap(), "\"service\"");
+        assert_eq!(
+            serde_json::to_string(&Role::Service).unwrap(),
+            "\"service\""
+        );
         assert_eq!(serde_json::to_string(&Role::Other).unwrap(), "\"other\"");
     }
 
     #[test]
     fn role_deserializes_from_snake_case() {
-        assert_eq!(serde_json::from_str::<Role>("\"user\"").unwrap(), Role::User);
+        assert_eq!(
+            serde_json::from_str::<Role>("\"user\"").unwrap(),
+            Role::User
+        );
         assert_eq!(
             serde_json::from_str::<Role>("\"assistant\"").unwrap(),
             Role::Assistant
         );
-        assert_eq!(serde_json::from_str::<Role>("\"system\"").unwrap(), Role::System);
-        assert_eq!(serde_json::from_str::<Role>("\"plugin\"").unwrap(), Role::Plugin);
-        assert_eq!(serde_json::from_str::<Role>("\"service\"").unwrap(), Role::Service);
+        assert_eq!(
+            serde_json::from_str::<Role>("\"system\"").unwrap(),
+            Role::System
+        );
+        assert_eq!(
+            serde_json::from_str::<Role>("\"plugin\"").unwrap(),
+            Role::Plugin
+        );
+        assert_eq!(
+            serde_json::from_str::<Role>("\"service\"").unwrap(),
+            Role::Service
+        );
     }
 
     #[test]

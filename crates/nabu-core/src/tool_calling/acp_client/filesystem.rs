@@ -17,8 +17,8 @@
 
 use super::types::{ReadTextFileRequest, WriteTextFileRequest};
 use crate::storage::StorageManager;
-use crate::tool_calling::{Tool, ToolCall, ToolError, ToolSpec, ToolParam, ToolParamSchema};
 use crate::tool_calling::models::ToolResult;
+use crate::tool_calling::{Tool, ToolCall, ToolError, ToolParam, ToolParamSchema, ToolSpec};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -198,10 +198,9 @@ impl Tool for FileSystemTool {
 
         match operation {
             "read_text_file" => {
-                let req: ReadTextFileRequest =
-                    serde_json::from_value(args).map_err(|e| {
-                        ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
-                    })?;
+                let req: ReadTextFileRequest = serde_json::from_value(args).map_err(|e| {
+                    ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
+                })?;
 
                 let vault_rel = match self.validate_vault_path(&req.path) {
                     Ok(v) => v,
@@ -240,10 +239,9 @@ impl Tool for FileSystemTool {
                 ))
             }
             "write_text_file" => {
-                let req: WriteTextFileRequest =
-                    serde_json::from_value(args).map_err(|e| {
-                        ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
-                    })?;
+                let req: WriteTextFileRequest = serde_json::from_value(args).map_err(|e| {
+                    ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
+                })?;
 
                 let vault_rel = match self.validate_vault_path(&req.path) {
                     Ok(v) => v,
@@ -253,10 +251,7 @@ impl Tool for FileSystemTool {
                 // Use StorageManager.save_note_content for persistence.
                 // The vault-relative path is passed directly.
                 let vault_rel_str = vault_rel.to_string_lossy().to_string();
-                if let Err(e) = self
-                    .storage
-                    .save_note_content(&vault_rel_str, &req.content)
-                {
+                if let Err(e) = self.storage.save_note_content(&vault_rel_str, &req.content) {
                     return Ok(error_result(ToolError::new(error_code::FS_WRITE_FAILED, e)));
                 }
 
@@ -337,10 +332,7 @@ mod tests {
 
         let result = tool.validate_vault_path("/etc/passwd");
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().code,
-            error_code::FS_PATH_OUTSIDE_VAULT
-        );
+        assert_eq!(result.unwrap_err().code, error_code::FS_PATH_OUTSIDE_VAULT);
     }
 
     #[test]
@@ -350,10 +342,7 @@ mod tests {
 
         let result = tool.validate_vault_path("relative/path.md");
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().code,
-            error_code::FS_PATH_NOT_ABSOLUTE
-        );
+        assert_eq!(result.unwrap_err().code, error_code::FS_PATH_NOT_ABSOLUTE);
     }
 
     #[test]
@@ -365,10 +354,7 @@ mod tests {
         let traversal = format!("{}/../outside.md", vault_root);
         let result = tool.validate_vault_path(&traversal);
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().code,
-            error_code::FS_PATH_OUTSIDE_VAULT
-        );
+        assert_eq!(result.unwrap_err().code, error_code::FS_PATH_OUTSIDE_VAULT);
     }
 
     #[tokio::test]
@@ -417,10 +403,7 @@ mod tests {
 
         let result = tool.call(call).await.unwrap();
         assert!(result.is_error());
-        assert_eq!(
-            result.error.unwrap().code,
-            error_code::FS_FILE_NOT_FOUND
-        );
+        assert_eq!(result.error.unwrap().code, error_code::FS_FILE_NOT_FOUND);
     }
 
     #[tokio::test]
@@ -428,7 +411,8 @@ mod tests {
         let (storage, _dir) = make_storage();
         let tool = FileSystemTool::new(storage.clone());
 
-        let abs_path = storage.clone()
+        let abs_path = storage
+            .clone()
             .vault_path()
             .join("output.md")
             .to_string_lossy()

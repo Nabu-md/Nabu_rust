@@ -9,7 +9,7 @@
 use async_trait::async_trait;
 use nabu_core::rpc::error::ErrorCode;
 use nabu_core::rpc::types::RequestId;
-use nabu_core::rpc::{JsonRpcError, Request, Response, RpcHandler, Router};
+use nabu_core::rpc::{JsonRpcError, Request, Response, Router, RpcHandler};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -148,10 +148,7 @@ fn jsonrpc_core_error_response_serializes_correctly() {
 
 #[test]
 fn jsonrpc_core_response_round_trips() {
-    let resp = Response::success(
-        RequestId::String("xyz".to_string()),
-        json!([1, 2, 3]),
-    );
+    let resp = Response::success(RequestId::String("xyz".to_string()), json!([1, 2, 3]));
     let json = serde_json::to_string(&resp).unwrap();
     let back: Response = serde_json::from_str(&json).unwrap();
     assert_eq!(resp, back);
@@ -518,7 +515,7 @@ async fn jsonrpc_core_router_handles_different_param_shapes() {
         .register("greet_named", Arc::new(GreetByNameHandler))
         .await;
 
-     // Array params
+    // Array params
     let req = Request::new(1, "sum", Some(json!([1, 2, 3, 4])));
     let resp = router.dispatch(req).await;
     assert!(resp.is_success());

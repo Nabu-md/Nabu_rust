@@ -203,9 +203,11 @@ impl Turn {
     /// Validates that the turn id is not nil.
     pub fn validate(&self) -> crate::models::conversation::ConversationResult<()> {
         if self.id == Uuid::nil() {
-            return Err(crate::models::conversation::ConversationError::invalid_turn_id(
-                "turn id must not be nil",
-            ));
+            return Err(
+                crate::models::conversation::ConversationError::invalid_turn_id(
+                    "turn id must not be nil",
+                ),
+            );
         }
         Ok(())
     }

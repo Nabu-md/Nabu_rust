@@ -148,7 +148,7 @@ use std::sync::Arc;
 use crate::event_bus::{EventBus, PipelineEvent};
 use crate::plugin::capability::{Capability, CapabilityRegistry};
 use crate::plugin::events::{
-    PluginErrorEvent, PluginEvent, PluginEventSeverity, PluginWarningEvent, publish_plugin_event,
+    publish_plugin_event, PluginErrorEvent, PluginEvent, PluginEventSeverity, PluginWarningEvent,
 };
 use crate::plugin::invocation::{
     PluginInvocationError, PluginInvocationRequest, PluginInvocationResponse,
@@ -184,17 +184,13 @@ use crate::plugin::version::Version;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProviderError {
     /// A provider with the given ID is already registered.
-    DuplicateProvider {
-        provider_id: String,
-    },
+    DuplicateProvider { provider_id: String },
     /// A provider with the given ID is not (or is no longer) registered to the
     /// [`PluginManager`]. Returned by unregistration and provider-level query
     /// operations that target an unknown provider.
     ///
     /// [`PluginManager`]: crate::plugin::PluginManager
-    UnknownProvider {
-        provider_id: String,
-    },
+    UnknownProvider { provider_id: String },
     /// A capability with the given ID is already registered — either by this
     /// provider or by another.
     DuplicateCapability {
@@ -209,20 +205,11 @@ pub enum ProviderError {
     },
     /// Registration with the capability registry failed for a reason not
     /// covered by the variants above.
-    RegistrationFailed {
-        provider_id: String,
-        reason: String,
-    },
+    RegistrationFailed { provider_id: String, reason: String },
     /// The provider's `initialize` hook returned an error.
-    InitializationFailed {
-        provider_id: String,
-        reason: String,
-    },
+    InitializationFailed { provider_id: String, reason: String },
     /// The provider's `shutdown` hook returned an error.
-    ShutdownFailed {
-        provider_id: String,
-        reason: String,
-    },
+    ShutdownFailed { provider_id: String, reason: String },
 }
 
 impl std::fmt::Display for ProviderError {
@@ -505,10 +492,7 @@ pub trait CapabilityProvider: Send + Sync + std::fmt::Debug {
     /// than panicking. A panicking provider will be caught by the
     /// [`PluginManager`] which converts the catch_unwind result into a
     /// structured error response.
-    fn invoke(
-        &self,
-        request: &PluginInvocationRequest,
-    ) -> PluginInvocationResponse {
+    fn invoke(&self, request: &PluginInvocationRequest) -> PluginInvocationResponse {
         let _ = request;
         PluginInvocationResponse::error(
             PluginInvocationError::new(
@@ -703,7 +687,10 @@ mod tests {
         let result = provider.register_capabilities(&mut registry);
         assert!(result.is_err());
         match result.unwrap_err() {
-            ProviderError::DuplicateCapability { capability_id, provider_id } => {
+            ProviderError::DuplicateCapability {
+                capability_id,
+                provider_id,
+            } => {
                 assert_eq!(capability_id, "test:ocr");
                 assert_eq!(provider_id, "test.plugin");
             }
@@ -885,10 +872,7 @@ mod tests {
         }
 
         let mut registry = CapabilityRegistry::new();
-        registry.register(
-            Capability::new("ns", "existing", "Pre-registered"),
-            "other",
-        );
+        registry.register(Capability::new("ns", "existing", "Pre-registered"), "other");
 
         let provider = OverriddenProvider {
             id: "override.plugin".to_string(),

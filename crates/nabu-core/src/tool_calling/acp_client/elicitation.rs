@@ -23,8 +23,10 @@
 
 use super::callbacks::ElicitationHandler;
 use super::types::{ElicitationOutcome, ElicitationSchema};
-use crate::tool_calling::{Tool, ToolCall, ToolError, ToolId, ToolParam, ToolParamSchema, ToolSpec};
 use crate::tool_calling::models::ToolResult;
+use crate::tool_calling::{
+    Tool, ToolCall, ToolError, ToolId, ToolParam, ToolParamSchema, ToolSpec,
+};
 use serde_json::json;
 
 /// Error codes returned by the elicitation tool.
@@ -53,9 +55,7 @@ impl ElicitationTool {
 
     /// Create a new ElicitationTool with the default denying handler.
     pub fn with_default_handler() -> Self {
-        Self::new(Arc::new(
-            super::callbacks::DenyElicitationHandler,
-        ))
+        Self::new(Arc::new(super::callbacks::DenyElicitationHandler))
     }
 }
 
@@ -101,10 +101,7 @@ impl Tool for ElicitationTool {
         };
 
         // Extract the elicitation message.
-        let message = match args
-            .get("message")
-            .and_then(|v| v.as_str())
-        {
+        let message = match args.get("message").and_then(|v| v.as_str()) {
             Some(m) => m,
             None => {
                 return Ok(error_result(ToolError::new(
@@ -115,10 +112,7 @@ impl Tool for ElicitationTool {
         };
 
         // Determine the mode (form or url).
-        let mode = args
-            .get("mode")
-            .and_then(|v| v.as_str())
-            .unwrap_or("form");
+        let mode = args.get("mode").and_then(|v| v.as_str()).unwrap_or("form");
 
         match mode {
             "form" => {
@@ -140,21 +134,17 @@ impl Tool for ElicitationTool {
                     .await;
 
                 match outcome {
-                    ElicitationOutcome::Provided { response } => {
-                        Ok(ToolResult::success(
-                            Some(json!({ "response": response })),
-                            Some(crate::tool_calling::ToolExecutionMeta::from_duration(
-                                crate::tool_calling::ToolId::new(tool_id),
-                                std::time::Duration::from_millis(1),
-                            )),
-                        ))
-                    }
-                    ElicitationOutcome::Cancelled => {
-                        Ok(error_result(ToolError::new(
-                            error_code::ELICITATION_CANCELLED,
-                            "user cancelled the elicitation",
-                        )))
-                    }
+                    ElicitationOutcome::Provided { response } => Ok(ToolResult::success(
+                        Some(json!({ "response": response })),
+                        Some(crate::tool_calling::ToolExecutionMeta::from_duration(
+                            crate::tool_calling::ToolId::new(tool_id),
+                            std::time::Duration::from_millis(1),
+                        )),
+                    )),
+                    ElicitationOutcome::Cancelled => Ok(error_result(ToolError::new(
+                        error_code::ELICITATION_CANCELLED,
+                        "user cancelled the elicitation",
+                    ))),
                 }
             }
             "url" => {
@@ -312,10 +302,7 @@ mod tests {
 
         let result = tool.call(call).await.unwrap();
         assert!(result.is_error());
-        assert_eq!(
-            result.error.unwrap().code,
-            error_code::ELICITATION_FAILED
-        );
+        assert_eq!(result.error.unwrap().code, error_code::ELICITATION_FAILED);
     }
 
     #[tokio::test]
@@ -343,10 +330,7 @@ mod tests {
     async fn elicitation_missing_message_fails() {
         let tool = ElicitationTool::with_default_handler();
 
-        let call = ToolCall::with_args(
-            TOOL_ID,
-            json!({ "mode": "form" }),
-        );
+        let call = ToolCall::with_args(TOOL_ID, json!({ "mode": "form" }));
 
         let result = tool.call(call).await.unwrap();
         assert!(result.is_error());

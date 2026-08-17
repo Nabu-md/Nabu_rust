@@ -9,7 +9,6 @@
 //! - Provider lifecycle hooks (initialize / shutdown)
 //! - Integration with the existing manifest-based registration path
 
-
 mod plugin_integration {
     use super::*;
 
@@ -255,7 +254,10 @@ mod plugin_integration {
         )));
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ProviderError::DuplicateProvider { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            ProviderError::DuplicateProvider { .. }
+        ));
         assert_eq!(pm.provider_count(), 1);
     }
 
@@ -332,11 +334,7 @@ mod plugin_integration {
         let mut pm = PluginManager::new(Version::new(1, 0, 0));
         let before_count = pm.capability_registry().capability_count();
 
-        let provider = Arc::new(StaticProvider::new(
-            "com.example.empty",
-            "Empty",
-            vec![],
-        ));
+        let provider = Arc::new(StaticProvider::new("com.example.empty", "Empty", vec![]));
         pm.register_provider(provider).unwrap();
 
         assert_eq!(pm.provider_count(), 1);
@@ -358,11 +356,7 @@ mod plugin_integration {
             Capability::new("test", "cap_b", "Capability B"),
             Capability::new("test", "cap_c", "Capability C"),
         ];
-        let provider = Arc::new(StaticProvider::new(
-            "com.example.three",
-            "Three",
-            caps,
-        ));
+        let provider = Arc::new(StaticProvider::new("com.example.three", "Three", caps));
 
         pm.register_provider(provider).unwrap();
 
@@ -388,7 +382,11 @@ mod plugin_integration {
         let result = pm.register_provider(Arc::new(StaticProvider::new(
             "com.example.second",
             "Second",
-            vec![Capability::new("shared", "feature", "Different provider, same cap")],
+            vec![Capability::new(
+                "shared",
+                "feature",
+                "Different provider, same cap",
+            )],
         )));
 
         assert!(result.is_err());
@@ -423,7 +421,7 @@ mod plugin_integration {
             "Second",
             vec![
                 Capability::new("ns", "feature", "Duplicate"), // duplicate!
-                Capability::new("ns", "new_cap", "New cap"),  // would-be new
+                Capability::new("ns", "new_cap", "New cap"),   // would-be new
             ],
         )));
 
@@ -488,7 +486,11 @@ mod plugin_integration {
         pm.register_provider(Arc::new(StaticProvider::new(
             "com.example.provider",
             "Provider Plugin",
-            vec![Capability::new("provider_ns", "provider_cap", "From provider")],
+            vec![Capability::new(
+                "provider_ns",
+                "provider_cap",
+                "From provider",
+            )],
         )))
         .unwrap();
 
@@ -536,9 +538,7 @@ mod plugin_integration {
         let result = provider.shutdown();
         assert!(result.is_ok());
 
-        let shut_down = provider
-            .shut_down
-            .load(std::sync::atomic::Ordering::SeqCst);
+        let shut_down = provider.shut_down.load(std::sync::atomic::Ordering::SeqCst);
         assert!(shut_down);
     }
 
@@ -552,7 +552,10 @@ mod plugin_integration {
         let result = provider.initialize();
         assert!(result.is_err());
         match result.unwrap_err() {
-            ProviderError::InitializationFailed { provider_id, reason } => {
+            ProviderError::InitializationFailed {
+                provider_id,
+                reason,
+            } => {
                 assert_eq!(provider_id, "com.example.failing");
                 assert!(reason.contains("simulated"));
             }
@@ -593,11 +596,10 @@ mod plugin_integration {
         .unwrap();
 
         let ids = pm.list_providers();
-        assert_eq!(ids, vec![
-            "com.alpha.first",
-            "com.beta.second",
-            "com.zeta.third",
-        ]);
+        assert_eq!(
+            ids,
+            vec!["com.alpha.first", "com.beta.second", "com.zeta.third",]
+        );
     }
 
     #[test]
@@ -754,7 +756,10 @@ mod plugin_integration {
         // Verify the capability is discoverable through the registry
         let cr = pm.capability_registry();
         assert!(cr.has("custom:extension"));
-        assert_eq!(cr.provider("custom:extension"), Some("com.example.registry"));
+        assert_eq!(
+            cr.provider("custom:extension"),
+            Some("com.example.registry")
+        );
 
         // Verify the provider is discoverable through the PluginManager
         let provider = pm.provider("com.example.registry");
@@ -776,8 +781,8 @@ mod plugin_integration {
     // Provider Event Lifecycle Tests
     // ===========================================================================
 
-    use nabu_core::event_bus::{EventBus, PipelineEvent};
     use nabu_core::event_bus::kinds;
+    use nabu_core::event_bus::{EventBus, PipelineEvent};
     use nabu_core::plugin::events::{
         PluginErrorEvent, PluginEvent, PluginLoadedEvent, PluginUnloadedEvent,
     };

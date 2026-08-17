@@ -271,11 +271,7 @@ impl JobStore {
     /// path to the file is returned.  This path is durable across process
     /// restarts and can be stored in a [`Job`]'s `content_payload` as a
     /// `blob_path` reference.
-    pub fn store_blob(
-        &self,
-        id: &str,
-        data: &[u8],
-    ) -> JobResult<String> {
+    pub fn store_blob(&self, id: &str, data: &[u8]) -> JobResult<String> {
         let blobs_dir = self.base_path.join("blobs");
         fs::create_dir_all(&blobs_dir)?;
         let blob_path = blobs_dir.join(id);
@@ -298,7 +294,9 @@ impl JobStore {
     /// to prevent arbitrary file reads.
     pub fn load_blob(&self, path: &str) -> JobResult<Vec<u8>> {
         let path = std::path::Path::new(path);
-        let canonical = path.canonicalize().map_err(|e| JobError::Persistence(e.to_string()))?;
+        let canonical = path
+            .canonicalize()
+            .map_err(|e| JobError::Persistence(e.to_string()))?;
         let blobs_abs = self
             .blobs_path()
             .canonicalize()

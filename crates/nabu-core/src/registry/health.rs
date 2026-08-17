@@ -259,7 +259,6 @@ pub struct ServiceHealth {
     /// `None` when the health report is complete and consistent.
     #[serde(default)]
     pub error: Option<String>,
-
     // ── Reserved for future phases ──────────────────────────────────
     // These fields are intentionally omitted but the model is designed
     // to accommodate them via serde defaults:

@@ -33,11 +33,11 @@
 use std::io::{self, BufRead, Write};
 
 use nabu_core::acp::types::{
-    AgentCapabilities, Implementation, InitializeResponse, NewSessionResponse, PromptResponse,
-    SessionNotificationParams, SessionUpdate, TextContent,
-    ContentBlock, ContentChunk, SUPPORTED_PROTOCOL_VERSION, StopReason,
+    AgentCapabilities, ContentBlock, ContentChunk, Implementation, InitializeResponse,
+    NewSessionResponse, PromptResponse, SessionNotificationParams, SessionUpdate, StopReason,
+    TextContent, SUPPORTED_PROTOCOL_VERSION,
 };
-use nabu_core::rpc::{JSON_RPC_VERSION, Request, RequestId};
+use nabu_core::rpc::{Request, RequestId, JSON_RPC_VERSION};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -166,7 +166,11 @@ fn main() {
             }
 
             "session/close" => {
-                send_response(&mut out, &req.id, &serde_json::Value::Object(serde_json::Map::new()));
+                send_response(
+                    &mut out,
+                    &req.id,
+                    &serde_json::Value::Object(serde_json::Map::new()),
+                );
             }
 
             "session/cancel" => {
@@ -200,20 +204,28 @@ fn send_response<T: serde::Serialize + std::fmt::Debug>(
     let result_val = match serde_json::to_value(result) {
         Ok(v) => v,
         Err(e) => {
-            let _ = writeln!(out, "{}", serde_json::json!({
-                "jsonrpc": JSON_RPC_VERSION,
-                "id": id_to_value(id),
-                "error": {"code": -32603, "message": format!("Internal error: {}", e)}
-            }));
+            let _ = writeln!(
+                out,
+                "{}",
+                serde_json::json!({
+                    "jsonrpc": JSON_RPC_VERSION,
+                    "id": id_to_value(id),
+                    "error": {"code": -32603, "message": format!("Internal error: {}", e)}
+                })
+            );
             let _ = out.flush();
             return;
         }
     };
-    let _ = writeln!(out, "{}", serde_json::json!({
-        "jsonrpc": JSON_RPC_VERSION,
-        "id": id_to_value(id),
-        "result": result_val
-    }));
+    let _ = writeln!(
+        out,
+        "{}",
+        serde_json::json!({
+            "jsonrpc": JSON_RPC_VERSION,
+            "id": id_to_value(id),
+            "result": result_val
+        })
+    );
     let _ = out.flush();
 }
 

@@ -68,5 +68,5 @@ pub mod types;
 
 pub use error::{ErrorCode, JsonRpcError};
 pub use router::{Router, RpcHandler};
-pub use types::{Request, RequestId, Response};
 pub use types::JSON_RPC_VERSION;
+pub use types::{Request, RequestId, Response};

@@ -26,7 +26,9 @@ use crate::diagnostic::DiagnosticProvider;
 use crate::jobs::cancellation::CancellationToken;
 use crate::jobs::workers::progress::ProgressReporter;
 use crate::models::{ObjectContent, ObjectType};
-use crate::processing::processor::{ExecutionStatus, ProcessingStats, ProcessingContext, ProcessingResult, Processor};
+use crate::processing::processor::{
+    ExecutionStatus, ProcessingContext, ProcessingResult, ProcessingStats, Processor,
+};
 use crate::processing::processors::harper_conversion::convert_lint;
 use async_trait::async_trait;
 use harper_core::linting::{LintGroup, Linter};
@@ -97,10 +99,7 @@ impl Processor for HarperProcessor {
         let text_for_task = text.clone();
 
         let start = std::time::Instant::now();
-        let result = tokio::task::spawn_blocking(move || {
-            run_harper(&text_for_task)
-        })
-        .await;
+        let result = tokio::task::spawn_blocking(move || run_harper(&text_for_task)).await;
         let duration_ms = start.elapsed().as_millis() as u64;
 
         progress.set_progress(0.9);
@@ -164,7 +163,9 @@ impl Processor for HarperProcessor {
 /// This function is `Send` because it creates a fresh `LintGroup` and `Document`
 /// internally (both `!Send`), runs the linter, converts lints to `Diagnostic`
 /// (which is `Send + Sync`), and returns only the `Diagnostic` collection.
-fn run_harper(text: &str) -> Result<(Vec<crate::diagnostic::Diagnostic>, usize), crate::diagnostic::DiagnosticError> {
+fn run_harper(
+    text: &str,
+) -> Result<(Vec<crate::diagnostic::Diagnostic>, usize), crate::diagnostic::DiagnosticError> {
     let dict = FstDictionary::curated();
     let parser = PlainEnglish;
     let document = Document::new_curated(text, &parser);
@@ -180,9 +181,7 @@ fn run_harper(text: &str) -> Result<(Vec<crate::diagnostic::Diagnostic>, usize),
         match convert_lint(lint, &source_chars) {
             Ok(diag) => diagnostics.push(diag),
             Err(e) => {
-                tracing::warn!(
-                    "Failed to convert Harper lint: {}", e
-                );
+                tracing::warn!("Failed to convert Harper lint: {}", e);
             }
         }
     }
@@ -231,7 +230,10 @@ impl DiagnosticProvider for HarperDiagnosticProvider {
         HARPER_ORIGIN
     }
 
-    fn analyze(&self, text: &str) -> Result<Vec<crate::diagnostic::Diagnostic>, crate::diagnostic::DiagnosticError> {
+    fn analyze(
+        &self,
+        text: &str,
+    ) -> Result<Vec<crate::diagnostic::Diagnostic>, crate::diagnostic::DiagnosticError> {
         analyze_text_with_harper(text)
     }
 }
@@ -256,8 +258,8 @@ fn strip_html_tags(html: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::KnowledgeObject;
     use crate::diagnostic::DiagnosticCategory;
+    use crate::models::KnowledgeObject;
 
     #[tokio::test]
     async fn test_harper_processor_skips_unsupported_type() {
@@ -281,10 +283,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_harper_processor_empty_text() {
-        let obj = KnowledgeObject::new(
-            ObjectType::Note,
-            ObjectContent::Markdown(String::new()),
-        );
+        let obj = KnowledgeObject::new(ObjectType::Note, ObjectContent::Markdown(String::new()));
         let ctx = ProcessingContext::new(obj);
         let processor = HarperProcessor;
         let result = processor
@@ -386,6 +385,9 @@ mod tests {
         assert_eq!(strip_html_tags("<p>Hello</p>"), "Hello");
         assert_eq!(strip_html_tags("a<b>b</b>c"), "abc");
         assert_eq!(strip_html_tags("no tags"), "no tags");
-        assert_eq!(strip_html_tags("<div>nested<b>bold</b>text</div>"), "nestedboldtext");
+        assert_eq!(
+            strip_html_tags("<div>nested<b>bold</b>text</div>"),
+            "nestedboldtext"
+        );
     }
 }

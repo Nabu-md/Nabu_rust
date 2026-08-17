@@ -24,8 +24,8 @@ use crate::agent::handler::NabuAcpHandler;
 use crate::conversations::ConversationStore;
 use crate::event_bus::{EventBus, PipelineEvent};
 use crate::models::conversation::{Message, Role, Thread, Turn, TurnContent};
-use crate::streaming::{StreamingPipeline, StreamSessionHandle};
 use crate::storage::StorageManager;
+use crate::streaming::{StreamSessionHandle, StreamingPipeline};
 
 /// Configuration for connecting to an ACP agent via stdio.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,10 +47,8 @@ pub struct AcpConnectConfig {
 }
 
 /// The concrete transport type used for stdio-based ACP connections.
-pub type StdioTransportType = StdioTransport<
-    tokio::io::BufReader<tokio::process::ChildStdout>,
-    tokio::process::ChildStdin,
->;
+pub type StdioTransportType =
+    StdioTransport<tokio::io::BufReader<tokio::process::ChildStdout>, tokio::process::ChildStdin>;
 
 /// The concrete client type for stdio-based ACP connections.
 pub type AcpClientType = AcpClient<StdioTransportType>;
@@ -70,6 +68,9 @@ struct ActiveSession {
     /// The ACP client — stored here so subsequent prompt/cancel calls can
     /// reuse it.  All post-`initialize` methods take `&self`.
     client: AcpClientType,
+    /// The concrete handler — stored so the `acp_permission_respond` Tauri
+    /// command can deliver user responses back to the awaiting handler.
+    handler: Arc<NabuAcpHandler>,
     /// The child process handle — must be stored to prevent the process from
     /// being killed when `connect()` returns (kill_on_drop would otherwise
     /// terminate it immediately).  Explicitly killed in `disconnect()`.
@@ -87,6 +88,8 @@ pub enum AcpSessionError {
     Acp(#[from] crate::acp::error::AcpError),
     #[error("Stream error: {0}")]
     Stream(#[from] crate::streaming::errors::StreamManagerError),
+    #[error("Permission delivery failed: {0}")]
+    PermissionDelivery(String),
 }
 
 /// The manager owns the live ACP session and bridges updates into Nabu's
@@ -143,22 +146,24 @@ impl AcpSessionManager {
         // process when connect() returns. See ActiveSession::child field.
 
         let transport = StdioTransport::new(tokio::io::BufReader::new(stdout), stdin);
-        let handler: Arc<dyn crate::acp::handler::AcpClientHandler> =
-            Arc::new(NabuAcpHandler::new(self.storage.clone()));
-        let mut client = AcpClient::new(transport, handler);
+        let handler = Arc::new(NabuAcpHandler::new(
+            self.storage.clone(),
+            self.pipeline.event_bus().clone(),
+            thread_id,
+        ));
+        let handler_for_session = handler.clone();
+        let handler_trait: Arc<dyn crate::acp::handler::AcpClientHandler> = handler;
+        let mut client = AcpClient::new(transport, handler_trait);
 
-        let stream_handle = self.pipeline.start_stream(
-            Some(thread_id),
-            None,
-            config.agent_name.clone(),
-        )?;
+        let stream_handle =
+            self.pipeline
+                .start_stream(Some(thread_id), None, config.agent_name.clone())?;
 
         let pipeline = self.pipeline.clone();
         let stream_handle_cb = stream_handle.clone();
-        let accumulated = Arc::new(tokio::sync::Mutex::new(HashMap::<
-            Option<String>,
-            String,
-        >::new()));
+        let accumulated = Arc::new(tokio::sync::Mutex::new(
+            HashMap::<Option<String>, String>::new(),
+        ));
 
         let accumulated_cb = accumulated.clone();
         let store_cb = self.conversation_store.clone();
@@ -227,20 +232,20 @@ impl AcpSessionManager {
         let mcp_servers = build_nabu_mcp_server_config(&resolved_wd);
 
         let session_id = client
-            .new_session(
-                &resolved_wd.to_string_lossy(),
-                mcp_servers,
-                vec![],
-            )
+            .new_session(&resolved_wd.to_string_lossy(), mcp_servers, vec![])
             .await?;
 
-        let thread = Thread::with_id(thread_id)
-            .with_title(config.agent_name.clone().unwrap_or("ACP Session".to_string()));
+        let thread = Thread::with_id(thread_id).with_title(
+            config
+                .agent_name
+                .clone()
+                .unwrap_or("ACP Session".to_string()),
+        );
         let _ = self.conversation_store.save(&thread);
 
         {
             let mut sessions = self.sessions.write().await;
-             sessions.insert(
+            sessions.insert(
                 thread_id,
                 ActiveSession {
                     session_id: session_id.clone(),
@@ -249,6 +254,7 @@ impl AcpSessionManager {
                     accumulated_content: accumulated,
                     agent_name: config.agent_name.clone(),
                     client,
+                    handler: handler_for_session,
                     child,
                 },
             );
@@ -274,10 +280,7 @@ impl AcpSessionManager {
             let session = sessions
                 .get(&thread_id)
                 .ok_or(AcpSessionError::NotConnected)?;
-            (
-                session.session_id.clone(),
-                build_prompt(&message),
-            )
+            (session.session_id.clone(), build_prompt(&message))
         };
 
         // Persist the user message.
@@ -344,6 +347,31 @@ impl AcpSessionManager {
         Ok(sessions.values().map(|s| s.session_id.clone()).collect())
     }
 
+    /// Delivers a user's permission response to the awaiting handler.
+    ///
+    /// Called by the `acp_permission_respond` Tauri command. Looks up the
+    /// session by `thread_id`, then forwards the `request_id` + `outcome` to
+    /// the session's `NabuAcpHandler`, which wakes the oneshot receiver stuck
+    /// in `request_permission`.
+    pub async fn respond_to_permission(
+        &self,
+        thread_id: Uuid,
+        request_id: Uuid,
+        outcome: crate::acp::types::PermissionOutcome,
+    ) -> Result<(), AcpSessionError> {
+        let handler = {
+            let sessions = self.sessions.read().await;
+            let session = sessions
+                .get(&thread_id)
+                .ok_or(AcpSessionError::NotConnected)?;
+            session.handler.clone()
+        };
+        handler
+            .deliver_permission_response(request_id, outcome)
+            .await
+            .map_err(|e| AcpSessionError::PermissionDelivery(e.to_string()))
+    }
+
     pub fn streaming_pipeline(&self) -> &StreamingPipeline {
         &self.pipeline
     }
@@ -406,7 +434,9 @@ fn build_nabu_mcp_server_config(vault_path: &std::path::Path) -> Vec<McpServer> 
     })]
 }
 
-fn spawn_agent_process(config: &AcpConnectConfig) -> Result<tokio::process::Child, AcpSessionError> {
+fn spawn_agent_process(
+    config: &AcpConnectConfig,
+) -> Result<tokio::process::Child, AcpSessionError> {
     let mut cmd = tokio::process::Command::new(&config.command);
     cmd.args(&config.args);
     if !config.env.is_empty() {
@@ -457,11 +487,7 @@ async fn publish_content_chunk(
 }
 
 /// Persists a user message as a `Message` (role: User) on the thread.
-async fn persist_user_message(
-    store: &ConversationStore,
-    thread_id: Uuid,
-    message: &str,
-) {
+async fn persist_user_message(store: &ConversationStore, thread_id: Uuid, message: &str) {
     if let Ok(mut thread) = store.load(thread_id) {
         let user_msg = Message::new(Uuid::new_v4(), thread_id)
             .with_role(Role::User)
@@ -521,10 +547,7 @@ mod tests {
         assert_eq!(obj.get("type").unwrap(), "stdio");
         assert_eq!(obj.get("name").unwrap(), "nabu");
         assert_eq!(obj.get("command").unwrap().as_str().unwrap(), mcp_path_str);
-        assert_eq!(
-            obj.get("args").unwrap().as_array().unwrap()[0],
-            "/my/vault"
-        );
+        assert_eq!(obj.get("args").unwrap().as_array().unwrap()[0], "/my/vault");
         let _ = std::fs::remove_file(&mcp_path);
         std::env::remove_var("NABU_MCP_SERVER_PATH");
     }

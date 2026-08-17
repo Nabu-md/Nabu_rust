@@ -115,8 +115,8 @@ pub mod style;
 pub use category::DiagnosticCategory;
 pub use error::DiagnosticError;
 pub use events::{
-    BatchClearedEvent, BatchRemovedEvent, DiagnosticBatch, DiagnosticEvent,
-    DiagnosticEventContract, DiagnosticEventError, publish_diagnostic_event,
+    publish_diagnostic_event, BatchClearedEvent, BatchRemovedEvent, DiagnosticBatch,
+    DiagnosticEvent, DiagnosticEventContract, DiagnosticEventError,
 };
 pub use mapping::{default_severity_styles, diagnostic_style};
 pub use model::{

@@ -177,7 +177,11 @@ pub struct ToolSpec {
 
 impl ToolSpec {
     /// Create a new tool spec with the given id, name, and description.
-    pub fn new(id: impl Into<ToolId>, name: impl Into<String>, description: impl Into<String>) -> Self {
+    pub fn new(
+        id: impl Into<ToolId>,
+        name: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             name: name.into(),
@@ -464,10 +468,7 @@ impl ToolResult {
     }
 
     /// Construct an error result.
-    pub fn error(
-        error: ToolError,
-        execution: Option<ToolExecutionMeta>,
-    ) -> Self {
+    pub fn error(error: ToolError, execution: Option<ToolExecutionMeta>) -> Self {
         Self {
             status: ToolResultStatus::Error,
             result: None,
@@ -527,7 +528,9 @@ impl ToolResult {
     pub fn is_error(&self) -> bool {
         matches!(
             self.status,
-            ToolResultStatus::Error | ToolResultStatus::ToolNotFound | ToolResultStatus::InvalidParams
+            ToolResultStatus::Error
+                | ToolResultStatus::ToolNotFound
+                | ToolResultStatus::InvalidParams
         ) || !self.is_success()
     }
 }
@@ -551,8 +554,9 @@ mod tests {
 
     #[test]
     fn tool_spec_round_trips() {
-        let spec = ToolSpec::new("nabu:read_note", "Read Note", "Read a note")
-            .with_param(ToolParam::required("path", ToolParamSchema::of_type("string")));
+        let spec = ToolSpec::new("nabu:read_note", "Read Note", "Read a note").with_param(
+            ToolParam::required("path", ToolParamSchema::of_type("string")),
+        );
 
         let json = serde_json::to_string(&spec).unwrap();
         let back: ToolSpec = serde_json::from_str(&json).unwrap();
@@ -602,8 +606,10 @@ mod tests {
 
     #[test]
     fn tool_call_validates_required_params_present() {
-        let spec = ToolSpec::new("nabu:read_note", "Read", "read")
-            .with_param(ToolParam::required("path", ToolParamSchema::of_type("string")));
+        let spec = ToolSpec::new("nabu:read_note", "Read", "read").with_param(ToolParam::required(
+            "path",
+            ToolParamSchema::of_type("string"),
+        ));
 
         let call = ToolCall::with_args("nabu:read_note", serde_json::json!({ "path": "note.md" }));
         assert!(call.validate_against(&spec).is_ok());
@@ -611,8 +617,10 @@ mod tests {
 
     #[test]
     fn tool_call_validates_required_params_missing() {
-        let spec = ToolSpec::new("nabu:read_note", "Read", "read")
-            .with_param(ToolParam::required("path", ToolParamSchema::of_type("string")));
+        let spec = ToolSpec::new("nabu:read_note", "Read", "read").with_param(ToolParam::required(
+            "path",
+            ToolParamSchema::of_type("string"),
+        ));
 
         let call = ToolCall::without_args("nabu:read_note");
         let err = call.validate_against(&spec).unwrap_err();
@@ -712,10 +720,7 @@ mod tests {
         assert!(ToolResult::tool_not_found(ToolId::new("x")).is_error());
         assert!(ToolResult::invalid_params(ToolId::new("x"), vec![]).is_error());
         assert!(ToolResult::cancelled(None).is_error());
-        let err_result = ToolResult::error(
-            ToolError::new("E", "m"),
-            None,
-        );
+        let err_result = ToolResult::error(ToolError::new("E", "m"), None);
         assert!(err_result.is_error());
     }
 

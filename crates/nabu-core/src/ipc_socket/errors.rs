@@ -43,10 +43,7 @@ pub enum SocketError {
     /// operation (e.g. calling `start()` before `initialize()`, or calling
     /// `shutdown()` on an already-shut-down socket).
     #[error("Invalid lifecycle transition for socket '{path}': {message}")]
-    LifecycleError {
-        path: PathBuf,
-        message: String,
-    },
+    LifecycleError { path: PathBuf, message: String },
 
     /// The tokio runtime is not available on the current thread — required
     /// for spawning the accept loop task.

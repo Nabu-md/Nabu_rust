@@ -366,8 +366,7 @@ impl VaultGraph {
             loaded_from_disk = self.loaded_from_disk(),
             "VaultGraph state validated"
         );
-        self.lifecycle
-            .transition_to(LifecycleStage::Initialized)?;
+        self.lifecycle.transition_to(LifecycleStage::Initialized)?;
         tracing::info!(
             subsystem = "graph",
             component = "graph",
@@ -386,13 +385,10 @@ impl VaultGraph {
     /// to document events via the EventBus.
     pub fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         if self.lifecycle.is_shutdown() {
-            return Err(
-                "VaultGraph has been shut down and cannot be restarted".into(),
-            );
+            return Err("VaultGraph has been shut down and cannot be restarted".into());
         }
         if self.lifecycle.stage() == LifecycleStage::Created {
-            self.lifecycle
-                .transition_to(LifecycleStage::Initialized)?;
+            self.lifecycle.transition_to(LifecycleStage::Initialized)?;
         }
         self.lifecycle.transition_to(LifecycleStage::Running)?;
         tracing::info!(
@@ -426,8 +422,7 @@ impl VaultGraph {
             operation = "shutdown",
             "VaultGraph shutdown complete"
         );
-        self.lifecycle
-            .transition_to(LifecycleStage::Shutdown)?;
+        self.lifecycle.transition_to(LifecycleStage::Shutdown)?;
         Ok(())
     }
 
@@ -468,7 +463,13 @@ impl VaultGraph {
                     crate::models::RelationType::Custom(label) => label.as_str(),
                 };
                 if self.has_node(relation.target_id) {
-                    self._add_edge_internal(object.id, relation.target_id, relationship, false, 1.0)?;
+                    self._add_edge_internal(
+                        object.id,
+                        relation.target_id,
+                        relationship,
+                        false,
+                        1.0,
+                    )?;
                 }
             }
         }
@@ -559,9 +560,9 @@ impl VaultGraph {
         Ok(())
     }
 
-// -----------------------------------------------------------------------
-// Internal helpers (no auto-persist)
-// -----------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // Internal helpers (no auto-persist)
+    // -----------------------------------------------------------------------
 
     fn _add_node_internal(&self, object: &KnowledgeObject) -> Result<(), String> {
         let mut nodes = self.nodes.write().map_err(|e| e.to_string())?;
@@ -570,13 +571,19 @@ impl VaultGraph {
     }
 
     fn _add_edge_internal(
-        &self, source: Uuid, target: Uuid, relationship: &str,
-        content_derived: bool, weight: f64,
+        &self,
+        source: Uuid,
+        target: Uuid,
+        relationship: &str,
+        content_derived: bool,
+        weight: f64,
     ) -> Result<(), String> {
         let edge = GraphEdge {
-            source, target,
+            source,
+            target,
             relationship: relationship.to_string(),
-            weight, content_derived,
+            weight,
+            content_derived,
         };
 
         {
@@ -633,14 +640,21 @@ impl VaultGraph {
 
     /// Check if a node exists in the graph.
     fn has_node(&self, object_id: Uuid) -> bool {
-        self.nodes.read().map(|n| n.contains_key(&object_id)).unwrap_or(false)
+        self.nodes
+            .read()
+            .map(|n| n.contains_key(&object_id))
+            .unwrap_or(false)
     }
 
     /// Build a resolution index from the in-memory nodes.
     fn build_resolution_index_internal(&self) -> Result<ResolutionIndex, String> {
         let objects: Vec<KnowledgeObject> = self
-            .nodes.read().map_err(|e| e.to_string())?
-            .values().cloned().collect();
+            .nodes
+            .read()
+            .map_err(|e| e.to_string())?
+            .values()
+            .cloned()
+            .collect();
         Ok(ResolutionIndex::from_objects(&objects))
     }
 
@@ -648,7 +662,9 @@ impl VaultGraph {
     /// a note content. Removes previous content-derived edges from the
     /// same source before adding new ones.
     fn derive_content_edges_internal(
-        &self, object: &KnowledgeObject, index: &ResolutionIndex,
+        &self,
+        object: &KnowledgeObject,
+        index: &ResolutionIndex,
     ) -> Result<(), String> {
         self._remove_content_edges_internal(object.id)?;
 
@@ -673,9 +689,9 @@ impl VaultGraph {
         Ok(())
     }
 
-// -----------------------------------------------------------------------
-// Production update path — derives content edges via add_edge
-// -----------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // Production update path — derives content edges via add_edge
+    // -----------------------------------------------------------------------
 
     /// Update a note in the graph, deriving content-derived edges from
     /// wiki-links and block references in its content.
@@ -714,19 +730,26 @@ impl VaultGraph {
         self.update_node(object)
     }
 
-// -----------------------------------------------------------------------
-// Rename / lifecycle
-// -----------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // Rename / lifecycle
+    // -----------------------------------------------------------------------
 
     /// Rename a note — updates title and/or vault path.
     pub fn rename_note(
-        &self, object_id: Uuid, new_title: Option<String>, new_vault_path: Option<String>,
+        &self,
+        object_id: Uuid,
+        new_title: Option<String>,
+        new_vault_path: Option<String>,
     ) -> Result<(), String> {
         {
             let mut nodes = self.nodes.write().map_err(|e| e.to_string())?;
             if let Some(obj) = nodes.get_mut(&object_id) {
-                if let Some(title) = new_title { obj.metadata.title = Some(title); }
-                if let Some(path) = new_vault_path { obj.metadata.vault_path = Some(path); }
+                if let Some(title) = new_title {
+                    obj.metadata.title = Some(title);
+                }
+                if let Some(path) = new_vault_path {
+                    obj.metadata.vault_path = Some(path);
+                }
                 obj.updated_at = chrono::Utc::now();
             } else {
                 return Err(format!("Node not found in graph: {}", object_id));
@@ -734,21 +757,27 @@ impl VaultGraph {
         }
 
         if let Some(ref bus) = self.event_bus {
-            bus.publish(GRAPH_UPDATED, &PipelineEvent::GraphUpdated(GraphUpdatedEvent {
-                object_id, operation: GraphOperation::NodeUpdated,
-                timestamp: chrono::Utc::now(),
-            }));
+            bus.publish(
+                GRAPH_UPDATED,
+                &PipelineEvent::GraphUpdated(GraphUpdatedEvent {
+                    object_id,
+                    operation: GraphOperation::NodeUpdated,
+                    timestamp: chrono::Utc::now(),
+                }),
+            );
         }
 
         if let Some(ref persistence) = self.persistence {
-            if persistence.auto_save { let _ = persistence.save(self); }
+            if persistence.auto_save {
+                let _ = persistence.save(self);
+            }
         }
         Ok(())
     }
 
-// -----------------------------------------------------------------------
-// Vault content loading & rebuild
-// -----------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // Vault content loading & rebuild
+    // -----------------------------------------------------------------------
 
     pub fn load_content(&self, vault_rel_path: &str) -> Option<String> {
         let root = self.vault_root.read().ok().and_then(|r| r.clone())?;
@@ -756,7 +785,9 @@ impl VaultGraph {
     }
 
     pub fn try_load_object(
-        &self, object_id: Uuid, vault_rel_path: &str,
+        &self,
+        object_id: Uuid,
+        vault_rel_path: &str,
     ) -> Option<KnowledgeObject> {
         let root = self.vault_root.read().ok().and_then(|r| r.clone())?;
         let sidecar_path = root.join(".nabu").join(format!("{}.json", object_id));
@@ -798,20 +829,25 @@ impl VaultGraph {
         self.clear()?;
         self._rebuild_adjacency_internal()?;
         self.load_from_snapshot(&snapshot);
-        if let Ok(mut gen) = self.generation.write() { *gen = 1; }
+        if let Ok(mut gen) = self.generation.write() {
+            *gen = 1;
+        }
         self.persist()?;
         Ok(())
     }
 
-// -----------------------------------------------------------------------
-// Query API
-// -----------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // Query API
+    // -----------------------------------------------------------------------
 
     pub fn neighbors(&self, object_id: Uuid) -> Vec<Uuid> {
         let adj = self.adjacency.read().ok();
         match adj {
-            Some(adj) => adj.get(&object_id).cloned()
-                .map(|s| s.into_iter().collect()).unwrap_or_default(),
+            Some(adj) => adj
+                .get(&object_id)
+                .cloned()
+                .map(|s| s.into_iter().collect())
+                .unwrap_or_default(),
             None => Vec::new(),
         }
     }
@@ -819,9 +855,11 @@ impl VaultGraph {
     pub fn edges_for(&self, object_id: Uuid) -> Vec<GraphEdge> {
         let edges = self.edges.read().ok();
         match edges {
-            Some(edges) => edges.iter()
+            Some(edges) => edges
+                .iter()
                 .filter(|e| e.source == object_id || e.target == object_id)
-                .cloned().collect(),
+                .cloned()
+                .collect(),
             None => Vec::new(),
         }
     }
@@ -833,51 +871,84 @@ impl VaultGraph {
 
     /// Get all outgoing edges from a given node.
     pub fn outgoing_edges(&self, object_id: Uuid) -> Vec<GraphEdge> {
-        self.edges.read().map(|edges| {
-            edges.iter().filter(|e| e.source == object_id).cloned().collect()
-        }).unwrap_or_default()
+        self.edges
+            .read()
+            .map(|edges| {
+                edges
+                    .iter()
+                    .filter(|e| e.source == object_id)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Get all incoming edges to a given node.
     pub fn incoming_edges(&self, object_id: Uuid) -> Vec<GraphEdge> {
-        self.edges.read().map(|edges| {
-            edges.iter().filter(|e| e.target == object_id).cloned().collect()
-        }).unwrap_or_default()
+        self.edges
+            .read()
+            .map(|edges| {
+                edges
+                    .iter()
+                    .filter(|e| e.target == object_id)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Check whether a specific edge exists in the graph.
     pub fn has_edge(&self, source: Uuid, target: Uuid, relationship: &str) -> bool {
-        self.edges.read().map(|edges| {
-            edges.iter().any(|e| e.source == source
-                && e.target == target && e.relationship == relationship)
-        }).unwrap_or(false)
+        self.edges
+            .read()
+            .map(|edges| {
+                edges.iter().any(|e| {
+                    e.source == source && e.target == target && e.relationship == relationship
+                })
+            })
+            .unwrap_or(false)
     }
 
     /// Get all notes referenced by the given note (outgoing references).
     pub fn linked_notes(&self, object_id: Uuid) -> Vec<Uuid> {
-        self.edges.read().map(|edges| {
-            edges.iter()
-                .filter(|e| e.source == object_id && e.relationship == "references")
-                .map(|e| e.target).collect()
-        }).unwrap_or_default()
+        self.edges
+            .read()
+            .map(|edges| {
+                edges
+                    .iter()
+                    .filter(|e| e.source == object_id && e.relationship == "references")
+                    .map(|e| e.target)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Get all notes that reference the given note (incoming references).
     pub fn incoming_links(&self, object_id: Uuid) -> Vec<Uuid> {
-        self.edges.read().map(|edges| {
-            edges.iter()
-                .filter(|e| e.target == object_id && e.relationship == "references")
-                .map(|e| e.source).collect()
-        }).unwrap_or_default()
+        self.edges
+            .read()
+            .map(|edges| {
+                edges
+                    .iter()
+                    .filter(|e| e.target == object_id && e.relationship == "references")
+                    .map(|e| e.source)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Get all edges of a specific relationship type.
     pub fn edges_by_type(&self, relationship: &str) -> Vec<GraphEdge> {
-        self.edges.read().map(|edges| {
-            edges.iter()
-                .filter(|e| e.relationship == relationship)
-                .cloned().collect()
-        }).unwrap_or_default()
+        self.edges
+            .read()
+            .map(|edges| {
+                edges
+                    .iter()
+                    .filter(|e| e.relationship == relationship)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn node_count(&self) -> usize {
@@ -899,7 +970,10 @@ impl VaultGraph {
     }
 
     pub fn all_nodes(&self) -> Vec<KnowledgeObject> {
-        self.nodes.read().map(|n| n.values().cloned().collect()).unwrap_or_default()
+        self.nodes
+            .read()
+            .map(|n| n.values().cloned().collect())
+            .unwrap_or_default()
     }
 }
 
@@ -1109,9 +1183,17 @@ mod tests {
 
         // update_node should create a content-derived edge from A to B
         let edges = graph.edges();
-        let content_edge = edges.iter().find(|e| e.source == obj_a.id && e.target == obj_b.id);
-        assert!(content_edge.is_some(), "Expected wiki-link edge from A to B");
-        assert!(content_edge.unwrap().content_derived, "Edge should be content-derived");
+        let content_edge = edges
+            .iter()
+            .find(|e| e.source == obj_a.id && e.target == obj_b.id);
+        assert!(
+            content_edge.is_some(),
+            "Expected wiki-link edge from A to B"
+        );
+        assert!(
+            content_edge.unwrap().content_derived,
+            "Edge should be content-derived"
+        );
 
         // linked_notes should resolve via wiki-link
         let linked = graph.linked_notes(obj_a.id);
@@ -1246,7 +1328,10 @@ mod tests {
         // Block reference should create a block_reference edge
         let edges = graph.edges();
         let block_edge = edges.iter().find(|e| e.relationship == "block_reference");
-        assert!(block_edge.is_some(), "Expected block_reference edge from ((Note B))");
+        assert!(
+            block_edge.is_some(),
+            "Expected block_reference edge from ((Note B))"
+        );
         assert!(block_edge.unwrap().content_derived);
     }
 
@@ -1277,7 +1362,11 @@ mod tests {
         // rebuild should have created content-derived edges
         let edges = graph.edges();
         let content_edges: Vec<_> = edges.iter().filter(|e| e.content_derived).collect();
-        assert_eq!(content_edges.len(), 2, "Expected 2 content-derived edges (A->B and B->A)");
+        assert_eq!(
+            content_edges.len(),
+            2,
+            "Expected 2 content-derived edges (A->B and B->A)"
+        );
 
         // node count should be 2
         assert_eq!(graph.node_count(), 2);

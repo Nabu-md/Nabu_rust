@@ -32,8 +32,8 @@ pub use application::Application;
 pub use health::{HealthStatus, LifecycleStageInfo, ServiceEntry, ServiceHealth};
 pub use lifecycle::{Lifecycle, LifecycleError, LifecycleManager, LifecycleStage};
 pub use metrics::{
-    CounterMetric, GaugeMetric, MetricsAggregator, MetricsError, RuntimeMetrics,
-    ServiceMetrics, TimerMetric,
+    CounterMetric, GaugeMetric, MetricsAggregator, MetricsError, RuntimeMetrics, ServiceMetrics,
+    TimerMetric,
 };
 
 use std::any::Any;
@@ -117,8 +117,7 @@ impl ServiceRegistry {
         if !self.lifecycle_services.contains(&key) {
             self.lifecycle_services.push(key.clone());
         }
-        self.lifecycle_refs
-            .insert(key, service);
+        self.lifecycle_refs.insert(key, service);
     }
 
     /// Registers a service as a [`MetricsAggregator`] under the given key.
@@ -137,8 +136,7 @@ impl ServiceRegistry {
         key: &str,
         service: Arc<T>,
     ) {
-        self.metrics_aggregators
-            .insert(key.to_string(), service);
+        self.metrics_aggregators.insert(key.to_string(), service);
     }
 
     // -----------------------------------------------------------------------
@@ -665,7 +663,10 @@ mod tests {
         assert!(errors.is_empty());
 
         let order = shutdown_order.lock().unwrap();
-        assert_eq!(*order, vec!["c".to_string(), "b".to_string(), "a".to_string()]);
+        assert_eq!(
+            *order,
+            vec!["c".to_string(), "b".to_string(), "a".to_string()]
+        );
     }
 
     #[test]
@@ -684,7 +685,11 @@ mod tests {
 
         assert_eq!(
             registry.lifecycle_service_keys(),
-            vec!["first".to_string(), "second".to_string(), "third".to_string()]
+            vec![
+                "first".to_string(),
+                "second".to_string(),
+                "third".to_string()
+            ]
         );
     }
 }

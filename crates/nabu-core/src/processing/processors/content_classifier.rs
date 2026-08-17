@@ -88,46 +88,65 @@ fn classify_content(text: &str, _metadata: &ObjectMetadata) -> Option<(String, f
     let lower = text.to_lowercase();
 
     // Invoice detection
-    if let Some(score) = match_score(&lower, &[
-        "invoice",
-        "invoice number",
-        "invoice date",
-        "total due",
-        "amount due",
-        "payment terms",
-        "bill to",
-    ]) {
+    if let Some(score) = match_score(
+        &lower,
+        &[
+            "invoice",
+            "invoice number",
+            "invoice date",
+            "total due",
+            "amount due",
+            "payment terms",
+            "bill to",
+        ],
+    ) {
         return Some(("invoice".to_string(), score));
     }
 
     // Receipt detection
-    if contains_any(&lower, &[
-        "receipt",
-        "total",
-        "tax",
-        "subtotal",
-        "payment method",
-        "card ending",
-        "thank you for your purchase",
-    ]) && contains_any(&lower, &["$", "€", "£", "¥"])
+    if contains_any(
+        &lower,
+        &[
+            "receipt",
+            "total",
+            "tax",
+            "subtotal",
+            "payment method",
+            "card ending",
+            "thank you for your purchase",
+        ],
+    ) && contains_any(&lower, &["$", "€", "£", "¥"])
     {
-        let score = match_score(&lower, &[
-            "receipt", "total", "tax", "subtotal",
-            "payment method", "card ending", "thank you for your purchase",
-        ]).map(|s| (s + 0.2).min(1.0)).unwrap_or(0.5);
+        let score = match_score(
+            &lower,
+            &[
+                "receipt",
+                "total",
+                "tax",
+                "subtotal",
+                "payment method",
+                "card ending",
+                "thank you for your purchase",
+            ],
+        )
+        .map(|s| (s + 0.2).min(1.0))
+        .unwrap_or(0.5);
         return Some(("receipt".to_string(), score));
     }
 
     // Meeting notes
-    if let Some(score) = match_score(&lower, &[
-        "meeting notes",
-        "agenda",
-        "action items",
-        "minutes",
-        "attendees",
-        "discussion points",
-        "next steps",
-    ]) {
+    if let Some(score) = match_score(
+        &lower,
+        &[
+            "meeting notes",
+            "agenda",
+            "action items",
+            "minutes",
+            "attendees",
+            "discussion points",
+            "next steps",
+        ],
+    ) {
         return Some(("meeting_note".to_string(), score));
     }
 
@@ -138,15 +157,18 @@ fn classify_content(text: &str, _metadata: &ObjectMetadata) -> Option<(String, f
     }
 
     // Email
-    if contains_any(&lower, &[
-        "subject:",
-        "from:",
-        "to:",
-        "cc:",
-        "bcc:",
-        "forwarded message",
-        "original message",
-    ]) && text.contains('@')
+    if contains_any(
+        &lower,
+        &[
+            "subject:",
+            "from:",
+            "to:",
+            "cc:",
+            "bcc:",
+            "forwarded message",
+            "original message",
+        ],
+    ) && text.contains('@')
     {
         let score = 0.85;
         return Some(("email".to_string(), score));
@@ -154,14 +176,17 @@ fn classify_content(text: &str, _metadata: &ObjectMetadata) -> Option<(String, f
 
     // Article
     if text.len() > 500
-        && contains_any(&lower, &[
-        "introduction",
-        "conclusion",
-        "summary",
-        "abstract",
-        "published",
-        "author",
-    ])
+        && contains_any(
+            &lower,
+            &[
+                "introduction",
+                "conclusion",
+                "summary",
+                "abstract",
+                "published",
+                "author",
+            ],
+        )
     {
         let score = 0.7;
         return Some(("article".to_string(), score));

@@ -10,9 +10,7 @@
 //! response. The default implementations use simple synchronous approval
 //! (denying all requests), which is the safe fallback.
 
-use super::types::{
-    ElicitationId, ElicitationOutcome, RequestPermissionOutcome,
-};
+use super::types::{ElicitationId, ElicitationOutcome, RequestPermissionOutcome};
 use async_trait::async_trait;
 
 /// Handles elicitation requests — presents a form or URL to the user and
@@ -166,6 +164,9 @@ mod tests {
             _meta: None,
         }];
         let outcome = handler.request_permission("sess_1", "tc_1", &options).await;
-        assert!(matches!(outcome, RequestPermissionOutcome::Cancelled { .. }));
+        assert!(matches!(
+            outcome,
+            RequestPermissionOutcome::Cancelled { .. }
+        ));
     }
 }

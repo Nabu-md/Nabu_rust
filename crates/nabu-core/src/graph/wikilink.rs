@@ -188,7 +188,12 @@ mod tests {
     use super::*;
     use crate::models::{ObjectContent, ObjectMetadata, ObjectType};
 
-    fn obj(id: uuid::Uuid, title: &str, vault_path: Option<&str>, content: &str) -> KnowledgeObject {
+    fn obj(
+        id: uuid::Uuid,
+        title: &str,
+        vault_path: Option<&str>,
+        content: &str,
+    ) -> KnowledgeObject {
         let mut o = KnowledgeObject::new(ObjectType::Note, ObjectContent::Markdown(content.into()));
         o.metadata.title = Some(title.into());
         if let Some(p) = vault_path {
@@ -202,7 +207,10 @@ mod tests {
     fn parse_wiki_links_extracts_bracketed_text() {
         let text = "See [[My Note]] and [[Another Page]] for details.";
         let links = parse_wiki_links(text);
-        assert_eq!(links, vec!["My Note".to_string(), "Another Page".to_string()]);
+        assert_eq!(
+            links,
+            vec!["My Note".to_string(), "Another Page".to_string()]
+        );
     }
 
     #[test]

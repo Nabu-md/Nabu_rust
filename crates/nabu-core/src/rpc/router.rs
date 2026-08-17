@@ -33,24 +33,24 @@
 //!   the `result`.
 //! - `Err(error)` → the router builds an error response with that error.
 //!
-    //! ```
-    //! use nabu_core::rpc::{Router, RpcHandler, JsonRpcError};
-    //! use serde_json::{json, Value};
-    //! use std::sync::Arc;
-    //! use async_trait::async_trait;
-    //!
-    //! struct AddHandler;
-    //! #[async_trait]
-    //! impl RpcHandler for AddHandler {
-    //!     async fn handle(&self, params: Option<Value>) -> Result<Value, JsonRpcError> {
-    //!         let arr = params.unwrap_or(Value::Null);
-    //!         let nums: Vec<f64> = serde_json::from_value(arr)
-    //!             .map_err(|e| JsonRpcError::invalid_params(e.to_string()))?;
-    //!         let sum: f64 = nums.iter().sum();
-    //!         Ok(json!(sum))
-    //!     }
-    //! }
-    //! ```
+//! ```
+//! use nabu_core::rpc::{Router, RpcHandler, JsonRpcError};
+//! use serde_json::{json, Value};
+//! use std::sync::Arc;
+//! use async_trait::async_trait;
+//!
+//! struct AddHandler;
+//! #[async_trait]
+//! impl RpcHandler for AddHandler {
+//!     async fn handle(&self, params: Option<Value>) -> Result<Value, JsonRpcError> {
+//!         let arr = params.unwrap_or(Value::Null);
+//!         let nums: Vec<f64> = serde_json::from_value(arr)
+//!             .map_err(|e| JsonRpcError::invalid_params(e.to_string()))?;
+//!         let sum: f64 = nums.iter().sum();
+//!         Ok(json!(sum))
+//!     }
+//! }
+//! ```
 
 use crate::rpc::types::{Request, Response};
 use crate::rpc::JsonRpcError;
@@ -99,23 +99,23 @@ pub trait RpcHandler: Send + Sync {
 ///
 /// ## Usage
 ///
-    /// ```
-    /// use nabu_core::rpc::{Router, RpcHandler, JsonRpcError};
-    /// use serde_json::{json, Value};
-    /// use std::sync::Arc;
-    /// use async_trait::async_trait;
-    ///
-    /// struct PingHandler;
-    /// #[async_trait]
-    /// impl RpcHandler for PingHandler {
-    ///     async fn handle(&self, _params: Option<Value>) -> Result<Value, JsonRpcError> {
-    ///         Ok(json!("pong"))
-    ///     }
-    /// }
-    ///
-    /// let router = Router::new();
-    /// // Registration is async — await in a real runtime.
-    /// ```
+/// ```
+/// use nabu_core::rpc::{Router, RpcHandler, JsonRpcError};
+/// use serde_json::{json, Value};
+/// use std::sync::Arc;
+/// use async_trait::async_trait;
+///
+/// struct PingHandler;
+/// #[async_trait]
+/// impl RpcHandler for PingHandler {
+///     async fn handle(&self, _params: Option<Value>) -> Result<Value, JsonRpcError> {
+///         Ok(json!("pong"))
+///     }
+/// }
+///
+/// let router = Router::new();
+/// // Registration is async — await in a real runtime.
+/// ```
 ///
 /// ## Concurrency
 ///
@@ -221,10 +221,7 @@ impl Router {
 
         // 2. Destructure after validation.
         let Request {
-            id,
-            method,
-            params,
-            ..
+            id, method, params, ..
         } = request;
 
         // 2. Locate the handler.
@@ -261,4 +258,3 @@ impl Router {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-

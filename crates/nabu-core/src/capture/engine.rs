@@ -6,9 +6,7 @@ use crate::jobs::job::{ContentPayload, Job, JobType};
 use crate::jobs::queue::{DurableJobQueue, Queue};
 use crate::models::ObjectType;
 use crate::registry::lifecycle::{Lifecycle, LifecycleManager, LifecycleStage};
-use crate::registry::metrics::{
-    CounterMetric, GaugeMetric, MetricsAggregator, ServiceMetrics,
-};
+use crate::registry::metrics::{CounterMetric, GaugeMetric, MetricsAggregator, ServiceMetrics};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -111,8 +109,7 @@ impl CaptureEngine {
                 // and process restarts.  Text content is stored inline in the
                 // payload; binary content is persisted to a blob file and a
                 // durable reference is stored instead.
-                job.content_payload =
-                    build_content_payload(&result.object, queue, &job.object_id)?;
+                job.content_payload = build_content_payload(&result.object, queue, &job.object_id)?;
 
                 queue.enqueue(job)?;
 
@@ -201,8 +198,7 @@ impl Lifecycle for CaptureEngine {
             handlers = self.handler_count(),
             "CaptureEngine initialized"
         );
-        self.lifecycle
-            .transition_to(LifecycleStage::Initialized)?;
+        self.lifecycle.transition_to(LifecycleStage::Initialized)?;
         Ok(())
     }
 
@@ -217,9 +213,7 @@ impl Lifecycle for CaptureEngine {
     fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         // Cannot restart a shut-down engine
         if self.lifecycle.is_shutdown() {
-            return Err(
-                "CaptureEngine has been shut down and cannot be restarted".into(),
-            );
+            return Err("CaptureEngine has been shut down and cannot be restarted".into());
         }
 
         // Auto-advance Created → Initialized so callers can call start()
@@ -231,8 +225,7 @@ impl Lifecycle for CaptureEngine {
                 operation = "start",
                 "Initializing capture engine"
             );
-            self.lifecycle
-                .transition_to(LifecycleStage::Initialized)?;
+            self.lifecycle.transition_to(LifecycleStage::Initialized)?;
         }
 
         // Guard against duplicate start — transition Running → Running is a
@@ -247,8 +240,7 @@ impl Lifecycle for CaptureEngine {
             return Ok(());
         }
 
-        self.lifecycle
-            .transition_to(LifecycleStage::Running)?;
+        self.lifecycle.transition_to(LifecycleStage::Running)?;
 
         tracing::info!(
             subsystem = "capture",
@@ -274,8 +266,7 @@ impl Lifecycle for CaptureEngine {
             "CaptureEngine shutting down"
         );
 
-        self.lifecycle
-            .transition_to(LifecycleStage::Shutdown)?;
+        self.lifecycle.transition_to(LifecycleStage::Shutdown)?;
 
         tracing::info!(
             subsystem = "capture",
@@ -440,9 +431,7 @@ mod tests {
         engine.register(Arc::new(crate::capture::handler::ClipboardHandler));
 
         let distinctive_text = "INVOICE #42\nTotal Due: $999.99\nbill to: Test Corp";
-        let request = CaptureRequest::new(CaptureData::Text(
-            distinctive_text.to_string(),
-        ));
+        let request = CaptureRequest::new(CaptureData::Text(distinctive_text.to_string()));
         engine.ingest(request).await.unwrap();
 
         // Dequeue and inspect the job
@@ -479,7 +468,9 @@ mod tests {
         let payload = job.content_payload.expect("binary job must carry content");
         match &payload {
             ContentPayload::Binary {
-                mime_type, blob_path, ..
+                mime_type,
+                blob_path,
+                ..
             } => {
                 assert_eq!(mime_type, "image/png");
                 // The blob file should exist on disk and contain the bytes

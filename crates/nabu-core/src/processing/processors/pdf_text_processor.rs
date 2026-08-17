@@ -1,21 +1,21 @@
+use crate::diagnostic::{
+    Diagnostic, DiagnosticCategory, DiagnosticSeverity, TextPosition, TextRange,
+};
 use crate::jobs::cancellation::CancellationToken;
 use crate::jobs::workers::progress::ProgressReporter;
 use crate::models::{CustomPropertyValue, ObjectContent, ObjectType};
-use crate::processing::processor::{ProcessingContext, ProcessingResult, Processor, ProcessingStats};
-use crate::diagnostic::{Diagnostic, DiagnosticCategory, DiagnosticSeverity, TextPosition, TextRange};
 use crate::native::NativeError;
+use crate::processing::processor::{
+    ProcessingContext, ProcessingResult, ProcessingStats, Processor,
+};
 use async_trait::async_trait;
 use std::time::Instant;
 
 fn pdf_diagnostic(severity: DiagnosticSeverity, message: String, code: &str) -> Diagnostic {
-    Diagnostic::new(
-        severity,
-        TextRange::empty(TextPosition::new(0, 0)),
-        message,
-    )
-    .with_code(code.to_string())
-    .with_source("pdf_text_processor".to_string())
-    .with_category(DiagnosticCategory::Ocr)
+    Diagnostic::new(severity, TextRange::empty(TextPosition::new(0, 0)), message)
+        .with_code(code.to_string())
+        .with_source("pdf_text_processor".to_string())
+        .with_category(DiagnosticCategory::Ocr)
 }
 
 /// Extracts text content from PDF files via the native PDFKit engine
@@ -57,8 +57,9 @@ impl Processor for PdfTextProcessor {
         let mut object = context.object.clone();
 
         let start = Instant::now();
-        let engine_result = tokio::task::spawn_blocking(move || crate::native::pdfkit::extract_text(&pdf_data))
-            .await;
+        let engine_result =
+            tokio::task::spawn_blocking(move || crate::native::pdfkit::extract_text(&pdf_data))
+                .await;
         let duration_ms = start.elapsed().as_millis() as u64;
 
         let extracted = match engine_result {
@@ -167,12 +168,11 @@ impl Processor for PdfTextProcessor {
         }
 
         progress.set_progress(1.0);
-        ProcessingResult::new(object)
-            .with_stats(
-                ProcessingStats::new()
-                    .with_duration_ms(duration_ms)
-                    .with_metric("pdf_pages".to_string(), extracted.page_count.to_string()),
-            )
+        ProcessingResult::new(object).with_stats(
+            ProcessingStats::new()
+                .with_duration_ms(duration_ms)
+                .with_metric("pdf_pages".to_string(), extracted.page_count.to_string()),
+        )
     }
 
     fn supports(&self, object_type: &ObjectType) -> bool {
@@ -230,30 +230,52 @@ mod tests {
                 .custom_properties
                 .get("pdf_text_info")
                 .and_then(|v| match v {
-                    CustomPropertyValue::Text(s) => serde_json::from_str::<serde_json::Value>(s).ok(),
+                    CustomPropertyValue::Text(s) => {
+                        serde_json::from_str::<serde_json::Value>(s).ok()
+                    }
                     _ => None,
                 });
             assert!(pdf_info.is_some(), "pdf_text_info must be stored");
             let parsed = pdf_info.unwrap();
-            assert!(parsed["extraction_succeeded"].as_bool().unwrap_or(false), "extraction_succeeded must be true");
-            assert!(parsed["page_count"].is_number(), "page_count must be a number");
+            assert!(
+                parsed["extraction_succeeded"].as_bool().unwrap_or(false),
+                "extraction_succeeded must be true"
+            );
+            assert!(
+                parsed["page_count"].is_number(),
+                "page_count must be a number"
+            );
 
             // description must contain the FULL text (not truncated to 200 chars)
             let desc = result.object.metadata.description.as_deref().unwrap_or("");
-            assert!(desc.contains("QUICK BROWN FOX"), "description must contain the full extracted text");
-            assert_eq!(desc, &extracted, "description should be the full extracted text, not truncated");
+            assert!(
+                desc.contains("QUICK BROWN FOX"),
+                "description must contain the full extracted text"
+            );
+            assert_eq!(
+                desc, &extracted,
+                "description should be the full extracted text, not truncated"
+            );
         } else {
             // Non-macOS: PDFKit unavailable, pdf_text_info must be stored with warning.
-            assert!(result.modified, "object should be modified to record PDF platform warning");
+            assert!(
+                result.modified,
+                "object should be modified to record PDF platform warning"
+            );
             let pdf_info = result
                 .object
                 .custom_properties
                 .get("pdf_text_info")
                 .and_then(|v| match v {
-                    CustomPropertyValue::Text(s) => serde_json::from_str::<serde_json::Value>(s).ok(),
+                    CustomPropertyValue::Text(s) => {
+                        serde_json::from_str::<serde_json::Value>(s).ok()
+                    }
                     _ => None,
                 });
-            assert!(pdf_info.is_some(), "pdf_text_info must be stored even on failure");
+            assert!(
+                pdf_info.is_some(),
+                "pdf_text_info must be stored even on failure"
+            );
             let warning = pdf_info.and_then(|v| v["warning"].as_str().map(|s| s.to_string()));
             assert!(warning.is_some(), "warning must be set on non-macOS");
         }

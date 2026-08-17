@@ -46,9 +46,9 @@ use std::sync::{Arc, Mutex, RwLock};
 use nabu_core::event_bus::kinds;
 use nabu_core::event_bus::{EventBus, PipelineEvent};
 use nabu_core::graph::VaultGraph;
-use nabu_core::indexer::Indexer;
 use nabu_core::inbox::model::build_inbox_object;
 use nabu_core::inbox::{inbox_item_status, set_status, FilingService, InboxItemStatus};
+use nabu_core::indexer::Indexer;
 use nabu_core::models::{
     KnowledgeObject, ObjectContent, ObjectMetadata, ObjectRelation, ObjectType, RelationType,
 };
@@ -77,7 +77,10 @@ fn build_pipeline(
 ) {
     let event_bus = EventBus::new();
 
-    let storage = Arc::new(StorageManager::with_event_bus(vault.clone(), event_bus.clone()));
+    let storage = Arc::new(StorageManager::with_event_bus(
+        vault.clone(),
+        event_bus.clone(),
+    ));
     let indexer = Arc::new(Mutex::new(Indexer::with_vault_path_and_event_bus(
         vault.clone(),
         event_bus.clone(),
@@ -105,11 +108,7 @@ fn build_pipeline(
 }
 
 /// Drive a freshly-built runtime through Created → Initialized → Running.
-fn init_and_start(
-    storage: &StorageManager,
-    indexer: &Mutex<Indexer>,
-    graph: &RwLock<VaultGraph>,
-) {
+fn init_and_start(storage: &StorageManager, indexer: &Mutex<Indexer>, graph: &RwLock<VaultGraph>) {
     assert!(storage.initialize().is_ok(), "storage initialize");
     assert!(storage.start().is_ok(), "storage start");
     {
@@ -134,11 +133,12 @@ fn persist_derived(indexer: &Mutex<Indexer>, graph: &RwLock<VaultGraph>) {
 }
 
 fn make_note(title: &str, body: &str) -> KnowledgeObject {
-    KnowledgeObject::new(ObjectType::Note, ObjectContent::Markdown(body.to_string()))
-        .with_metadata(ObjectMetadata {
+    KnowledgeObject::new(ObjectType::Note, ObjectContent::Markdown(body.to_string())).with_metadata(
+        ObjectMetadata {
             title: Some(title.to_string()),
             ..Default::default()
-        })
+        },
+    )
 }
 
 // ===========================================================================
@@ -162,7 +162,11 @@ fn notes_survive_restart() {
         // Sanity: object is resident in the live session.
         let live = storage.load(note.id).expect("load in session 1");
         assert_eq!(live.content, note.content, "content written in session 1");
-        assert_eq!(saved, live.metadata.vault_path.unwrap(), "vault_path returned by save");
+        assert_eq!(
+            saved,
+            live.metadata.vault_path.unwrap(),
+            "vault_path returned by save"
+        );
     } // ← close: EventBus (and thus the ITEM_STORED subscriber + service Arcs) drops here.
 
     // Session 2 — reopen and reconstruct from the isolated vault on disk.
@@ -179,9 +183,7 @@ fn notes_survive_restart() {
                 .id
         };
 
-        let loaded = storage
-            .load(note_id)
-            .expect("note must survive restart");
+        let loaded = storage.load(note_id).expect("note must survive restart");
         assert_eq!(loaded.object_type, ObjectType::Note);
         assert_eq!(
             loaded.content,
@@ -222,7 +224,10 @@ fn body_search_survives_restart() {
 
         let note = make_note(
             "Searchable Note",
-            &format!("This note body contains {} somewhere inside", body_only_token),
+            &format!(
+                "This note body contains {} somewhere inside",
+                body_only_token
+            ),
         );
         storage.save(&note).expect("save searchable note");
         persist_derived(&indexer, &graph);
@@ -232,7 +237,10 @@ fn body_search_survives_restart() {
     {
         let (_eb, _storage, indexer, _graph) = build_pipeline(vault.clone());
         let idx = indexer.lock().unwrap();
-        assert!(idx.initialize().is_ok(), "indexer reinitialize loads persisted index");
+        assert!(
+            idx.initialize().is_ok(),
+            "indexer reinitialize loads persisted index"
+        );
         assert!(idx.token_count() > 0, "index non-empty after reload");
 
         // Title token + the body-only token must both survive.
@@ -266,7 +274,11 @@ fn note_id_of(vault: &std::path::Path, title: &str) -> String {
         let raw = std::fs::read_to_string(&path).unwrap();
         let sidecar: serde_json::Value = serde_json::from_str(&raw).unwrap();
         if sidecar.get("title").and_then(|t| t.as_str()) == Some(title) {
-            return sidecar.get("id").and_then(|i| i.as_str()).unwrap().to_string();
+            return sidecar
+                .get("id")
+                .and_then(|i| i.as_str())
+                .unwrap()
+                .to_string();
         }
     }
     panic!("note with title {} not found on disk", title);
@@ -301,7 +313,11 @@ fn graph_edges_survive_restart() {
             let g = graph.write().unwrap();
             g.update_node(&linker)
                 .expect("update_node must derive wiki-link edges");
-            assert_eq!(g.edge_count(), 1, "wiki-link edge materialised at build time");
+            assert_eq!(
+                g.edge_count(),
+                1,
+                "wiki-link edge materialised at build time"
+            );
             assert!(
                 g.has_edge(linker.id, wiki.id, "references"),
                 "wiki-link edge should exist immediately after update_node",
@@ -408,8 +424,10 @@ fn inbox_survives_restart() {
         let (_eb, storage, indexer, graph) = build_pipeline(vault.clone());
         init_and_start(storage.as_ref(), &indexer, &graph);
 
-        let mut item =
-            build_inbox_object(ObjectContent::Markdown("inbox clip body".to_string()), Some("Clip"));
+        let mut item = build_inbox_object(
+            ObjectContent::Markdown("inbox clip body".to_string()),
+            Some("Clip"),
+        );
         set_status(&mut item, InboxItemStatus::Ready);
         storage.save(&item).expect("save inbox item");
         persist_derived(&indexer, &graph);
@@ -655,7 +673,8 @@ fn rename_survives_restart() {
         assert!(
             idx.search("rename").contains(&obj_id.to_string()),
             "RENAME defect — index lost the note during rename; expected id {} in results {:?}",
-            obj_id, idx.search("rename")
+            obj_id,
+            idx.search("rename")
         );
     }
 }
@@ -717,12 +736,16 @@ fn move_survives_restart() {
             "MOVE defect — content file missing at destination",
         );
         let sidecar = vault.join(".nabu").join(format!("{}.json", obj_id));
-        assert!(sidecar.exists(), "MOVE defect — sidecar must survive the move");
+        assert!(
+            sidecar.exists(),
+            "MOVE defect — sidecar must survive the move"
+        );
 
         assert!(
             idx.search("move").contains(&obj_id.to_string()),
             "MOVE defect — index lost the note after move; expected id {} in {:?}",
-            obj_id, idx.search("move")
+            obj_id,
+            idx.search("move")
         );
     }
 }
@@ -743,10 +766,7 @@ fn delete_survives_restart() {
         let (_eb, storage, indexer, graph) = build_pipeline(vault.clone());
         init_and_start(storage.as_ref(), &indexer, &graph);
 
-        let note = make_note(
-            "Delete Me",
-            &format!("body with {}", unique_token),
-        );
+        let note = make_note("Delete Me", &format!("body with {}", unique_token));
         let rel = storage.save(&note).expect("save before delete");
         let content_path = vault.join(&rel);
         let sidecar_path = vault.join(".nabu").join(format!("{}.json", note.id));
@@ -758,9 +778,18 @@ fn delete_survives_restart() {
 
         storage.delete(note.id).expect("delete");
         // After delete, the canonical persistence (content + sidecar) is gone.
-        assert!(!content_path.exists(), "content must be removed immediately");
-        assert!(!sidecar_path.exists(), "sidecar must be removed immediately");
-        assert!(!storage.exists(note.id), "object must not exist immediately");
+        assert!(
+            !content_path.exists(),
+            "content must be removed immediately"
+        );
+        assert!(
+            !sidecar_path.exists(),
+            "sidecar must be removed immediately"
+        );
+        assert!(
+            !storage.exists(note.id),
+            "object must not exist immediately"
+        );
 
         persist_derived(&indexer, &graph); // flush whatever derived state remains
         note.id
@@ -780,7 +809,9 @@ fn delete_survives_restart() {
             "DELETE defect — object loadable after restart (content+sidecar must stay absent)"
         );
 
-        let remaining = storage.list_objects("", None, 1000).expect("list after delete");
+        let remaining = storage
+            .list_objects("", None, 1000)
+            .expect("list after delete");
         assert!(
             !remaining.iter().any(|o| o.id == obj_id),
             "DELETE defect — deleted object reappears in list_objects after restart"
@@ -792,7 +823,8 @@ fn delete_survives_restart() {
         if let Ok(entries) = std::fs::read_dir(vault.join(".nabu")) {
             for e in entries.flatten() {
                 if e.path().extension().and_then(|ex| ex.to_str()) == Some("json")
-                    && e.path().file_stem().and_then(|s| s.to_str()) == Some(obj_id.to_string().as_str())
+                    && e.path().file_stem().and_then(|s| s.to_str())
+                        == Some(obj_id.to_string().as_str())
                 {
                     sidecar_gone = false;
                 }
@@ -800,12 +832,17 @@ fn delete_survives_restart() {
         }
         // Walk content dirs for the note's body (defensive — there should be
         // none matching the token's file).
-        let _ = std::fs::read_to_string(vault.join(format!("Inbox/{}.md", "delete-me")))
-            .map(|c| {
-                content_gone = content_gone && !c.contains(unique_token);
-            });
-        assert!(content_gone, "DELETE defect — content residue detected after restart");
-        assert!(sidecar_gone, "DELETE defect — sidecar residue detected after restart");
+        let _ = std::fs::read_to_string(vault.join(format!("Inbox/{}.md", "delete-me"))).map(|c| {
+            content_gone = content_gone && !c.contains(unique_token);
+        });
+        assert!(
+            content_gone,
+            "DELETE defect — content residue detected after restart"
+        );
+        assert!(
+            sidecar_gone,
+            "DELETE defect — sidecar residue detected after restart"
+        );
     }
 }
 
@@ -870,7 +907,9 @@ fn delete_propagates_to_derived_indexes() {
              subscriber calls Indexer::remove_object or VaultGraph::remove_node, so stale \
              state survives in `.nabu/search_index.json` and `.nabu/graph/graph.json`. \
              Responsible: Phase 1B (wire the INDEX_UPDATED/Removed subscriber).",
-            obj_id, index_still_has, graph_still_has
+            obj_id,
+            index_still_has,
+            graph_still_has
         );
     }
 }

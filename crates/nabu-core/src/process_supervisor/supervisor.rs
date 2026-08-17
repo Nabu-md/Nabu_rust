@@ -52,9 +52,7 @@ use uuid::Uuid;
 
 use crate::event_bus::{EventBus, PipelineEvent};
 use crate::registry::lifecycle::{Lifecycle, LifecycleManager, LifecycleStage};
-use crate::registry::metrics::{
-    CounterMetric, GaugeMetric, MetricsAggregator, ServiceMetrics,
-};
+use crate::registry::metrics::{CounterMetric, GaugeMetric, MetricsAggregator, ServiceMetrics};
 
 use chrono::Utc;
 
@@ -350,10 +348,7 @@ impl ProcessSupervisor {
     /// - [`ProcessSupervisorError::ShuttingDown`] if the supervisor is shutting down.
     /// - [`ProcessSupervisorError::NoRuntime`] if no tokio runtime is available.
     /// - [`ProcessSupervisorError::SpawnFailed`] if the child process cannot be spawned.
-    pub fn spawn_with_stdio(
-        &self,
-        config: ProcessConfig,
-    ) -> ProcessResult<SpawnedChild> {
+    pub fn spawn_with_stdio(&self, config: ProcessConfig) -> ProcessResult<SpawnedChild> {
         tracing::debug!(
             subsystem = "supervisor",
             component = "supervisor",
@@ -396,9 +391,7 @@ impl ProcessSupervisor {
 
         // Spawn the child with piped stdio
         let mut cmd = tokio::process::Command::new(config.command.clone());
-        cmd.args(&config.args)
-            .envs(&config.env)
-            .kill_on_drop(true);
+        cmd.args(&config.args).envs(&config.env).kill_on_drop(true);
 
         // Configure stdio based on the config
         if config.stdio == StdioMode::Piped {
@@ -875,8 +868,7 @@ impl Lifecycle for ProcessSupervisor {
 
         // Auto-advance Created → Initialized
         if self.lifecycle.stage() == LifecycleStage::Created {
-            self.lifecycle
-                .transition_to(LifecycleStage::Initialized)?;
+            self.lifecycle.transition_to(LifecycleStage::Initialized)?;
         }
 
         self.lifecycle
@@ -920,11 +912,7 @@ impl Default for ProcessSupervisor {
 
 impl std::fmt::Debug for ProcessSupervisor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let processes = self
-            .processes
-            .read()
-            .map(|p| p.len())
-            .unwrap_or(0);
+        let processes = self.processes.read().map(|p| p.len()).unwrap_or(0);
         f.debug_struct("ProcessSupervisor")
             .field("process_count", &processes)
             .field("lifecycle_stage", &self.lifecycle.stage())
@@ -1087,8 +1075,8 @@ mod tests {
         assert!(supervisor.start().is_ok());
 
         // spawn a process that exits immediately with code 0
-        let config = ProcessConfig::new("exit-test", "true")
-            .with_restart_policy(RestartPolicy::never());
+        let config =
+            ProcessConfig::new("exit-test", "true").with_restart_policy(RestartPolicy::never());
 
         let id = supervisor.spawn(config).expect("spawn should succeed");
 
@@ -1291,8 +1279,12 @@ mod tests {
         let supervisor = ProcessSupervisor::new();
         assert!(supervisor.start().is_ok());
 
-        let id1 = supervisor.spawn(ProcessConfig::new("p1", "echo").with_restart_policy(RestartPolicy::never())).unwrap();
-        let id2 = supervisor.spawn(ProcessConfig::new("p2", "echo").with_restart_policy(RestartPolicy::never())).unwrap();
+        let id1 = supervisor
+            .spawn(ProcessConfig::new("p1", "echo").with_restart_policy(RestartPolicy::never()))
+            .unwrap();
+        let id2 = supervisor
+            .spawn(ProcessConfig::new("p2", "echo").with_restart_policy(RestartPolicy::never()))
+            .unwrap();
 
         assert_ne!(id1, id2);
         assert_eq!(supervisor.process_count(), 2);

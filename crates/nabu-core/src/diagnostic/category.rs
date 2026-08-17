@@ -241,8 +241,7 @@ mod tests {
             DiagnosticCategory::Accessibility,
         ] {
             let json = serde_json::to_string(&variant).expect("serialize");
-            let back: DiagnosticCategory =
-                serde_json::from_str(&json).expect("deserialize");
+            let back: DiagnosticCategory = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(variant, back, "round-trip failed for {:?}", variant);
         }
     }

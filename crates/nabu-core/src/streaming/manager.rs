@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use crate::event_bus::{EventBus, PipelineEvent, StreamId};
 use crate::streaming::errors::{StreamManagerError, StreamResult};
-use crate::streaming::session::{StreamingSession, StreamSessionHandle};
+use crate::streaming::session::{StreamSessionHandle, StreamingSession};
 
 /// A thread-safe registry for tracking active streaming sessions.
 ///
@@ -205,9 +205,10 @@ impl StreamManager {
             .read()
             .expect("stream manager sessions lock poisoned");
 
-        let session = sessions.get(stream_id).cloned().ok_or_else(|| {
-            StreamManagerError::StreamNotFound(*stream_id)
-        })?;
+        let session = sessions
+            .get(stream_id)
+            .cloned()
+            .ok_or_else(|| StreamManagerError::StreamNotFound(*stream_id))?;
         drop(sessions);
 
         let session_guard = session.lock().expect("session lock poisoned");
@@ -237,10 +238,14 @@ impl StreamManager {
     /// # Errors
     ///
     /// - [`StreamManagerError::StreamNotFound`] if no stream with the given ID exists.
-    pub fn cancel_stream(&self, stream_id: &StreamId, reason: impl Into<String>) -> StreamResult<()> {
-        let handle = self.get_stream(stream_id).ok_or_else(|| {
-            StreamManagerError::StreamNotFound(*stream_id)
-        })?;
+    pub fn cancel_stream(
+        &self,
+        stream_id: &StreamId,
+        reason: impl Into<String>,
+    ) -> StreamResult<()> {
+        let handle = self
+            .get_stream(stream_id)
+            .ok_or_else(|| StreamManagerError::StreamNotFound(*stream_id))?;
         handle.cancel(reason)
     }
 
@@ -252,9 +257,9 @@ impl StreamManager {
     ///
     /// - [`StreamManagerError::StreamNotFound`] if no stream with the given ID exists.
     pub fn complete_stream(&self, stream_id: &StreamId) -> StreamResult<()> {
-        let handle = self.get_stream(stream_id).ok_or_else(|| {
-            StreamManagerError::StreamNotFound(*stream_id)
-        })?;
+        let handle = self
+            .get_stream(stream_id)
+            .ok_or_else(|| StreamManagerError::StreamNotFound(*stream_id))?;
         handle.complete()
     }
 
@@ -266,9 +271,9 @@ impl StreamManager {
     ///
     /// - [`StreamManagerError::StreamNotFound`] if no stream with the given ID exists.
     pub fn fail_stream(&self, stream_id: &StreamId, error: impl Into<String>) -> StreamResult<()> {
-        let handle = self.get_stream(stream_id).ok_or_else(|| {
-            StreamManagerError::StreamNotFound(*stream_id)
-        })?;
+        let handle = self
+            .get_stream(stream_id)
+            .ok_or_else(|| StreamManagerError::StreamNotFound(*stream_id))?;
         handle.fail(error)
     }
 
@@ -342,7 +347,7 @@ impl std::fmt::Debug for StreamManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event_bus::{EventBus, PipelineEvent, kinds};
+    use crate::event_bus::{kinds, EventBus, PipelineEvent};
     use crate::streaming::StreamState;
 
     fn test_bus() -> Arc<EventBus<PipelineEvent>> {

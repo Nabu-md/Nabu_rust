@@ -112,7 +112,9 @@ pub fn diagnostic_style(severity: DiagnosticSeverity) -> super::style::Diagnosti
             Priority::High,
             AccessibilityMeta {
                 label: "Warning".to_string(),
-                description: Some("suspicious — likely unintentional; review recommended".to_string()),
+                description: Some(
+                    "suspicious — likely unintentional; review recommended".to_string(),
+                ),
                 visual_indicator: VisualIndicator::Shape,
                 color_safe: true,
             },
@@ -127,7 +129,9 @@ pub fn diagnostic_style(severity: DiagnosticSeverity) -> super::style::Diagnosti
             Priority::High,
             AccessibilityMeta {
                 label: "Error".to_string(),
-                description: Some("a real problem that breaks an invariant or expectation".to_string()),
+                description: Some(
+                    "a real problem that breaks an invariant or expectation".to_string(),
+                ),
                 visual_indicator: VisualIndicator::Shape,
                 color_safe: true,
             },
@@ -142,7 +146,10 @@ pub fn diagnostic_style(severity: DiagnosticSeverity) -> super::style::Diagnosti
             Priority::Critical,
             AccessibilityMeta {
                 label: "Critical".to_string(),
-                description: Some("a catastrophic condition — data loss, corruption, or an unrecoverable failure".to_string()),
+                description: Some(
+                    "a catastrophic condition — data loss, corruption, or an unrecoverable failure"
+                        .to_string(),
+                ),
                 visual_indicator: VisualIndicator::Pattern,
                 color_safe: true,
             },
@@ -165,7 +172,11 @@ pub fn diagnostic_style(severity: DiagnosticSeverity) -> super::style::Diagnosti
 /// Convenience for renderers that want to enumerate the full default palette
 /// (e.g. to build a legend or a settings preview).
 pub fn default_severity_styles() -> Vec<(DiagnosticSeverity, super::style::DiagnosticStyle)> {
-    DiagnosticSeverity::ALL.iter().copied().map(|s| (s, diagnostic_style(s))).collect()
+    DiagnosticSeverity::ALL
+        .iter()
+        .copied()
+        .map(|s| (s, diagnostic_style(s)))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -183,7 +194,11 @@ mod tests {
             let style = diagnostic_style(sev);
             // Every style must carry a non-empty accessibility label so that
             // severity is always perceivable via a screen reader.
-            assert!(!style.accessibility.label.is_empty(), "{:?} has empty label", sev);
+            assert!(
+                !style.accessibility.label.is_empty(),
+                "{:?} has empty label",
+                sev
+            );
             // `VisualIndicator` has no `None` variant, so every style always
             // carries a concrete non-color cue — severity is never color-only.
             let _ = style.accessibility.visual_indicator;
@@ -193,18 +208,32 @@ mod tests {
     #[test]
     fn mapping_is_monotonic_in_priority() {
         let severities = DiagnosticSeverity::ALL;
-        let priorities: Vec<_> = severities.iter().copied().map(|s| diagnostic_style(s).priority).collect();
+        let priorities: Vec<_> = severities
+            .iter()
+            .copied()
+            .map(|s| diagnostic_style(s).priority)
+            .collect();
         for window in priorities.windows(2) {
-            assert!(window[0] <= window[1], "priority must be non-decreasing with severity");
+            assert!(
+                window[0] <= window[1],
+                "priority must be non-decreasing with severity"
+            );
         }
     }
 
     #[test]
     fn mapping_is_monotonic_in_visual_emphasis() {
         let severities = DiagnosticSeverity::ALL;
-        let emphases: Vec<_> = severities.iter().copied().map(|s| diagnostic_style(s).visual_emphasis).collect();
+        let emphases: Vec<_> = severities
+            .iter()
+            .copied()
+            .map(|s| diagnostic_style(s).visual_emphasis)
+            .collect();
         for window in emphases.windows(2) {
-            assert!(window[0] <= window[1], "emphasis must be non-decreasing with severity");
+            assert!(
+                window[0] <= window[1],
+                "emphasis must be non-decreasing with severity"
+            );
         }
     }
 
@@ -222,7 +251,10 @@ mod tests {
         let crit = diagnostic_style(DiagnosticSeverity::Critical);
         assert_eq!(crit.decoration_category, DecorationCategory::Block);
         assert_eq!(crit.highlight_style, HighlightStyle::UnderlineAndBackground);
-        assert_eq!(crit.accessibility.visual_indicator, VisualIndicator::Pattern);
+        assert_eq!(
+            crit.accessibility.visual_indicator,
+            VisualIndicator::Pattern
+        );
         assert!(crit.accessibility.color_safe);
     }
 

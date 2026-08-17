@@ -275,8 +275,7 @@ where
     T: serde::de::DeserializeOwned,
 {
     let value = params.unwrap_or(serde_json::Value::Null);
-    serde_json::from_value(value)
-        .map_err(|e| super::error::McpError::invalid_params(e.to_string()))
+    serde_json::from_value(value).map_err(|e| super::error::McpError::invalid_params(e.to_string()))
 }
 
 /// Convert a Nabu [`ToolSpec`](crate::tool_calling::ToolSpec) into an MCP
@@ -310,10 +309,7 @@ pub fn tool_spec_to_mcp_tool(
                     ),
                 );
             }
-            Some((
-                p.name.clone(),
-                serde_json::Value::Object(schema),
-            ))
+            Some((p.name.clone(), serde_json::Value::Object(schema)))
         })
         .collect();
 
@@ -365,10 +361,7 @@ pub fn tool_spec_to_mcp_tool(
 /// name (e.g. `search_note`).  MCP tool names must match `^[a-zA-Z0-9._-]+$`,
 /// so the `nabu:` namespace prefix is stripped.
 pub fn mcp_tool_name(tool_id: &str) -> String {
-    tool_id
-        .strip_prefix("nabu:")
-        .unwrap_or(tool_id)
-        .to_string()
+    tool_id.strip_prefix("nabu:").unwrap_or(tool_id).to_string()
 }
 
 /// Translate an MCP tool name back to a Nabu tool ID.
@@ -381,9 +374,7 @@ pub fn tool_id_from_mcp_name(name: &str) -> String {
 }
 
 /// Build a `CallToolResult` from a [`ToolResult`](crate::tool_calling::ToolResult).
-pub fn tool_result_to_call_result(
-    result: crate::tool_calling::ToolResult,
-) -> CallToolResult {
+pub fn tool_result_to_call_result(result: crate::tool_calling::ToolResult) -> CallToolResult {
     match result.status {
         crate::tool_calling::ToolResultStatus::Success => {
             let result_json = result.result.unwrap_or(serde_json::Value::Null);
@@ -487,10 +478,13 @@ mod tests {
         }
         let params = Some(serde_json::json!({ "name": "test", "count": 42 }));
         let req: TestReq = decode_params(params).unwrap();
-        assert_eq!(req, TestReq {
-            name: "test".to_string(),
-            count: 42,
-        });
+        assert_eq!(
+            req,
+            TestReq {
+                name: "test".to_string(),
+                count: 42,
+            }
+        );
     }
 
     #[test]

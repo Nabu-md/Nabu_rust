@@ -109,8 +109,10 @@ mod tests {
     fn error_display_formats() {
         let id = ProcessId::nil();
         assert!(format!("{}", ProcessSupervisorError::NotFound(id)).contains("not found"));
-        assert!(format!("{}", ProcessSupervisorError::SpawnFailed("bad cmd".into()))
-            .contains("spawn failed"));
+        assert!(
+            format!("{}", ProcessSupervisorError::SpawnFailed("bad cmd".into()))
+                .contains("spawn failed")
+        );
         assert!(format!(
             "{}",
             ProcessSupervisorError::NotRunning {
@@ -118,21 +120,11 @@ mod tests {
             }
         )
         .contains("not running"));
-        assert!(format!(
-            "{}",
-            ProcessSupervisorError::ShuttingDown
-        )
-        .contains("shutting down"));
-        assert!(format!(
-            "{}",
-            ProcessSupervisorError::NoRuntime
-        )
-        .contains("no tokio runtime"));
-        assert!(format!(
-            "{}",
-            ProcessSupervisorError::UnsupportedPlatform
-        )
-        .contains("not supported"));
+        assert!(format!("{}", ProcessSupervisorError::ShuttingDown).contains("shutting down"));
+        assert!(format!("{}", ProcessSupervisorError::NoRuntime).contains("no tokio runtime"));
+        assert!(
+            format!("{}", ProcessSupervisorError::UnsupportedPlatform).contains("not supported")
+        );
     }
 
     #[test]

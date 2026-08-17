@@ -34,12 +34,8 @@ fn sample_thread_with_participants(title: &str) -> Thread {
 
     let mut thread = Thread::new()
         .with_title(title)
-        .with_participant(
-            Participant::new(alice_id, Role::User).with_name("Alice"),
-        )
-        .with_participant(
-            Participant::new(bob_id, Role::Assistant).with_name("Bob"),
-        )
+        .with_participant(Participant::new(alice_id, Role::User).with_name("Alice"))
+        .with_participant(Participant::new(bob_id, Role::Assistant).with_name("Bob"))
         .with_metadata("model", serde_json::json!("gpt-4o"))
         .with_metadata("temperature", serde_json::json!(0.7));
 
@@ -92,8 +88,7 @@ fn sample_thread_with_participants(title: &str) -> Thread {
 fn context_manages_conversation_store_lifecycle() {
     let dir = tempdir().unwrap();
     let store = Arc::new(ConversationStore::new(dir.path()));
-    let ctx = ApplicationContext::builder()
-        .build();
+    let ctx = ApplicationContext::builder().build();
 
     ctx.register("conversation_store", store.clone());
 
@@ -186,8 +181,11 @@ fn restart_recovery_preserves_message_ordering() {
         assert_eq!(loaded.messages.len(), thread.messages.len());
 
         // Message ordering preserved
-        for (i, (orig, restored)) in
-            thread.messages.iter().zip(loaded.messages.iter()).enumerate()
+        for (i, (orig, restored)) in thread
+            .messages
+            .iter()
+            .zip(loaded.messages.iter())
+            .enumerate()
         {
             assert_eq!(orig.id, restored.id, "message id mismatch at index {}", i);
             assert_eq!(orig.thread_id, restored.thread_id);
@@ -228,18 +226,9 @@ fn restart_recovery_preserves_turn_ordering() {
             assistant_msg.turns[0].content.as_text(),
             Some("I'm doing well, thank you!")
         );
-        assert_eq!(
-            assistant_msg.turns[0].id,
-            thread.messages[2].turns[0].id
-        );
-        assert_eq!(
-            assistant_msg.turns[1].id,
-            thread.messages[2].turns[1].id
-        );
-        assert_eq!(
-            assistant_msg.turns[1].message_id,
-            assistant_msg.id
-        );
+        assert_eq!(assistant_msg.turns[0].id, thread.messages[2].turns[0].id);
+        assert_eq!(assistant_msg.turns[1].id, thread.messages[2].turns[1].id);
+        assert_eq!(assistant_msg.turns[1].message_id, assistant_msg.id);
 
         store.shutdown().unwrap();
     }
@@ -313,8 +302,7 @@ fn restart_recovery_loads_all_threads() {
         let threads = store.list();
         assert_eq!(threads.len(), 3);
 
-        let ids: std::collections::HashSet<uuid::Uuid> =
-            threads.iter().map(|t| t.id).collect();
+        let ids: std::collections::HashSet<uuid::Uuid> = threads.iter().map(|t| t.id).collect();
         assert!(ids.contains(&thread_a.id));
         assert!(ids.contains(&thread_b.id));
         assert!(ids.contains(&thread_c.id));
@@ -355,7 +343,9 @@ fn restart_recovery_after_update_preserves_changes() {
         let mut loaded = store.load(thread.id).unwrap();
         let new_msg = Message::new(uuid::Uuid::new_v4(), loaded.id)
             .with_role(Role::User)
-            .with_turn(Turn::new_anonymous(TurnContent::text("New message after restart")));
+            .with_turn(Turn::new_anonymous(TurnContent::text(
+                "New message after restart",
+            )));
         loaded = loaded.with_message(new_msg);
 
         store.update(&mut loaded).unwrap();
@@ -680,8 +670,14 @@ fn context_health_check_includes_conversation_store() {
     ctx.start().unwrap();
 
     let health = ctx.health_check();
-    let conv_entry = health.services.iter().find(|s| s.name == "conversation_store");
-    assert!(conv_entry.is_some(), "conversation_store should appear in health report");
+    let conv_entry = health
+        .services
+        .iter()
+        .find(|s| s.name == "conversation_store");
+    assert!(
+        conv_entry.is_some(),
+        "conversation_store should appear in health report"
+    );
     assert!(conv_entry.unwrap().healthy);
 
     ctx.shutdown().unwrap();

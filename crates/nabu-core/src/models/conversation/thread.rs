@@ -119,7 +119,10 @@ impl Thread {
     ///
     /// If a participant with the same id already exists, the later one is kept
     /// (replace semantics).
-    pub fn with_participant(mut self, participant: crate::models::conversation::Participant) -> Self {
+    pub fn with_participant(
+        mut self,
+        participant: crate::models::conversation::Participant,
+    ) -> Self {
         if let Some(pos) = self
             .participants
             .iter()
@@ -144,10 +147,7 @@ impl Thread {
     }
 
     /// Builder: add multiple messages at once.
-    pub fn with_messages(
-        mut self,
-        messages: Vec<crate::models::conversation::Message>,
-    ) -> Self {
+    pub fn with_messages(mut self, messages: Vec<crate::models::conversation::Message>) -> Self {
         for mut message in messages {
             message.thread_id = self.id;
             self.messages.push(message);
@@ -186,10 +186,7 @@ impl Thread {
                 ));
             }
             if message.thread_id != self.id {
-                return Err(ConversationError::thread_mismatch(
-                    message.id,
-                    self.id,
-                ));
+                return Err(ConversationError::thread_mismatch(message.id, self.id));
             }
             if !seen_message_ids.insert(message.id) {
                 return Err(ConversationError::ordering_violation(
@@ -258,13 +255,10 @@ mod tests {
     #[test]
     fn thread_with_participant_dedups_by_id() {
         let id = Uuid::new_v4();
-        let p1 = crate::models::conversation::Participant::new(id, Role::User)
-            .with_name("Alice");
+        let p1 = crate::models::conversation::Participant::new(id, Role::User).with_name("Alice");
         let p2 = crate::models::conversation::Participant::new(id, Role::User)
             .with_name("Alice Updated");
-        let t = Thread::new()
-            .with_participant(p1)
-            .with_participant(p2);
+        let t = Thread::new().with_participant(p1).with_participant(p2);
         assert_eq!(t.participants.len(), 1);
         assert_eq!(t.participants[0].name, Some("Alice Updated".to_string()));
     }
@@ -273,12 +267,9 @@ mod tests {
     fn thread_full_builder_round_trips() {
         let id = Uuid::new_v4();
         let ts = Utc::now();
-        let msg = crate::models::conversation::Message::new(Uuid::new_v4(), id)
-            .with_turn(crate::models::conversation::Turn::new(
-                Uuid::new_v4(),
-                Uuid::new_v4(),
-                "hello",
-            ));
+        let msg = crate::models::conversation::Message::new(Uuid::new_v4(), id).with_turn(
+            crate::models::conversation::Turn::new(Uuid::new_v4(), Uuid::new_v4(), "hello"),
+        );
         let t = Thread::with_id(id)
             .with_title("My Conversation")
             .with_created_at(ts)
@@ -335,12 +326,9 @@ mod tests {
                     .with_name("Alice"),
             )
             .with_message(
-                crate::models::conversation::Message::new_anonymous()
-                    .with_turn(crate::models::conversation::Turn::new(
-                        Uuid::new_v4(),
-                        Uuid::new_v4(),
-                        "Hello",
-                    )),
+                crate::models::conversation::Message::new_anonymous().with_turn(
+                    crate::models::conversation::Turn::new(Uuid::new_v4(), Uuid::new_v4(), "Hello"),
+                ),
             );
         assert!(t.validate().is_ok());
     }
@@ -386,10 +374,7 @@ mod tests {
         let back: Thread = serde_json::from_str(&json).unwrap();
         assert_eq!(back.messages.len(), 1);
         assert_eq!(back.messages[0].turns.len(), 1);
-        assert_eq!(
-            back.messages[0].turns[0].content.as_text(),
-            Some("Hello")
-        );
+        assert_eq!(back.messages[0].turns[0].content.as_text(), Some("Hello"));
         assert_eq!(back.participants.len(), 1);
         assert_eq!(back.participants[0].name, Some("Alice".to_string()));
     }

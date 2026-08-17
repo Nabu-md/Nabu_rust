@@ -17,20 +17,17 @@
 //!
 //! Run with: `cargo test streaming_integration`
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::Arc;
 
 use chrono::Utc;
 use uuid::Uuid;
 
 use nabu_core::event_bus::{
-    EventBus, PipelineEvent, StreamEvent, StreamId, StreamSessionEvent, StreamTokenEvent,
-    kinds,
-};
-use nabu_core::streaming::{
-    StreamManager, StreamState, StreamingPipeline,
+    kinds, EventBus, PipelineEvent, StreamEvent, StreamId, StreamSessionEvent, StreamTokenEvent,
 };
 use nabu_core::streaming::errors::StreamManagerError;
+use nabu_core::streaming::{StreamManager, StreamState, StreamingPipeline};
 
 /// A thread-safe collector that captures streaming events in order.
 struct EventCollector {
@@ -132,7 +129,9 @@ fn stream_lifecycle_completes_successfully() {
     let collector = EventCollector::new();
     collector.subscribe(&bus);
 
-    let handle = pipeline.start_stream(None, None, None).expect("start_stream");
+    let handle = pipeline
+        .start_stream(None, None, None)
+        .expect("start_stream");
 
     // After start_stream, a StreamStarted event should be published
     assert_eq!(collector.started_count(), 1);
@@ -140,12 +139,16 @@ fn stream_lifecycle_completes_successfully() {
     assert!(handle.is_active());
 
     // Publish tokens — each transitions to Streaming
-    pipeline.publish_token(&handle, "Hello").expect("publish token");
+    pipeline
+        .publish_token(&handle, "Hello")
+        .expect("publish token");
     assert_eq!(handle.state(), StreamState::Streaming);
     assert_eq!(handle.token_count(), 1);
     assert_eq!(handle.partial_content(), "Hello");
 
-    pipeline.publish_token(&handle, " world").expect("publish token");
+    pipeline
+        .publish_token(&handle, " world")
+        .expect("publish token");
     assert_eq!(handle.token_count(), 2);
     assert_eq!(handle.partial_content(), "Hello world");
 
@@ -188,7 +191,11 @@ fn stream_started_event_carries_metadata() {
         .start_stream(Some(thread_id), Some(agent_id), Some("test-agent".into()))
         .expect("start_stream");
 
-    let event = received.lock().expect("lock").take().expect("event received");
+    let event = received
+        .lock()
+        .expect("lock")
+        .take()
+        .expect("event received");
     assert_eq!(event.stream_id, handle.stream_id());
     assert_eq!(event.thread_id, Some(thread_id));
     assert_eq!(event.agent_id, Some(agent_id));
@@ -208,13 +215,19 @@ fn completed_event_carries_full_content() {
         }
     });
 
-    let handle = pipeline.start_stream(None, None, None).expect("start_stream");
+    let handle = pipeline
+        .start_stream(None, None, None)
+        .expect("start_stream");
     pipeline.publish_token(&handle, "Hello").expect("token");
     pipeline.publish_token(&handle, " ").expect("token");
     pipeline.publish_token(&handle, "World").expect("token");
     pipeline.complete_stream(&handle).expect("complete");
 
-    let event = received.lock().expect("lock").take().expect("event received");
+    let event = received
+        .lock()
+        .expect("lock")
+        .take()
+        .expect("event received");
     assert_eq!(event.full_content, "Hello World");
     assert_eq!(event.total_tokens, 3);
     assert!(event.timestamp <= Utc::now());
@@ -230,7 +243,9 @@ fn stream_lifecycle_cancels_gracefully() {
     let collector = EventCollector::new();
     collector.subscribe(&bus);
 
-    let handle = pipeline.start_stream(None, None, None).expect("start_stream");
+    let handle = pipeline
+        .start_stream(None, None, None)
+        .expect("start_stream");
 
     pipeline.publish_token(&handle, "partial").expect("token");
     assert_eq!(handle.token_count(), 1);
@@ -266,14 +281,20 @@ fn cancelled_event_carries_partial_content_and_reason() {
         }
     });
 
-    let handle = pipeline.start_stream(None, None, None).expect("start_stream");
+    let handle = pipeline
+        .start_stream(None, None, None)
+        .expect("start_stream");
     pipeline.publish_token(&handle, "Hello ").expect("token");
     pipeline.publish_token(&handle, "World").expect("token");
     pipeline
         .cancel_stream(&handle, "user interrupted")
         .expect("cancel");
 
-    let event = received.lock().expect("lock").take().expect("event received");
+    let event = received
+        .lock()
+        .expect("lock")
+        .take()
+        .expect("event received");
     assert_eq!(event.partial_content, "Hello World");
     assert_eq!(event.tokens_delivered, 2);
     assert_eq!(event.reason, "user interrupted");
@@ -284,7 +305,9 @@ fn cancelled_event_carries_partial_content_and_reason() {
 fn cancel_before_first_token_still_works() {
     let (pipeline, _bus) = make_pipeline();
 
-    let handle = pipeline.start_stream(None, None, None).expect("start_stream");
+    let handle = pipeline
+        .start_stream(None, None, None)
+        .expect("start_stream");
     pipeline
         .cancel_stream(&handle, "immediate")
         .expect("cancel");
@@ -303,10 +326,14 @@ fn stream_lifecycle_handles_failure() {
     let collector = EventCollector::new();
     collector.subscribe(&bus);
 
-    let handle = pipeline.start_stream(None, None, None).expect("start_stream");
+    let handle = pipeline
+        .start_stream(None, None, None)
+        .expect("start_stream");
 
     pipeline.publish_token(&handle, "partial").expect("token");
-    pipeline.fail_stream(&handle, "connection lost").expect("fail");
+    pipeline
+        .fail_stream(&handle, "connection lost")
+        .expect("fail");
 
     assert_eq!(handle.state(), StreamState::Failed);
     assert!(handle.is_terminal());
@@ -334,14 +361,20 @@ fn failed_event_carries_error_and_partial_content() {
         }
     });
 
-    let handle = pipeline.start_stream(None, None, None).expect("start_stream");
+    let handle = pipeline
+        .start_stream(None, None, None)
+        .expect("start_stream");
     pipeline.publish_token(&handle, "partial ").expect("token");
     pipeline.publish_token(&handle, "output").expect("token");
     pipeline
         .fail_stream(&handle, "agent process crashed")
         .expect("fail");
 
-    let event = received.lock().expect("lock").take().expect("event received");
+    let event = received
+        .lock()
+        .expect("lock")
+        .take()
+        .expect("event received");
     assert_eq!(event.error, "agent process crashed");
     assert_eq!(event.partial_content, "partial output");
     assert_eq!(event.tokens_delivered, 2);
@@ -358,7 +391,9 @@ fn tokens_reach_frontend_in_strict_sequence_order() {
     let collector = EventCollector::new();
     collector.subscribe(&bus);
 
-    let handle = pipeline.start_stream(None, None, None).expect("start_stream");
+    let handle = pipeline
+        .start_stream(None, None, None)
+        .expect("start_stream");
 
     // Publish many tokens
     let token_count: u32 = 100;
@@ -383,12 +418,14 @@ fn token_events_preserve_content_assembly() {
     let collector = EventCollector::new();
     collector.subscribe(&bus);
 
-    let handle = pipeline.start_stream(None, None, None).expect("start_stream");
+    let handle = pipeline
+        .start_stream(None, None, None)
+        .expect("start_stream");
 
     let words = ["The", " ", "quick", " ", "brown", " ", "fox"];
     for word in &words {
         pipeline
-             .publish_token(&handle, *word)
+            .publish_token(&handle, *word)
             .expect("publish token");
     }
 
@@ -428,7 +465,9 @@ fn all_streaming_events_are_pipeline_events() {
         });
     }
 
-    let handle = pipeline.start_stream(None, None, None).expect("start_stream");
+    let handle = pipeline
+        .start_stream(None, None, None)
+        .expect("start_stream");
     pipeline.publish_token(&handle, "Hello").expect("token");
     pipeline.publish_token(&handle, " World").expect("token");
     pipeline.complete_stream(&handle).expect("complete");
@@ -463,7 +502,9 @@ fn session_events_published_through_event_bus() {
         });
     }
 
-    let handle = pipeline.start_stream(None, None, None).expect("start_stream");
+    let handle = pipeline
+        .start_stream(None, None, None)
+        .expect("start_stream");
     pipeline.publish_token(&handle, "test").expect("token");
     pipeline.complete_stream(&handle).expect("complete");
 
@@ -486,10 +527,8 @@ fn session_events_published_through_event_bus() {
 fn multiple_concurrent_streams_are_isolated() {
     let (pipeline, bus) = make_pipeline();
 
-    let stream1_id: Arc<std::sync::Mutex<Option<StreamId>>> =
-        Arc::new(std::sync::Mutex::new(None));
-    let stream2_id: Arc<std::sync::Mutex<Option<StreamId>>> =
-        Arc::new(std::sync::Mutex::new(None));
+    let stream1_id: Arc<std::sync::Mutex<Option<StreamId>>> = Arc::new(std::sync::Mutex::new(None));
+    let stream2_id: Arc<std::sync::Mutex<Option<StreamId>>> = Arc::new(std::sync::Mutex::new(None));
     let stream1_tokens: Arc<std::sync::Mutex<Vec<String>>> =
         Arc::new(std::sync::Mutex::new(Vec::new()));
     let stream2_tokens: Arc<std::sync::Mutex<Vec<String>>> =
@@ -589,7 +628,9 @@ fn stream_manager_cancel_by_id() {
     let handle = manager.create_stream(None, None, None).expect("create");
     let stream_id = handle.stream_id();
 
-    manager.cancel_stream(&stream_id, "shutdown").expect("cancel");
+    manager
+        .cancel_stream(&stream_id, "shutdown")
+        .expect("cancel");
     assert!(handle.is_cancelled());
     assert_eq!(manager.active_session_count(), 0);
 
@@ -671,12 +712,7 @@ fn stream_manager_remove_terminal_succeeds() {
 
 #[test]
 fn stream_event_serializes_and_deserializes() {
-    let ev = StreamEvent::Token(StreamTokenEvent::new(
-        Uuid::new_v4(),
-        "hello",
-        "hello",
-        0,
-    ));
+    let ev = StreamEvent::Token(StreamTokenEvent::new(Uuid::new_v4(), "hello", "hello", 0));
 
     let json = serde_json::to_string(&ev).expect("serialize");
     let back: StreamEvent = serde_json::from_str(&json).expect("deserialize");
@@ -754,7 +790,8 @@ fn frontend_receives_incremental_updates_without_polling() {
     let (pipeline, bus) = make_pipeline();
 
     // Simulate a frontend subscriber that processes events as they arrive
-    let received_tokens: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let received_tokens: Arc<std::sync::Mutex<Vec<String>>> =
+        Arc::new(std::sync::Mutex::new(Vec::new()));
     let received_tokens_clone = received_tokens.clone();
 
     // Track the time of each received token
@@ -821,7 +858,11 @@ fn partial_update_event_delivers_full_content() {
         .publish_partial_update(&handle)
         .expect("partial update");
 
-    let event = received.lock().expect("lock").take().expect("event received");
+    let event = received
+        .lock()
+        .expect("lock")
+        .take()
+        .expect("event received");
     assert_eq!(event.content, "Hello World");
     assert_eq!(event.token_count, 3);
     assert!(event.timestamp <= Utc::now());

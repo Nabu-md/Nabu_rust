@@ -138,10 +138,7 @@ impl ConversationError {
     }
 
     /// Creates an [`OrderingViolation`](ConversationError::OrderingViolation) error.
-    pub fn ordering_violation(
-        collection: impl Into<String>,
-        reason: impl Into<String>,
-    ) -> Self {
+    pub fn ordering_violation(collection: impl Into<String>, reason: impl Into<String>) -> Self {
         ConversationError::OrderingViolation {
             collection: collection.into(),
             reason: reason.into(),

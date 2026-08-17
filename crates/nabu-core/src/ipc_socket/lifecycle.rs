@@ -162,8 +162,7 @@ impl SocketLifecycleManager {
             return Err("Invalid lifecycle transition — transitions are one-way and forward-only");
         }
 
-        self.stage
-            .store(target.as_u8(), Ordering::Release);
+        self.stage.store(target.as_u8(), Ordering::Release);
         Ok(())
     }
 

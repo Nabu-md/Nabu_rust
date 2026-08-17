@@ -25,5 +25,7 @@
 pub mod filing_service;
 pub mod model;
 
-pub use filing_service::{FilingService, FilingError, FilingResult, FilingStatus};
-pub use model::{InboxItemStatus, classify_ready, inbox_item_status, resolve_destination, set_status};
+pub use filing_service::{FilingError, FilingResult, FilingService, FilingStatus};
+pub use model::{
+    classify_ready, inbox_item_status, resolve_destination, set_status, InboxItemStatus,
+};

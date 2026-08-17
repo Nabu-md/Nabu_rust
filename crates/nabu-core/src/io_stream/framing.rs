@@ -25,10 +25,12 @@ use serde::Serialize;
 /// The output is a single line of JSON with a trailing `\n`. This is
 /// the unit of framing for the stdio transport.
 pub fn encode_message<T: Serialize>(value: &T) -> crate::io_stream::TransportResult<String> {
-    serde_json::to_string(value).map_err(Into::into).map(|mut s| {
-        s.push('\n');
-        s
-    })
+    serde_json::to_string(value)
+        .map_err(Into::into)
+        .map(|mut s| {
+            s.push('\n');
+            s
+        })
 }
 
 /// Decode a newline-delimited JSON line into the requested type.

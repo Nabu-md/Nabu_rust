@@ -267,38 +267,80 @@ mod sync_model {
 
     #[test]
     fn sync_model_status_same_state_transition() {
-        assert!(SyncStatus::can_transition_to(SyncStatus::Idle, SyncStatus::Idle));
-        assert!(SyncStatus::can_transition_to(SyncStatus::Syncing, SyncStatus::Syncing));
+        assert!(SyncStatus::can_transition_to(
+            SyncStatus::Idle,
+            SyncStatus::Idle
+        ));
+        assert!(SyncStatus::can_transition_to(
+            SyncStatus::Syncing,
+            SyncStatus::Syncing
+        ));
     }
 
     #[test]
     fn sync_model_status_syncing_to_completion_states() {
-        assert!(SyncStatus::can_transition_to(SyncStatus::Syncing, SyncStatus::UpToDate));
-        assert!(SyncStatus::can_transition_to(SyncStatus::Syncing, SyncStatus::Pending));
-        assert!(SyncStatus::can_transition_to(SyncStatus::Syncing, SyncStatus::Conflict));
-        assert!(SyncStatus::can_transition_to(SyncStatus::Syncing, SyncStatus::Error));
-        assert!(SyncStatus::can_transition_to(SyncStatus::Syncing, SyncStatus::Offline));
+        assert!(SyncStatus::can_transition_to(
+            SyncStatus::Syncing,
+            SyncStatus::UpToDate
+        ));
+        assert!(SyncStatus::can_transition_to(
+            SyncStatus::Syncing,
+            SyncStatus::Pending
+        ));
+        assert!(SyncStatus::can_transition_to(
+            SyncStatus::Syncing,
+            SyncStatus::Conflict
+        ));
+        assert!(SyncStatus::can_transition_to(
+            SyncStatus::Syncing,
+            SyncStatus::Error
+        ));
+        assert!(SyncStatus::can_transition_to(
+            SyncStatus::Syncing,
+            SyncStatus::Offline
+        ));
     }
 
     #[test]
     fn sync_model_status_error_to_any_is_allowed() {
         // Error should be able to recover to any state (except itself, which is trivially allowed).
-        assert!(SyncStatus::can_transition_to(SyncStatus::Error, SyncStatus::Idle));
-        assert!(SyncStatus::can_transition_to(SyncStatus::Error, SyncStatus::Syncing));
-        assert!(SyncStatus::can_transition_to(SyncStatus::Error, SyncStatus::UpToDate));
-        assert!(SyncStatus::can_transition_to(SyncStatus::Error, SyncStatus::Offline));
+        assert!(SyncStatus::can_transition_to(
+            SyncStatus::Error,
+            SyncStatus::Idle
+        ));
+        assert!(SyncStatus::can_transition_to(
+            SyncStatus::Error,
+            SyncStatus::Syncing
+        ));
+        assert!(SyncStatus::can_transition_to(
+            SyncStatus::Error,
+            SyncStatus::UpToDate
+        ));
+        assert!(SyncStatus::can_transition_to(
+            SyncStatus::Error,
+            SyncStatus::Offline
+        ));
     }
 
     #[test]
     fn sync_model_status_offline_to_any_is_allowed() {
-        assert!(SyncStatus::can_transition_to(SyncStatus::Offline, SyncStatus::Idle));
-        assert!(SyncStatus::can_transition_to(SyncStatus::Offline, SyncStatus::UpToDate));
+        assert!(SyncStatus::can_transition_to(
+            SyncStatus::Offline,
+            SyncStatus::Idle
+        ));
+        assert!(SyncStatus::can_transition_to(
+            SyncStatus::Offline,
+            SyncStatus::UpToDate
+        ));
     }
 
     #[test]
     fn sync_model_status_invalid_transition() {
         // UpToDate -> NotConfigured is not a natural transition.
-        assert!(!SyncStatus::can_transition_to(SyncStatus::UpToDate, SyncStatus::NotConfigured));
+        assert!(!SyncStatus::can_transition_to(
+            SyncStatus::UpToDate,
+            SyncStatus::NotConfigured
+        ));
     }
 
     #[test]

@@ -25,8 +25,8 @@ use crate::models::{KnowledgeObject, ObjectContent, ObjectType};
 use crate::storage::StorageManager;
 use crate::tool_calling::models::ToolExecutionMeta;
 use crate::tool_calling::{
-    Tool, ToolCall, ToolError, ToolId, ToolParam, ToolParamSchema, ToolResult, ToolSpec,
-    ToolRegistry,
+    Tool, ToolCall, ToolError, ToolId, ToolParam, ToolParamSchema, ToolRegistry, ToolResult,
+    ToolSpec,
 };
 
 pub mod error_code {
@@ -96,10 +96,7 @@ fn note_search_hit(obj: &KnowledgeObject, _query: &str) -> Value {
 }
 
 fn exec_meta(id: &str) -> ToolExecutionMeta {
-    ToolExecutionMeta::from_duration(
-        ToolId::new(id),
-        std::time::Duration::from_millis(1),
-    )
+    ToolExecutionMeta::from_duration(ToolId::new(id), std::time::Duration::from_millis(1))
 }
 
 // ---------------------------------------------------------------------------
@@ -140,10 +137,7 @@ impl Tool for SearchNoteTool {
 
     async fn call(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
         let args = call.arguments.unwrap_or(serde_json::Value::Null);
-        let query = args
-            .get("query")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
 
         if query.is_empty() {
             return Err(ToolError::new(
@@ -217,10 +211,12 @@ impl Tool for ReadNoteTool {
 
         validate_vault_path(path)?;
 
-        let obj = self
-            .storage
-            .find_by_path(path)
-            .ok_or_else(|| ToolError::new(error_code::NOTE_NOT_FOUND, format!("note not found: {}", path)))?;
+        let obj = self.storage.find_by_path(path).ok_or_else(|| {
+            ToolError::new(
+                error_code::NOTE_NOT_FOUND,
+                format!("note not found: {}", path),
+            )
+        })?;
 
         let content = content_as_str(&obj.content);
 
@@ -283,7 +279,9 @@ impl Tool for WriteNoteTool {
         let content = args
             .get("content")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::new(error_code::INVALID_PATH, "missing 'content' parameter"))?;
+            .ok_or_else(|| {
+                ToolError::new(error_code::INVALID_PATH, "missing 'content' parameter")
+            })?;
 
         validate_vault_path(path)?;
 
@@ -329,10 +327,7 @@ impl Tool for ListNotesTool {
 
     async fn call(&self, _call: ToolCall) -> Result<ToolResult, ToolError> {
         let objects = self.storage.load_by_type(ObjectType::Note);
-        let notes: Vec<Value> = objects
-            .iter()
-            .map(|obj| note_search_hit(obj, ""))
-            .collect();
+        let notes: Vec<Value> = objects.iter().map(|obj| note_search_hit(obj, "")).collect();
 
         Ok(ToolResult::success(
             Some(json!({
@@ -394,12 +389,15 @@ mod tests {
     }
 
     fn make_note(path: &str, content: &str, title: &str) -> KnowledgeObject {
-        KnowledgeObject::new(ObjectType::Note, ObjectContent::Markdown(content.to_string()))
-            .with_metadata(ObjectMetadata {
-                vault_path: Some(path.to_string()),
-                title: Some(title.to_string()),
-                ..Default::default()
-            })
+        KnowledgeObject::new(
+            ObjectType::Note,
+            ObjectContent::Markdown(content.to_string()),
+        )
+        .with_metadata(ObjectMetadata {
+            vault_path: Some(path.to_string()),
+            title: Some(title.to_string()),
+            ..Default::default()
+        })
     }
 
     #[tokio::test]
@@ -447,10 +445,7 @@ mod tests {
         indexer.index_object(&obj).unwrap();
 
         let tool = ReadNoteTool::new(storage);
-        let call = ToolCall::with_args(
-            "nabu:read_note",
-            json!({ "path": "test/readme.md" }),
-        );
+        let call = ToolCall::with_args("nabu:read_note", json!({ "path": "test/readme.md" }));
         let result = tool.call(call).await.unwrap();
         assert!(result.is_success());
         let value = result.result.unwrap();
@@ -462,10 +457,7 @@ mod tests {
     async fn read_note_rejects_traversal() {
         let (storage, _indexer, _dir) = make_test_env();
         let tool = ReadNoteTool::new(storage);
-        let call = ToolCall::with_args(
-            "nabu:read_note",
-            json!({ "path": "../secret.md" }),
-        );
+        let call = ToolCall::with_args("nabu:read_note", json!({ "path": "../secret.md" }));
         let result = tool.call(call).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code, error_code::PATH_OUTSIDE_VAULT);
@@ -475,10 +467,7 @@ mod tests {
     async fn read_note_rejects_nabu_dir() {
         let (storage, _indexer, _dir) = make_test_env();
         let tool = ReadNoteTool::new(storage);
-        let call = ToolCall::with_args(
-            "nabu:read_note",
-            json!({ "path": ".nabu/evil.json" }),
-        );
+        let call = ToolCall::with_args("nabu:read_note", json!({ "path": ".nabu/evil.json" }));
         let result = tool.call(call).await;
         assert!(result.is_err());
     }
@@ -504,7 +493,8 @@ mod tests {
         let result = tool.call(call).await.unwrap();
         assert!(result.is_success());
 
-        let written = std::fs::read_to_string(storage.vault_path().join("test/new-note.md")).unwrap();
+        let written =
+            std::fs::read_to_string(storage.vault_path().join("test/new-note.md")).unwrap();
         assert_eq!(written, "# New Note");
     }
 
@@ -533,10 +523,7 @@ mod tests {
         indexer.index_object(&obj).unwrap();
 
         let tool = SearchNoteTool::new(indexer, storage);
-        let call = ToolCall::with_args(
-            "nabu:search_note",
-            json!({ "query": "bodytoken123" }),
-        );
+        let call = ToolCall::with_args("nabu:search_note", json!({ "query": "bodytoken123" }));
         let result = tool.call(call).await.unwrap();
         assert!(result.is_success());
         let value = result.result.unwrap();
@@ -548,10 +535,7 @@ mod tests {
     async fn search_note_empty_query_errors() {
         let (storage, indexer, _dir) = make_test_env();
         let tool = SearchNoteTool::new(indexer, storage);
-        let call = ToolCall::with_args(
-            "nabu:search_note",
-            json!({ "query": "" }),
-        );
+        let call = ToolCall::with_args("nabu:search_note", json!({ "query": "" }));
         let result = tool.call(call).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code, error_code::MISSING_QUERY);

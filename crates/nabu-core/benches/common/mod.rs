@@ -18,7 +18,9 @@
 // the cross-binary dead-code warnings for the shared helper module.
 #![allow(dead_code)]
 
-use nabu_core::models::{KnowledgeObject, ObjectContent, ObjectMetadata, ObjectType, ProcessingState};
+use nabu_core::models::{
+    KnowledgeObject, ObjectContent, ObjectMetadata, ObjectType, ProcessingState,
+};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -27,9 +29,7 @@ use chrono::TimeZone;
 /// Fixed timestamp used for every generated object so fixtures are independent
 /// of the wall clock.
 pub fn fixed_time() -> chrono::DateTime<chrono::Utc> {
-    chrono::Utc
-        .with_ymd_and_hms(2024, 1, 1, 0, 0, 0)
-        .unwrap()
+    chrono::Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap()
 }
 
 /// Deterministic, seedable linear-congruential PRNG.
@@ -116,8 +116,16 @@ const COMMON_SENTENCES: &[&str] = &[
 ];
 
 const COMMON_TAGS: &[&str] = &[
-    "concept", "reference", "project", "index", "graph", "search",
-    "vault", "metadata", "archive", "draft",
+    "concept",
+    "reference",
+    "project",
+    "index",
+    "graph",
+    "search",
+    "vault",
+    "metadata",
+    "archive",
+    "draft",
 ];
 
 /// Hub notes (indices 0..HUB_COUNT) are referenced by many other notes so the

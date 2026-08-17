@@ -474,8 +474,8 @@ fn pipeline_executor_lifecycle_trait_is_implemented() {
 fn application_manages_capture_engine_lifecycle() {
     use nabu_core::capture::CaptureEngine;
     use nabu_core::processing::ProcessingPipeline;
-    use nabu_core::registry::Application;
     use nabu_core::registry::lifecycle::LifecycleStage;
+    use nabu_core::registry::Application;
     use std::sync::Arc;
 
     let engine = Arc::new(CaptureEngine::new());
@@ -487,10 +487,8 @@ fn application_manages_capture_engine_lifecycle() {
     assert_eq!(engine.lifecycle_stage(), LifecycleStage::Created);
 
     // Register required services for validation
-    app.context().register(
-        "pipeline",
-        Arc::new(ProcessingPipeline::new()),
-    );
+    app.context()
+        .register("pipeline", Arc::new(ProcessingPipeline::new()));
     app.context().register(
         "storage_manager",
         Arc::new(nabu_core::storage::StorageManager::new(
@@ -517,8 +515,8 @@ fn application_manages_pipeline_executor_lifecycle() {
     use nabu_core::capture::CaptureEngine;
     use nabu_core::pipeline_migration::PipelineExecutor;
     use nabu_core::processing::pipeline::ProcessingPipeline;
-    use nabu_core::registry::Application;
     use nabu_core::registry::lifecycle::LifecycleStage;
+    use nabu_core::registry::Application;
     use std::sync::Arc;
 
     let pipeline = Arc::new(ProcessingPipeline::new());

@@ -242,10 +242,7 @@ impl TextRange {
         }
         if let (Some(s), Some(e)) = (self.start_offset, self.end_offset) {
             if s > e {
-                return Err(DiagnosticError::InvalidOffset {
-                    start: s,
-                    end: e,
-                });
+                return Err(DiagnosticError::InvalidOffset { start: s, end: e });
             }
         }
         Ok(())
@@ -271,7 +268,9 @@ fn cmp_position(a: TextPosition, b: TextPosition) -> std::cmp::Ordering {
 /// This is the suggestion-side analog of "confidence": it tells a renderer
 /// whether to offer the suggestion as an auto-fix, a user-requested quick-fix,
 /// or whether it should be withheld entirely.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default,
+)]
 #[non_exhaustive]
 pub enum SuggestionApplicability {
     /// The suggestion is always safe and applicable.
@@ -325,7 +324,9 @@ impl std::fmt::Display for SuggestionApplicability {
 
 /// Priority ranking for a [`Suggestion`], influencing display ordering
 /// and prominence in quick-fix UI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default,
+)]
 #[non_exhaustive]
 pub enum SuggestionPriority {
     /// Low priority — shown after other suggestions.
@@ -399,11 +400,7 @@ impl Suggestion {
     /// Create a suggestion with no explicit `kind`, defaulting
     /// `applicability` and `priority` to their defaults.
     #[inline]
-    pub fn simple(
-        title: impl Into<String>,
-        range: TextRange,
-        new_text: impl Into<String>,
-    ) -> Self {
+    pub fn simple(title: impl Into<String>, range: TextRange, new_text: impl Into<String>) -> Self {
         Self {
             title: title.into(),
             range,
@@ -470,7 +467,8 @@ impl Suggestion {
     /// Returns the applicability, or `OnRequest` if not explicitly set.
     #[inline]
     pub fn effective_applicability(&self) -> SuggestionApplicability {
-        self.applicability.unwrap_or(SuggestionApplicability::OnRequest)
+        self.applicability
+            .unwrap_or(SuggestionApplicability::OnRequest)
     }
 
     /// Returns the priority, or `Normal` if not explicitly set.
@@ -604,11 +602,7 @@ impl Diagnostic {
     /// when inputs come from untrusted sources. The `category` field is
     /// left `None`; use [`with_category`](Self::with_category) to attach one.
     #[inline]
-    pub fn new(
-        severity: DiagnosticSeverity,
-        range: TextRange,
-        message: impl Into<String>,
-    ) -> Self {
+    pub fn new(severity: DiagnosticSeverity, range: TextRange, message: impl Into<String>) -> Self {
         Self {
             severity,
             range,
@@ -691,10 +685,7 @@ impl Diagnostic {
 
     /// Builder: attach multiple decorations at once.
     #[inline]
-    pub fn with_decorations(
-        mut self,
-        decorations: impl IntoIterator<Item = Decoration>,
-    ) -> Self {
+    pub fn with_decorations(mut self, decorations: impl IntoIterator<Item = Decoration>) -> Self {
         self.decorations.extend(decorations);
         self
     }
@@ -787,13 +778,9 @@ mod tests {
 
     #[test]
     fn range_byte_offsets() {
-        let range = TextRange::try_with_offsets(
-            TextPosition::new(0, 0),
-            TextPosition::new(0, 5),
-            0,
-            5,
-        )
-        .unwrap();
+        let range =
+            TextRange::try_with_offsets(TextPosition::new(0, 0), TextPosition::new(0, 5), 0, 5)
+                .unwrap();
         assert_eq!(range.start_byte_offset(), Some(0));
         assert_eq!(range.end_byte_offset(), Some(5));
     }
@@ -801,19 +788,12 @@ mod tests {
     #[test]
     fn range_validate_rejects_inverted_positions() {
         let result = TextRange::try_new(TextPosition::new(2, 0), TextPosition::new(1, 5));
-        assert!(matches!(
-            result,
-            Err(DiagnosticError::InvalidRange { .. })
-        ));
+        assert!(matches!(result, Err(DiagnosticError::InvalidRange { .. })));
     }
 
     #[test]
     fn range_try_new_accepts_valid() {
-        let range = TextRange::try_new(
-            TextPosition::new(0, 0),
-            TextPosition::new(0, 5),
-        )
-        .unwrap();
+        let range = TextRange::try_new(TextPosition::new(0, 0), TextPosition::new(0, 5)).unwrap();
         assert!(!range.is_empty());
     }
 
@@ -826,12 +806,8 @@ mod tests {
 
     #[test]
     fn range_with_offsets_rejects_inverted_byte_offsets() {
-        let result = TextRange::try_with_offsets(
-            TextPosition::new(0, 0),
-            TextPosition::new(0, 5),
-            10,
-            5,
-        );
+        let result =
+            TextRange::try_with_offsets(TextPosition::new(0, 0), TextPosition::new(0, 5), 10, 5);
         assert!(matches!(
             result,
             Err(DiagnosticError::InvalidOffset { start: 10, end: 5 })
@@ -840,16 +816,9 @@ mod tests {
 
     #[test]
     fn range_with_offsets_rejects_inverted_positions() {
-        let result = TextRange::try_with_offsets(
-            TextPosition::new(2, 0),
-            TextPosition::new(1, 5),
-            0,
-            5,
-        );
-        assert!(matches!(
-            result,
-            Err(DiagnosticError::InvalidRange { .. })
-        ));
+        let result =
+            TextRange::try_with_offsets(TextPosition::new(2, 0), TextPosition::new(1, 5), 0, 5);
+        assert!(matches!(result, Err(DiagnosticError::InvalidRange { .. })));
     }
 
     #[test]
@@ -887,7 +856,10 @@ mod tests {
         assert_eq!(sug.title, "Fix typo");
         assert_eq!(sug.new_text, "because");
         assert!(sug.kind.is_none());
-        assert_eq!(sug.effective_applicability(), SuggestionApplicability::OnRequest);
+        assert_eq!(
+            sug.effective_applicability(),
+            SuggestionApplicability::OnRequest
+        );
         assert_eq!(sug.effective_priority(), SuggestionPriority::Normal);
     }
 
@@ -905,21 +877,17 @@ mod tests {
         assert_eq!(sug.applicability, Some(SuggestionApplicability::Always));
         assert_eq!(sug.priority, Some(SuggestionPriority::High));
         assert_eq!(sug.kind.as_deref(), Some("quickfix"));
-        assert_eq!(sug.effective_applicability(), SuggestionApplicability::Always);
+        assert_eq!(
+            sug.effective_applicability(),
+            SuggestionApplicability::Always
+        );
         assert_eq!(sug.effective_priority(), SuggestionPriority::High);
     }
 
     #[test]
     fn suggestion_try_new_rejects_empty_title() {
-        let result = Suggestion::try_new(
-            "",
-            TextRange::empty(TextPosition::new(0, 0)),
-            "text",
-        );
-        assert!(matches!(
-            result,
-            Err(DiagnosticError::EmptySuggestionTitle)
-        ));
+        let result = Suggestion::try_new("", TextRange::empty(TextPosition::new(0, 0)), "text");
+        assert!(matches!(result, Err(DiagnosticError::EmptySuggestionTitle)));
     }
 
     #[test]
@@ -929,10 +897,7 @@ mod tests {
             TextRange::new(TextPosition::new(2, 0), TextPosition::new(1, 0)),
             "text",
         );
-        assert!(matches!(
-            result,
-            Err(DiagnosticError::InvalidRange { .. })
-        ));
+        assert!(matches!(result, Err(DiagnosticError::InvalidRange { .. })));
     }
 
     #[test]
@@ -949,7 +914,10 @@ mod tests {
         assert_eq!(SuggestionApplicability::Always.name(), "always");
         assert_eq!(SuggestionApplicability::OnRequest.to_string(), "on-request");
         assert_eq!(SuggestionApplicability::Manual.label(), "Requires review");
-        assert_eq!(SuggestionApplicability::NotApplicable.name(), "not-applicable");
+        assert_eq!(
+            SuggestionApplicability::NotApplicable.name(),
+            "not-applicable"
+        );
     }
 
     #[test]
@@ -961,7 +929,10 @@ mod tests {
 
     #[test]
     fn suggestion_applicability_default_is_on_request() {
-        assert_eq!(SuggestionApplicability::default(), SuggestionApplicability::OnRequest);
+        assert_eq!(
+            SuggestionApplicability::default(),
+            SuggestionApplicability::OnRequest
+        );
     }
 
     #[test]
@@ -973,13 +944,8 @@ mod tests {
     fn suggestion_serialization_round_trip() {
         let sug = Suggestion::simple(
             "Fix",
-            TextRange::try_with_offsets(
-                TextPosition::new(0, 0),
-                TextPosition::new(0, 3),
-                0,
-                3,
-            )
-            .unwrap(),
+            TextRange::try_with_offsets(TextPosition::new(0, 0), TextPosition::new(0, 3), 0, 3)
+                .unwrap(),
             "because",
         )
         .with_applicability(SuggestionApplicability::Always)
@@ -1068,8 +1034,8 @@ mod tests {
     #[test]
     fn diagnostic_with_suggestions_batch() {
         let range = TextRange::empty(TextPosition::new(0, 0));
-        let diag = Diagnostic::new(DiagnosticSeverity::Warning, range, "multi")
-            .with_suggestions(vec![
+        let diag =
+            Diagnostic::new(DiagnosticSeverity::Warning, range, "multi").with_suggestions(vec![
                 Suggestion::simple("Fix 1", range, "a"),
                 Suggestion::simple("Fix 2", range, "b"),
             ]);
@@ -1079,8 +1045,8 @@ mod tests {
     #[test]
     fn diagnostic_with_decorations_batch() {
         let range = TextRange::empty(TextPosition::new(0, 0));
-        let diag = Diagnostic::new(DiagnosticSeverity::Error, range, "deco")
-            .with_decorations(vec![
+        let diag =
+            Diagnostic::new(DiagnosticSeverity::Error, range, "deco").with_decorations(vec![
                 Decoration {
                     category: DecorationCategory::Underline,
                     range,
@@ -1114,10 +1080,7 @@ mod tests {
             TextRange::new(TextPosition::new(2, 0), TextPosition::new(1, 0)),
             "bad range",
         );
-        assert!(matches!(
-            result,
-            Err(DiagnosticError::InvalidRange { .. })
-        ));
+        assert!(matches!(result, Err(DiagnosticError::InvalidRange { .. })));
     }
 
     #[test]
@@ -1215,13 +1178,9 @@ mod tests {
 
     #[test]
     fn diagnostic_serialization_round_trip() {
-        let range = TextRange::try_with_offsets(
-            TextPosition::new(2, 4),
-            TextPosition::new(2, 9),
-            100,
-            105,
-        )
-        .unwrap();
+        let range =
+            TextRange::try_with_offsets(TextPosition::new(2, 4), TextPosition::new(2, 9), 100, 105)
+                .unwrap();
         let diag = Diagnostic::new(DiagnosticSeverity::Critical, range, "corruption detected")
             .with_code("DISK99")
             .with_source("storage")
