@@ -48,6 +48,7 @@ pub mod indexer;
 #[cfg(unix)]
 pub mod ipc_socket;
 pub mod jobs;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod mcp;
 pub mod models;
 pub mod native;
@@ -61,6 +62,7 @@ pub mod rpc;
 pub mod storage;
 pub mod streaming;
 pub mod sync;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod tool_calling;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod watcher;
@@ -99,6 +101,7 @@ pub use models::*;
 pub use pipeline_migration::*;
 #[allow(ambiguous_glob_reexports)]
 pub use plugin::*;
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(ambiguous_glob_reexports)]
 pub use process_supervisor::*;
 #[allow(ambiguous_glob_reexports)]
@@ -109,10 +112,12 @@ pub use registry::*;
 pub use rpc::*;
 #[allow(ambiguous_glob_reexports)]
 pub use storage::*;
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(ambiguous_glob_reexports)]
 pub use streaming::*;
 #[allow(ambiguous_glob_reexports)]
 pub use sync::*;
+#[cfg(not(target_arch = "wasm32"))]
 #[allow(ambiguous_glob_reexports)]
 pub use tool_calling::*;
 #[cfg(not(target_arch = "wasm32"))]

@@ -80,7 +80,9 @@ pub use client::AcpClient;
 pub use error::{AcpError, ErrorKind};
 pub use handler::{dispatch_agent_request, AcpClientHandler, NoopClientHandler};
 pub use state::{ClientState, ConnectionState, NegotiatedCapabilities, SessionEntry, SessionState};
-pub use transport::{MockPeer, MockTransport, StdioTransport, Transport};
+#[cfg(not(target_arch = "wasm32"))]
+pub use transport::StdioTransport;
+pub use transport::{MockPeer, MockTransport, Transport};
 pub use types::*;
 
 // Re-export key RPC types used by the ACP client

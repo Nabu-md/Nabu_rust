@@ -72,8 +72,9 @@ pub fn PropertyEditor(props: PropertyEditorProps) -> Element {
                 let id_i = id.clone();
                 let def_i = def.clone();
                 let value_i = value.clone();
+                let id_i_key = id_i.clone();
                 rsx! {
-                    div { key: "{id_i}", class: "property-field" }
+                    div { key: "{id_i_key}", class: "property-field" }
                     PropertyField {
                         id: id_i,
                         definition: def_i,
@@ -361,9 +362,10 @@ fn multiselect_field(
                 let opt_c = opt.clone();
                 let id_c_iter = id_c.clone();
                 let is_selected = selected_sig.read().contains(&opt_c);
+                let opt_c_key = opt_c.clone();
                 rsx! {
                     button {
-                        key: "{opt_c}",
+                        key: "{opt_c_key}",
                         r#type: "button",
                         class: if is_selected {
                             "px-2 py-0.5 text-xs rounded-full border transition-colors bg-blue-700 border-blue-500 text-blue-100"
