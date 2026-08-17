@@ -46,9 +46,10 @@ fn TabButton(
     let icon = tab.icon;
     let is_active = id == current;
     let cb = on_change;
+    let id_key = id.clone();
     rsx! {
         button {
-            key: "{id}",
+            key: "{id_key}",
             r#type: "button",
             role: "tab",
             "aria-selected": "{is_active}",

@@ -33,6 +33,7 @@
 use crate::acp::error::{AcpError, ErrorKind};
 use serde::Serialize;
 use serde_json::Value;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
@@ -71,6 +72,10 @@ pub trait Transport: Send + Unpin {
 // ===========================================================================
 // StdioTransport — real pipes
 // ===========================================================================
+//
+// Stdio-based transports are native-only: they require tokio's async IO and
+// process support, neither of which is available on wasm32-unknown-unknown.
+// The in-memory MockTransport below works on every target.
 
 /// Stdio transport backed by pre-connected async stdin/stdout handles.
 ///
@@ -86,11 +91,13 @@ pub trait Transport: Send + Unpin {
 /// Use [`StdioTransport::split`] to obtain separate reader and writer handles
 /// for concurrent read/write access. The reader can be moved to a background
 /// task (the message loop) while the writer is kept by the ACP client.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct StdioTransport<R, W> {
     reader: BufReader<R>,
     writer: W,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<R, W> StdioTransport<R, W>
 where
     R: AsyncRead + Unpin + Send + 'static,
@@ -126,6 +133,7 @@ where
 ///
 /// Reads newline-delimited JSON-RPC messages from the agent's stdout.
 /// Can be moved to a background task.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct StdioReader<R> {
     reader: BufReader<R>,
 }
@@ -134,10 +142,12 @@ pub struct StdioReader<R> {
 ///
 /// Sends JSON-RPC messages to the agent's stdin. Can be moved to a
 /// different task than the reader.
+#[cfg(not(target_arch = "wasm32"))]
 pub struct StdioWriter<W> {
     writer: W,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<R: AsyncRead + Unpin + Send> StdioReader<R> {
     /// Read the next complete message line, skipping empty lines.
     /// Uses a loop instead of recursion to avoid infinitely-sized futures.
@@ -165,6 +175,7 @@ impl<R: AsyncRead + Unpin + Send> StdioReader<R> {
 }
 
 #[async_trait::async_trait]
+#[cfg(not(target_arch = "wasm32"))]
 impl<R: AsyncRead + Unpin + Send> Transport for StdioReader<R> {
     async fn send_json(&mut self, _msg: &Value) -> Result<(), AcpError> {
         Err(AcpError::new(
@@ -185,6 +196,7 @@ impl<R: AsyncRead + Unpin + Send> Transport for StdioReader<R> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl<W: AsyncWrite + Unpin + Send> StdioWriter<W> {
     /// Send raw bytes (including any framing) to the transport.
     async fn send_bytes_inner(&mut self, bytes: &[u8]) -> Result<(), AcpError> {
@@ -199,6 +211,7 @@ impl<W: AsyncWrite + Unpin + Send> StdioWriter<W> {
 }
 
 #[async_trait::async_trait]
+#[cfg(not(target_arch = "wasm32"))]
 impl<W: AsyncWrite + Unpin + Send> Transport for StdioWriter<W> {
     async fn send_json(&mut self, msg: &Value) -> Result<(), AcpError> {
         let json = serde_json::to_string(msg)
@@ -220,6 +233,7 @@ impl<W: AsyncWrite + Unpin + Send> Transport for StdioWriter<W> {
 
 // Full StdioTransport also implements Transport (both read and write)
 #[async_trait::async_trait]
+#[cfg(not(target_arch = "wasm32"))]
 impl<R, W> Transport for StdioTransport<R, W>
 where
     R: AsyncRead + Unpin + Send,

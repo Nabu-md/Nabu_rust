@@ -463,6 +463,7 @@ impl ApplicationContext {
     }
 
     /// Returns the ACP session manager if registered.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn acp_session_manager(&self) -> Option<Arc<crate::agent::AcpSessionManager>> {
         self.resolve("acp_session_manager")
     }

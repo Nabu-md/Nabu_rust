@@ -166,9 +166,10 @@ fn CommandMenuItem(
     let i = index;
     let active_index_sig = active_index;
     let open_sig = open;
+    let id_key = id.clone();
     rsx! {
         button {
-            key: "{id}",
+            key: "{id_key}",
             r#type: "button",
             role: "option",
             "aria-selected": "{i == *active_index_sig.read()}",

@@ -650,9 +650,11 @@ pub fn CanvasView() -> Element {
                     };
                     let s_for_select = s;
                     let id_for_dblclick = id.clone();
+                    let id_for_key = id.clone();
+                    let id_for_delete = id.clone();
                     rsx! {
                         div {
-                            key: id.clone(),
+                            key: id_for_key,
                             class: class,
                 ondoubleclick: move |_: MouseEvent| {
                     select_canvas(s_for_select, id_for_dblclick.clone());
@@ -669,7 +671,7 @@ pub fn CanvasView() -> Element {
                             "aria-label": format!("Delete canvas {name}"),
                             onclick: move |ev: MouseEvent| {
                                 ev.stop_propagation();
-                                delete_canvas(s, id.clone());
+                                delete_canvas(s, id_for_delete.clone());
                             },
                             {render_icon_view(Icon::Trash2)}
                         }
@@ -1010,9 +1012,10 @@ fn CanvasSurface(
                 let h = node.height.unwrap_or(DEFAULT_NODE_H);
                 let node_id_for_down = node_id.clone();
                 let path_for_open = node_path.clone();
+                let node_id_for_key = node_id.clone();
                 rsx! {
                     div {
-                        key: node_id.clone(),
+                        key: node_id_for_key,
                         class: "absolute bg-gray-800 border border-gray-600 rounded-lg shadow-lg cursor-move hover:border-blue-500 transition-colors",
                         style: "left: {nx}px; top: {ny}px; min-width: 180px; width: {w}px; min-height: {h}px;",
                         title: node_title.clone(),

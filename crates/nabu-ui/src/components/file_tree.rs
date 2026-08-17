@@ -727,9 +727,10 @@ pub fn FileTree() -> Element {
                                     {
                                         let fp = folder_path.clone();
                                         let items_f = items.clone();
+                                        let fp_key = fp.clone();
                                         rsx! {
                                             MenuItem {
-                                                key: "{fp}",
+                                                key: "{fp_key}",
                                                 icon: Some(Icon::Folder),
                                                 label: format!("{}{}", "  ".repeat(*depth), fp),
                                                 on_select: Callback::new(move |_| {

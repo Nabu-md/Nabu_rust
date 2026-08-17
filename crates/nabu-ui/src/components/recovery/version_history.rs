@@ -478,9 +478,10 @@ pub fn VersionHistory() -> Element {
                             let created_rel = relative_time(&version.created_at);
                             let size_text = human_size(version.size);
                             let char_text = format!("{} chars", version.char_count);
+                            let id_key = id.clone();
                             rsx! {
                                 button {
-                                    key: "{id}",
+                                    key: "{id_key}",
                                     class: { format!(
                                         "w-full text-left px-3 py-2 hover:bg-gray-800/60 transition-colors {}",
                                         if is_selected {
