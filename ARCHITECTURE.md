@@ -116,5 +116,5 @@ The UI runs as a **sandboxed WebView** rather than a Node-integrated renderer:
   (`npm run css:build`) rather than shipped as a runtime CSS-in-JS dependency.
 - **ACP + MCP** for agent/tool integration — both protocols are implemented
   natively in Rust within `crates/nabu-core` (`src/acp/`, `src/mcp/`).
-- **useReducer + Context** over Redux — retained for the Dioxus app state; the
-  state shape is not complex enough to warrant a store library.
+- **Signals + context** over Redux — Dioxus `Signal`/`use_context` for app state;
+  the shape is not complex enough to warrant a store library.
