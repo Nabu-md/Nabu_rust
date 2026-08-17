@@ -951,16 +951,20 @@ while True:
 
         client.start_read_loop().await;
 
-        // Wait for child exit and stdout close
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-
-        // The read loop should have detected EOF and set stopping=true
-        {
-            let st = client.state.lock().await;
-            assert!(
-                st.stopping.load(Ordering::SeqCst),
-                "stopping flag should be set after EOF"
-            );
+        // Wait for child exit and stdout close. Poll instead of sleeping a fixed
+        // duration so the assertion is deterministic even under full-suite load.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            {
+                let st = client.state.lock().await;
+                if st.stopping.load(Ordering::SeqCst) {
+                    break;
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("stopping flag should be set after EOF");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
 
