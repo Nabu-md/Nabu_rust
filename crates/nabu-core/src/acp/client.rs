@@ -7,7 +7,7 @@ use crate::acp::handler::AcpClientHandler;
 use crate::acp::state::{ClientState, NegotiatedCapabilities};
 use crate::acp::transport::Transport;
 use crate::acp::types::*;
-use crate::rpc::{JsonRpcError, RequestId};
+use crate::rpc::{ErrorCode, JsonRpcError, RequestId};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
@@ -413,9 +413,27 @@ async fn run_message_loop<T: Transport>(
                     Ok(Some(line)) => {
                         process_line(&mut transport, &state, &pending, &handler, &update_callback, &line).await;
                     }
-                    Ok(None) => break,
+                    Ok(None) => {
+                        // EOF — drain all pending requests with an error
+                        let mut map = pending.lock().await;
+                        for (_, entry) in map.drain() {
+                            let _ = entry.tx.send(Err(JsonRpcError::new(
+                                ErrorCode::ParseError,
+                                "connection closed by remote",
+                            )));
+                        }
+                        tracing::info!("ACP: session ended (EOF on transport)");
+                        break;
+                    }
                     Err(e) => {
                         tracing::error!("ACP: transport read error: {}", e);
+                        let mut map = pending.lock().await;
+                        for (_, entry) in map.drain() {
+                            let _ = entry.tx.send(Err(JsonRpcError::new(
+                                ErrorCode::ParseError,
+                                format!("transport read error: {}", e),
+                            )));
+                        }
                         break;
                     }
                 }

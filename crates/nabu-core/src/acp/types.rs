@@ -769,16 +769,8 @@ pub struct SelectedPermissionOutcome {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestPermissionResponse {
+    #[serde(flatten)]
     pub outcome: PermissionOutcome,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub _meta: Option<serde_json::Value>,
-}
-
-/// The outcome of a permission request — selected or cancelled.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionSelectedOutcome {
-    pub option_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
 }

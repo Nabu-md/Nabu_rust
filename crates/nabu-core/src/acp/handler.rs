@@ -30,7 +30,7 @@
 use crate::acp::error::{AcpError, ErrorKind};
 use crate::acp::types::{
     PermissionOutcome, ReadTextFileRequest, ReadTextFileResponse, RequestPermissionRequest,
-    WriteTextFileRequest, WriteTextFileResponse,
+    RequestPermissionResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 
 /// Trait for handling agent→client requests dispatched by the ACP client.
@@ -224,7 +224,11 @@ pub async fn dispatch_agent_request<H: AcpClientHandler + ?Sized>(
         crate::acp::types::METHOD_REQUEST_PERMISSION => {
             let req: RequestPermissionRequest =
                 decode_params::<RequestPermissionRequest>(params.clone())?;
-            let resp = handler.request_permission(&req).await?;
+            let outcome = handler.request_permission(&req).await?;
+            let resp = crate::acp::types::RequestPermissionResponse {
+                outcome,
+                _meta: None,
+            };
             Ok(serde_json::to_value(resp)?)
         }
         // Terminal methods
