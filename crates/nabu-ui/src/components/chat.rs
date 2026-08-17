@@ -59,7 +59,7 @@ pub fn ChatView() -> Element {
     provide_context(chat);
 
     let mut input_value = use_signal(|| String::new());
-    let mut agent_command = use_signal(|| String::new());
+    let mut agent_command = use_signal(|| "codex".to_string());
     let pending_permission = use_signal(|| None::<AcpPermissionRequestEvent>);
 
     // Listen for permission requests from the ACP agent. When one arrives,
@@ -100,53 +100,36 @@ pub fn ChatView() -> Element {
 
             {
                 let pending_perm = pending_permission.read().clone();
-                if let Some(req) = pending_perm {
-                    div { class: "border-t border-border bg-surface/80",
-                    div { class: "max-w-3xl mx-auto p-4 space-y-3",
-                        div { class: "flex items-start gap-3",
-                            crate::components::ui::icons::render_icon_view(crate::components::ui::icons::Icon::Info),
-                            div { class: "flex-1",
-                                div { class: "text-sm font-medium text-gray-100", "Agent requests permission" }
-                                div { class: "text-xs text-gray-400",
-                                    req.tool_call_title.clone()
-                                        .unwrap_or_else(|| req.tool_call_id.clone())
-                                }
-                            }
-                        }
-                        div { class: "flex gap-2",
-                            for opt in req.options.iter() {
-                                {
-                                    let opt = opt.clone();
-                                    let req_id = req.request_id;
-                                    let thread_id = *chat.thread_id.read();
-                                    let toasts_clone = toasts;
-                                    let pending = pending_permission;
-                                    rsx! {
-                                        button {
-                                            class: "px-3 py-1 text-xs font-medium text-white bg-accent rounded-lg hover:bg-accent-hover",
-                                            onclick: move |_| {
-                                                let outcome = PermissionOutcome::Selected(SelectedPermissionOutcome {
-                                                    option_id: opt.option_id.clone(),
-                                                    _meta: None,
-                                                });
-                                                let toasts = toasts_clone;
-                                                pending.set(None);
-                                                spawn_local(async move {
-                                                    respond_to_permission(
-                                                        thread_id,
-                                                        req_id,
-                                                        outcome,
-                                                        toasts,
-                                                    ).await;
-                                                });
-                                            },
-                                            "{opt.name}"
+                let perm_buttons: Vec<Element> = pending_perm
+                    .as_ref()
+                    .map(|req| build_permission_buttons(req, chat, toasts, pending_permission))
+                    .unwrap_or_default();
+
+                if !perm_buttons.is_empty() {
+                    let req = pending_perm.as_ref().unwrap();
+                    Some(rsx! {
+                        div { class: "border-t border-border bg-surface/80",
+                            div { class: "max-w-3xl mx-auto p-4 space-y-3",
+                                div { class: "flex items-start gap-3",
+                                    {crate::components::ui::icons::render_icon_view(crate::components::ui::icons::Icon::Info)}
+                                    div { class: "flex-1",
+                                        div { class: "text-sm font-medium text-gray-100", "Agent requests permission" }
+                                        div { class: "text-xs text-gray-400",
+                                            {req.tool_call_title.clone()
+                                                .unwrap_or_else(|| req.tool_call_id.clone())}
                                         }
+                                    }
+                                }
+                                div { class: "flex gap-2",
+                                    for btn in &perm_buttons {
+                                        {btn.clone()}
                                     }
                                 }
                             }
                         }
-                    }
+                    })
+                } else {
+                    None
                 }
             }
 
@@ -419,4 +402,44 @@ async fn respond_to_permission(
             toasts.error("Permission failed", e.message());
         }
     }
+}
+
+fn build_permission_buttons(
+    req: &AcpPermissionRequestEvent,
+    chat: ChatContext,
+    toasts: crate::components::ui::feedback::ToastContext,
+    pending: Signal<Option<AcpPermissionRequestEvent>>,
+) -> Vec<Element> {
+    req.options
+        .iter()
+        .map(|opt| {
+            let opt = opt.clone();
+            let req_id = req.request_id;
+            let thread_id = *chat.thread_id.read();
+            let toasts_clone = toasts;
+            let mut pending_clone = pending;
+            rsx! {
+                button {
+                    class: "px-3 py-1 text-xs font-medium text-white bg-accent rounded-lg hover:bg-accent-hover",
+                    onclick: move |_event: MouseEvent| {
+                        let outcome = PermissionOutcome::Selected(SelectedPermissionOutcome {
+                            option_id: opt.option_id.clone(),
+                            _meta: None,
+                        });
+                        let toasts = toasts_clone;
+                        pending_clone.set(None);
+                        spawn_local(async move {
+                            respond_to_permission(
+                                thread_id,
+                                req_id,
+                                outcome,
+                                toasts,
+                            ).await;
+                        });
+                    },
+                    "{opt.name}"
+                }
+            }
+        })
+        .collect()
 }
