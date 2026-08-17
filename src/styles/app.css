@@ -166,7 +166,7 @@
     width: 100vw;
     height: 100vh;
     overflow: hidden;
-    background-color: rgb(var(--gray-950));
+    background-color: transparent;
     color: rgb(var(--gray-100));
     font-family: var(--font-sans);
     font-size: var(--text-body);
@@ -239,6 +239,8 @@
     width: 100vw;
     height: 100vh;
     overflow: hidden;
+    border-radius: 10px;
+    background-color: rgb(var(--gray-950));
   }
 
   /* ---- Buttons ----

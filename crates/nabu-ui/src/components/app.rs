@@ -42,7 +42,7 @@ pub fn App() -> Element {
                                         CommandPalette {}
                                         QuickSwitcher {}
                                         ShortcutReference {}
-                                        crate::components::app::AppRouter {}
+                                        div { class: "app", crate::components::app::AppRouter {} }
                                     }
                                 }
                             }
