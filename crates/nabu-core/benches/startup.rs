@@ -87,7 +87,9 @@ pub fn bench_startup(c: &mut Criterion) {
             let node_count = graph.node_count();
             let edge_count = graph.edge_count();
 
-            (idx_ok, sto_count, node_count, edge_count, indexer, storage, graph)
+            (
+                idx_ok, sto_count, node_count, edge_count, indexer, storage, graph,
+            )
         });
     });
 

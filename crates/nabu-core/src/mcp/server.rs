@@ -35,8 +35,8 @@
 //! MCP Response
 //! ```
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -47,10 +47,9 @@ use crate::tool_calling::{ToolCall, ToolRegistry};
 use super::error::McpError;
 use super::protocol::{
     decode_params, tool_id_from_mcp_name, tool_result_to_call_result, tool_spec_to_mcp_tool,
-    CallToolParams, CallToolResult, ContentBlock, InitializeParams, InitializeResult,
-    ListResourcesResult, ListToolsResult, ReadResourceParams, ReadResourceResult,
-    MCP_PROTOCOL_VERSION, Implementation, ResourcesCapability,
-    ServerCapabilities, ToolsCapability,
+    CallToolParams, CallToolResult, ContentBlock, Implementation, InitializeParams,
+    InitializeResult, ListResourcesResult, ListToolsResult, ReadResourceParams, ReadResourceResult,
+    ResourcesCapability, ServerCapabilities, ToolsCapability, MCP_PROTOCOL_VERSION,
 };
 use super::resources::ResourceProvider;
 use super::tools::register_nabu_tools;
@@ -142,19 +141,34 @@ impl McpServer {
 
         // Register MCP protocol method handlers.
         router
-            .register(METHOD_INITIALIZE, Arc::new(InitializeHandler::new(self.clone())))
+            .register(
+                METHOD_INITIALIZE,
+                Arc::new(InitializeHandler::new(self.clone())),
+            )
             .await;
         router
-            .register(METHOD_TOOLS_LIST, Arc::new(ToolsListHandler::new(self.clone())))
+            .register(
+                METHOD_TOOLS_LIST,
+                Arc::new(ToolsListHandler::new(self.clone())),
+            )
             .await;
         router
-            .register(METHOD_TOOLS_CALL, Arc::new(ToolsCallHandler::new(self.clone())))
+            .register(
+                METHOD_TOOLS_CALL,
+                Arc::new(ToolsCallHandler::new(self.clone())),
+            )
             .await;
         router
-            .register(METHOD_RESOURCES_LIST, Arc::new(ResourcesListHandler::new(self.clone())))
+            .register(
+                METHOD_RESOURCES_LIST,
+                Arc::new(ResourcesListHandler::new(self.clone())),
+            )
             .await;
         router
-            .register(METHOD_RESOURCES_READ, Arc::new(ResourcesReadHandler::new(self.clone())))
+            .register(
+                METHOD_RESOURCES_READ,
+                Arc::new(ResourcesReadHandler::new(self.clone())),
+            )
             .await;
 
         tracing::info!(
@@ -214,8 +228,9 @@ impl RpcHandler for InitializeHandler {
         self.server.set_initialized();
 
         let result = self.server.build_initialize_result();
-        serde_json::to_value(result)
-            .map_err(|e| JsonRpcError::internal(format!("failed to serialize initialize result: {}", e)))
+        serde_json::to_value(result).map_err(|e| {
+            JsonRpcError::internal(format!("failed to serialize initialize result: {}", e))
+        })
     }
 }
 
@@ -239,7 +254,10 @@ impl RpcHandler for ToolsListHandler {
             .map(|s| tool_spec_to_mcp_tool(s, None))
             .collect();
 
-        let result = ListToolsResult { tools, next_cursor: None };
+        let result = ListToolsResult {
+            tools,
+            next_cursor: None,
+        };
         serde_json::to_value(result)
             .map_err(|e| JsonRpcError::internal(format!("failed to serialize tools list: {}", e)))
     }
@@ -291,8 +309,9 @@ impl ResourcesListHandler {
 impl RpcHandler for ResourcesListHandler {
     async fn handle(&self, _params: Option<Value>) -> Result<Value, JsonRpcError> {
         let result: ListResourcesResult = self.server.resource_provider().list_resources();
-        serde_json::to_value(result)
-            .map_err(|e| JsonRpcError::internal(format!("failed to serialize resources list: {}", e)))
+        serde_json::to_value(result).map_err(|e| {
+            JsonRpcError::internal(format!("failed to serialize resources list: {}", e))
+        })
     }
 }
 
@@ -310,7 +329,8 @@ impl ResourcesReadHandler {
 #[async_trait]
 impl RpcHandler for ResourcesReadHandler {
     async fn handle(&self, params: Option<Value>) -> Result<Value, JsonRpcError> {
-        let req: ReadResourceParams = decode_params(params).map_err(McpError::into_jsonrpc_error)?;
+        let req: ReadResourceParams =
+            decode_params(params).map_err(McpError::into_jsonrpc_error)?;
 
         let result = self
             .server
@@ -400,8 +420,7 @@ mod tests {
         let response = router.dispatch(request).await;
 
         assert!(response.is_success());
-        let result: InitializeResult =
-            serde_json::from_value(response.result.unwrap()).unwrap();
+        let result: InitializeResult = serde_json::from_value(response.result.unwrap()).unwrap();
         assert_eq!(result.protocol_version, MCP_PROTOCOL_VERSION);
         assert_eq!(result.server_info.name, "Nabu MCP Server");
         assert!(result.capabilities.tools.is_some());
@@ -424,8 +443,7 @@ mod tests {
         let response = router.dispatch(request).await;
 
         assert!(response.is_success());
-        let result: ListToolsResult =
-            serde_json::from_value(response.result.unwrap()).unwrap();
+        let result: ListToolsResult = serde_json::from_value(response.result.unwrap()).unwrap();
         assert_eq!(result.tools.len(), 4);
 
         let names: Vec<&str> = result.tools.iter().map(|t| t.name.as_str()).collect();
@@ -442,7 +460,11 @@ mod tests {
         server.register_handlers(&router).await;
 
         // Initialize
-        let init_req = Request::new(1, METHOD_INITIALIZE, Some(json!({ "protocolVersion": MCP_PROTOCOL_VERSION })));
+        let init_req = Request::new(
+            1,
+            METHOD_INITIALIZE,
+            Some(json!({ "protocolVersion": MCP_PROTOCOL_VERSION })),
+        );
         router.dispatch(init_req).await;
 
         // Seed a note
@@ -455,11 +477,7 @@ mod tests {
             title: Some("MCP Test".to_string()),
             ..Default::default()
         });
-        server
-            .resource_provider()
-            .storage()
-            .save(&obj)
-            .unwrap();
+        server.resource_provider().storage().save(&obj).unwrap();
 
         // Call read_note tool
         let params = Some(json!({
@@ -488,7 +506,11 @@ mod tests {
         server.register_handlers(&router).await;
 
         // Initialize
-        let init_req = Request::new(1, METHOD_INITIALIZE, Some(json!({ "protocolVersion": MCP_PROTOCOL_VERSION })));
+        let init_req = Request::new(
+            1,
+            METHOD_INITIALIZE,
+            Some(json!({ "protocolVersion": MCP_PROTOCOL_VERSION })),
+        );
         router.dispatch(init_req).await;
 
         let params = Some(json!({
@@ -529,8 +551,7 @@ mod tests {
         let response = router.dispatch(request).await;
 
         assert!(response.is_success());
-        let result: ListResourcesResult =
-            serde_json::from_value(response.result.unwrap()).unwrap();
+        let result: ListResourcesResult = serde_json::from_value(response.result.unwrap()).unwrap();
         assert_eq!(result.resources.len(), 2);
     }
 
@@ -545,10 +566,12 @@ mod tests {
         let response = router.dispatch(request).await;
 
         assert!(response.is_success());
-        let result: ReadResourceResult =
-            serde_json::from_value(response.result.unwrap()).unwrap();
+        let result: ReadResourceResult = serde_json::from_value(response.result.unwrap()).unwrap();
         assert_eq!(result.contents.len(), 1);
-        assert_eq!(result.contents[0].mime_type.as_deref(), Some("application/json"));
+        assert_eq!(
+            result.contents[0].mime_type.as_deref(),
+            Some("application/json")
+        );
     }
 
     #[tokio::test]

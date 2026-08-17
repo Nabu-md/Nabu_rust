@@ -75,8 +75,8 @@
 //! infrastructure. No new architecture is required.
 
 pub mod errors;
-pub mod manager;
 pub mod lifecycle;
+pub mod manager;
 
 pub use errors::{SocketError, SocketResult};
 pub use lifecycle::SocketLifecycle;

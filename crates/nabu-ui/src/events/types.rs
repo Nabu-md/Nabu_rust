@@ -105,6 +105,8 @@ pub enum FrontendEventKind {
     SessionCancelled,
     /// A streaming session was cleaned up and removed from the manager.
     SessionCleanedUp,
+    /// A permission request from an ACP agent — the user must approve or deny.
+    AcpPermissionRequested,
 }
 
 impl FrontendEventKind {
@@ -145,6 +147,7 @@ impl FrontendEventKind {
             FrontendEventKind::SessionStarted => kinds::SESSION_STARTED,
             FrontendEventKind::SessionCancelled => kinds::SESSION_CANCELLED,
             FrontendEventKind::SessionCleanedUp => kinds::SESSION_CLEANED_UP,
+            FrontendEventKind::AcpPermissionRequested => kinds::ACP_PERMISSION_REQUESTED,
         }
     }
 
@@ -187,6 +190,7 @@ impl FrontendEventKind {
             kinds::SESSION_STARTED => FrontendEventKind::SessionStarted,
             kinds::SESSION_CANCELLED => FrontendEventKind::SessionCancelled,
             kinds::SESSION_CLEANED_UP => FrontendEventKind::SessionCleanedUp,
+            kinds::ACP_PERMISSION_REQUESTED => FrontendEventKind::AcpPermissionRequested,
             _ => return None,
         })
     }
@@ -228,6 +232,7 @@ impl FrontendEventKind {
         FrontendEventKind::SessionStarted,
         FrontendEventKind::SessionCancelled,
         FrontendEventKind::SessionCleanedUp,
+        FrontendEventKind::AcpPermissionRequested,
     ];
 }
 

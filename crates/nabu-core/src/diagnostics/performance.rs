@@ -39,9 +39,7 @@
 //! println!("{}", report);
 //! ```
 
-use crate::diagnostics::metrics::{
-    Counter, Gauge, PerformanceSnapshot, Timer, TimerStats,
-};
+use crate::diagnostics::metrics::{Counter, Gauge, PerformanceSnapshot, Timer, TimerStats};
 use crate::registry::metrics::{
     CounterMetric, GaugeMetric, MetricsAggregator, ServiceMetrics, TimerMetric,
 };
@@ -541,10 +539,7 @@ impl PerformanceMonitor {
     /// for deterministic output.
     pub fn snapshot(&self) -> PerformanceSnapshot {
         let timers = if let Ok(timers) = self.timers.read() {
-            let mut entries: Vec<_> = timers
-                .iter()
-                .map(|(k, t)| (k.clone(), t.stats()))
-                .collect();
+            let mut entries: Vec<_> = timers.iter().map(|(k, t)| (k.clone(), t.stats())).collect();
             entries.sort_by(|a, b| a.0.cmp(&b.0));
             entries
                 .into_iter()
@@ -569,10 +564,7 @@ impl PerformanceMonitor {
         };
 
         let gauges = if let Ok(gauges) = self.gauges.read() {
-            let mut entries: Vec<_> = gauges
-                .iter()
-                .map(|(k, g)| (k.clone(), g.value()))
-                .collect();
+            let mut entries: Vec<_> = gauges.iter().map(|(k, g)| (k.clone(), g.value())).collect();
             entries.sort_by(|a, b| a.0.cmp(&b.0));
             entries
                 .into_iter()

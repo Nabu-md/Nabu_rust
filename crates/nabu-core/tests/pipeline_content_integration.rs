@@ -16,7 +16,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::tempdir;
 
-use nabu_core::capture::{CaptureEngine, CaptureRequest, CaptureData, ClipboardHandler, FileDropHandler};
+use nabu_core::capture::{
+    CaptureData, CaptureEngine, CaptureRequest, ClipboardHandler, FileDropHandler,
+};
 use nabu_core::graph::build_graph_from_objects;
 use nabu_core::jobs::cancellation::CancellationToken;
 use nabu_core::jobs::job::{ContentPayload, Job, JobType};
@@ -64,15 +66,13 @@ fn build_executor_empty(storage: Arc<StorageManager>) -> PipelineExecutor {
 
 /// Extract a classification string from an object's custom properties.
 fn classification_of(obj: &KnowledgeObject) -> Option<String> {
-    obj.custom_properties
-        .get("classification")
-        .and_then(|v| {
-            if let CustomPropertyValue::Text(t) = v {
-                Some(t.clone())
-            } else {
-                None
-            }
-        })
+    obj.custom_properties.get("classification").and_then(|v| {
+        if let CustomPropertyValue::Text(t) = v {
+            Some(t.clone())
+        } else {
+            None
+        }
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +104,11 @@ async fn test_text_content_reaches_classifier() {
     let result = executor
         .execute(&job, ProgressReporter::noop(), CancellationToken::new())
         .await;
-    assert!(result.is_ok(), "execution should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "execution should succeed: {:?}",
+        result.err()
+    );
 
     // Reload the object from storage.
     let object_id = job.object_id.unwrap();
@@ -135,7 +139,9 @@ async fn test_binary_capture_persists_bytes() {
     let executor = build_executor_empty(storage.clone());
 
     // PNG header + trailing bytes — a minimal but recognisable binary blob.
-    let image_bytes = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01, 0x02, 0x03];
+    let image_bytes = vec![
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x01, 0x02, 0x03,
+    ];
     let request = CaptureRequest::new(CaptureData::Binary {
         mime_type: "image/png".to_string(),
         data: image_bytes.clone(),
@@ -149,7 +155,11 @@ async fn test_binary_capture_persists_bytes() {
     let result = executor
         .execute(&job, ProgressReporter::noop(), CancellationToken::new())
         .await;
-    assert!(result.is_ok(), "execution should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "execution should succeed: {:?}",
+        result.err()
+    );
 
     // Reload the object from storage.
     let object_id = job.object_id.unwrap();
@@ -157,14 +167,18 @@ async fn test_binary_capture_persists_bytes() {
 
     match &stored.content {
         ObjectContent::Binary {
-            mime_type,
-            data,
-            ..
+            mime_type, data, ..
         } => {
             assert_eq!(mime_type, "image/png");
-            assert_eq!(data, &image_bytes, "stored binary bytes must match captured bytes");
+            assert_eq!(
+                data, &image_bytes,
+                "stored binary bytes must match captured bytes"
+            );
         }
-        _ => panic!("expected Binary content after pipeline, got {:?}", stored.content),
+        _ => panic!(
+            "expected Binary content after pipeline, got {:?}",
+            stored.content
+        ),
     }
 }
 
@@ -192,7 +206,10 @@ async fn test_markdown_content_preserved() {
     let job = queue.dequeue().unwrap().unwrap();
 
     // Verify the content_payload is Markdown before execution.
-    let payload = job.content_payload.as_ref().expect("job must carry content");
+    let payload = job
+        .content_payload
+        .as_ref()
+        .expect("job must carry content");
     match payload {
         ContentPayload::Markdown(s) => assert_eq!(s, md_text),
         _ => panic!("expected Markdown content payload, got {:?}", payload),
@@ -202,7 +219,11 @@ async fn test_markdown_content_preserved() {
     let result = executor
         .execute(&job, ProgressReporter::noop(), CancellationToken::new())
         .await;
-    assert!(result.is_ok(), "execution should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "execution should succeed: {:?}",
+        result.err()
+    );
 
     // Reload and verify content type is still Markdown.
     let object_id = job.object_id.unwrap();
@@ -210,9 +231,15 @@ async fn test_markdown_content_preserved() {
 
     match &stored.content {
         ObjectContent::Markdown(s) => {
-            assert_eq!(s, md_text, "Markdown content must be preserved through pipeline");
+            assert_eq!(
+                s, md_text,
+                "Markdown content must be preserved through pipeline"
+            );
         }
-        _ => panic!("expected Markdown content after pipeline, got {:?}", stored.content),
+        _ => panic!(
+            "expected Markdown content after pipeline, got {:?}",
+            stored.content
+        ),
     }
 }
 
@@ -235,16 +262,16 @@ async fn test_wiki_link_end_to_end_through_pipeline() {
 
     // --- Capture Note A ---
     let note_a_content = "# Note A\n\nThis is the body of note A.";
-    let request_a = CaptureRequest::new(CaptureData::Text(note_a_content.to_string()))
-        .with_title("Note A");
+    let request_a =
+        CaptureRequest::new(CaptureData::Text(note_a_content.to_string())).with_title("Note A");
     engine.ingest(request_a).await.unwrap();
     let job_a = queue.dequeue().unwrap().unwrap();
     let object_id_a = job_a.object_id.unwrap();
 
     // --- Capture Note B (links to Note A) ---
     let note_b_content = "# Note B\n\nSee [[Note A]] for context.";
-    let request_b = CaptureRequest::new(CaptureData::Text(note_b_content.to_string()))
-        .with_title("Note B");
+    let request_b =
+        CaptureRequest::new(CaptureData::Text(note_b_content.to_string())).with_title("Note B");
     engine.ingest(request_b).await.unwrap();
     let job_b = queue.dequeue().unwrap().unwrap();
     let object_id_b = job_b.object_id.unwrap();
@@ -253,16 +280,28 @@ async fn test_wiki_link_end_to_end_through_pipeline() {
     let result_a = executor
         .execute(&job_a, ProgressReporter::noop(), CancellationToken::new())
         .await;
-    assert!(result_a.is_ok(), "execution A should succeed: {:?}", result_a.err());
+    assert!(
+        result_a.is_ok(),
+        "execution A should succeed: {:?}",
+        result_a.err()
+    );
 
     let result_b = executor
         .execute(&job_b, ProgressReporter::noop(), CancellationToken::new())
         .await;
-    assert!(result_b.is_ok(), "execution B should succeed: {:?}", result_b.err());
+    assert!(
+        result_b.is_ok(),
+        "execution B should succeed: {:?}",
+        result_b.err()
+    );
 
     // --- Reload both objects from storage ---
-    let obj_a = storage.load(object_id_a).expect("Note A should be in storage");
-    let obj_b = storage.load(object_id_b).expect("Note B should be in storage");
+    let obj_a = storage
+        .load(object_id_a)
+        .expect("Note A should be in storage");
+    let obj_b = storage
+        .load(object_id_b)
+        .expect("Note B should be in storage");
 
     // Verify titles are preserved (critical for wiki-link resolution).
     assert_eq!(obj_a.metadata.title.as_deref(), Some("Note A"));
@@ -271,9 +310,15 @@ async fn test_wiki_link_end_to_end_through_pipeline() {
     // Verify wiki-link content is in Note B's body.
     let b_text = match &obj_b.content {
         ObjectContent::Markdown(s) => s.clone(),
-        _ => panic!("expected Markdown content for Note B, got {:?}", obj_b.content),
+        _ => panic!(
+            "expected Markdown content for Note B, got {:?}",
+            obj_b.content
+        ),
     };
-    assert!(b_text.contains("[[Note A]]"), "Note B content must contain the wiki-link");
+    assert!(
+        b_text.contains("[[Note A]]"),
+        "Note B content must contain the wiki-link"
+    );
 
     // --- Build graph from stored objects ---
     let (nodes, edges) = build_graph_from_objects(&[obj_a.clone(), obj_b.clone()]);
@@ -357,7 +402,10 @@ async fn test_legacy_job_without_content_payload_fails() {
         .execute(&job, ProgressReporter::noop(), CancellationToken::new())
         .await;
 
-    assert!(result.is_err(), "legacy job without content_payload must fail");
+    assert!(
+        result.is_err(),
+        "legacy job without content_payload must fail"
+    );
     let err = result.unwrap_err();
     assert!(
         err.to_string().contains("no content_payload"),
@@ -383,7 +431,8 @@ async fn test_durable_text_restart_then_execute() {
     let storage = Arc::new(StorageManager::new(vault.path()));
     let executor = build_executor_with_classifier(storage.clone());
 
-    let distinctive_text = "INVOICE #42\nTotal Due: $100.00\nbill to: Test Corp\nInvoice Date: today";
+    let distinctive_text =
+        "INVOICE #42\nTotal Due: $100.00\nbill to: Test Corp\nInvoice Date: today";
     let request = CaptureRequest::new(CaptureData::Text(distinctive_text.to_string()));
     engine.ingest(request).await.unwrap();
 
@@ -409,7 +458,10 @@ async fn test_durable_text_restart_then_execute() {
         .expect("content_payload must survive restart");
     let payload_text = match payload {
         ContentPayload::PlainText(s) => s.clone(),
-        _ => panic!("expected PlainText content payload after restart, got {:?}", payload),
+        _ => panic!(
+            "expected PlainText content payload after restart, got {:?}",
+            payload
+        ),
     };
     assert_eq!(
         payload_text, distinctive_text,
@@ -420,7 +472,11 @@ async fn test_durable_text_restart_then_execute() {
     let result = executor
         .execute(&job, ProgressReporter::noop(), CancellationToken::new())
         .await;
-    assert!(result.is_ok(), "execution after restart should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "execution after restart should succeed: {:?}",
+        result.err()
+    );
 
     // Verify the object was persisted with classification.
     let object_id = job.object_id.unwrap();
@@ -467,7 +523,10 @@ async fn test_durable_binary_restart_then_execute() {
         .expect("content_payload must survive restart");
     let blob_path = match payload {
         ContentPayload::Binary { blob_path, .. } => blob_path.clone(),
-        _ => panic!("expected Binary content payload after restart, got {:?}", payload),
+        _ => panic!(
+            "expected Binary content payload after restart, got {:?}",
+            payload
+        ),
     };
 
     // The blob file must still exist on disk after restart.
@@ -480,20 +539,25 @@ async fn test_durable_binary_restart_then_execute() {
     let result = executor
         .execute(&job, ProgressReporter::noop(), CancellationToken::new())
         .await;
-    assert!(result.is_ok(), "execution after restart should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "execution after restart should succeed: {:?}",
+        result.err()
+    );
 
     // Reload from storage and verify bytes.
     let object_id = job.object_id.unwrap();
     let stored = storage.load(object_id).expect("object should be persisted");
     match &stored.content {
         ObjectContent::Binary {
-            mime_type,
-            data,
-            ..
+            mime_type, data, ..
         } => {
             assert_eq!(mime_type, "image/png");
             assert_eq!(data, &image_bytes, "binary bytes must survive restart");
         }
-        _ => panic!("expected Binary content after restart, got {:?}", stored.content),
+        _ => panic!(
+            "expected Binary content after restart, got {:?}",
+            stored.content
+        ),
     }
 }

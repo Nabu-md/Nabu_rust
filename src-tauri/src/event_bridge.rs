@@ -100,6 +100,11 @@ const ALL_EVENT_KINDS: &[&str] = &[
     kinds::SESSION_STARTED,
     kinds::SESSION_CANCELLED,
     kinds::SESSION_CLEANED_UP,
+    // ACP permission request events:
+    // Published by NabuAcpHandler when an ACP agent requests permission.
+    // Forwarded so the frontend can prompt the user and call
+    // `acp_permission_respond`.
+    kinds::ACP_PERMISSION_REQUESTED,
 ];
 
 /// A single structured payload broadcast on the `nabu-event` channel.

@@ -38,12 +38,12 @@ use tokio::sync::Mutex as AsyncMutex;
 use crate::acp::events::classify_message;
 use crate::acp::types::{
     CloseSessionRequest, CloseSessionResponse, InitializeRequest, InitializeResponse,
-    METHOD_CLOSE_SESSION, METHOD_INITIALIZE, METHOD_NEW_SESSION, METHOD_PROMPT,
     NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
-    SessionNotificationParams, SessionUpdate,
+    SessionNotificationParams, SessionUpdate, METHOD_CLOSE_SESSION, METHOD_INITIALIZE,
+    METHOD_NEW_SESSION, METHOD_PROMPT,
 };
 use crate::agent::stdio_channel::StdioChannel;
-use crate::rpc::{JSON_RPC_VERSION, Request, RequestId, Response};
+use crate::rpc::{Request, RequestId, Response, JSON_RPC_VERSION};
 use crate::streaming::StreamingPipeline;
 use crate::{AgentManagerError, AgentResult};
 
@@ -315,10 +315,10 @@ impl AcpClient {
             return Err(AcpClientError::Protocol(err.message).into());
         }
 
-        let result: InitializeResponse = serde_json::from_value(
-            resp.result.unwrap_or(Value::Null),
-        )
-        .map_err(|e| AgentManagerError::Acp(format!("deserialize InitializeResponse: {}", e)))?;
+        let result: InitializeResponse = serde_json::from_value(resp.result.unwrap_or(Value::Null))
+            .map_err(|e| {
+                AgentManagerError::Acp(format!("deserialize InitializeResponse: {}", e))
+            })?;
 
         {
             let st = self.state.lock().await;
@@ -338,10 +338,10 @@ impl AcpClient {
             return Err(AcpClientError::Protocol(err.message).into());
         }
 
-        let result: NewSessionResponse = serde_json::from_value(
-            resp.result.unwrap_or(Value::Null),
-        )
-        .map_err(|e| AgentManagerError::Acp(format!("deserialize NewSessionResponse: {}", e)))?;
+        let result: NewSessionResponse = serde_json::from_value(resp.result.unwrap_or(Value::Null))
+            .map_err(|e| {
+                AgentManagerError::Acp(format!("deserialize NewSessionResponse: {}", e))
+            })?;
 
         {
             let mut st = self.state.lock().await;
@@ -367,7 +367,8 @@ impl AcpClient {
         if !req.session_id.is_empty() && req.session_id != session_id {
             tracing::warn!(
                 "prompt session_id '{}' does not match client's session '{}'",
-                req.session_id, session_id
+                req.session_id,
+                session_id
             );
         }
 
@@ -379,10 +380,8 @@ impl AcpClient {
             return Err(AcpClientError::Protocol(err.message).into());
         }
 
-        let result: PromptResponse = serde_json::from_value(
-            resp.result.unwrap_or(Value::Null),
-        )
-        .map_err(|e| AgentManagerError::Acp(format!("deserialize PromptResponse: {}", e)))?;
+        let result: PromptResponse = serde_json::from_value(resp.result.unwrap_or(Value::Null))
+            .map_err(|e| AgentManagerError::Acp(format!("deserialize PromptResponse: {}", e)))?;
 
         Ok(result)
     }
@@ -402,16 +401,18 @@ impl AcpClient {
         };
         let params = serde_json::to_value(&req)
             .map_err(|e| AgentManagerError::Acp(format!("serialize CloseSessionRequest: {}", e)))?;
-        let resp = self.send_request(METHOD_CLOSE_SESSION, Some(params)).await?;
+        let resp = self
+            .send_request(METHOD_CLOSE_SESSION, Some(params))
+            .await?;
 
         if let Some(err) = resp.error {
             return Err(AcpClientError::Protocol(err.message).into());
         }
 
-        let result: CloseSessionResponse = serde_json::from_value(
-            resp.result.unwrap_or(Value::Null),
-        )
-        .map_err(|e| AgentManagerError::Acp(format!("deserialize CloseSessionResponse: {}", e)))?;
+        let result: CloseSessionResponse =
+            serde_json::from_value(resp.result.unwrap_or(Value::Null)).map_err(|e| {
+                AgentManagerError::Acp(format!("deserialize CloseSessionResponse: {}", e))
+            })?;
 
         Ok(result)
     }
@@ -623,9 +624,8 @@ while True:
     #[tokio::test]
     async fn initialize_and_new_session_and_close() {
         let (_child, channel) = spawn_mock_agent().await;
-        let pipeline: Arc<StreamingPipeline> = Arc::new(StreamingPipeline::new(
-            Arc::new(EventBus::new()),
-        ));
+        let pipeline: Arc<StreamingPipeline> =
+            Arc::new(StreamingPipeline::new(Arc::new(EventBus::new())));
         let mut client = AcpClient::new(channel, Some(pipeline));
 
         // --- initialize ---
@@ -641,14 +641,13 @@ while True:
             _meta: None,
         };
 
-        let init_resp = client.initialize(init_req).await
+        let init_resp = client
+            .initialize(init_req)
+            .await
             .expect("initialize should succeed");
         assert_eq!(init_resp.protocol_version, SUPPORTED_PROTOCOL_VERSION);
         assert!(client.is_initialized().await);
-        assert_eq!(
-            init_resp.agent_info.as_ref().unwrap().name,
-            "mock-agent"
-        );
+        assert_eq!(init_resp.agent_info.as_ref().unwrap().name, "mock-agent");
 
         // --- new_session ---
         let new_session_req = NewSessionRequest {
@@ -658,23 +657,26 @@ while True:
             _meta: None,
         };
 
-        let new_session_resp = client.new_session(new_session_req).await
+        let new_session_resp = client
+            .new_session(new_session_req)
+            .await
             .expect("new_session should succeed");
         assert_eq!(new_session_resp.session_id, "test-session-123");
-        assert_eq!(client.session_id().await.as_deref(), Some("test-session-123"));
+        assert_eq!(
+            client.session_id().await.as_deref(),
+            Some("test-session-123")
+        );
 
         // --- close ---
-        let _close_resp = client.close().await
-            .expect("close should succeed");
+        let _close_resp = client.close().await.expect("close should succeed");
         assert_eq!(client.session_id().await, None);
     }
 
     #[tokio::test]
     async fn full_lifecycle_with_prompt() {
         let (_child, channel) = spawn_mock_agent().await;
-        let pipeline: Arc<StreamingPipeline> = Arc::new(StreamingPipeline::new(
-            Arc::new(EventBus::new()),
-        ));
+        let pipeline: Arc<StreamingPipeline> =
+            Arc::new(StreamingPipeline::new(Arc::new(EventBus::new())));
         let mut client = AcpClient::new(channel, Some(pipeline));
 
         // initialize
@@ -698,7 +700,10 @@ while True:
             additional_directories: vec![],
             _meta: None,
         };
-        client.new_session(new_session_req).await.expect("new_session");
+        client
+            .new_session(new_session_req)
+            .await
+            .expect("new_session");
 
         // prompt
         let prompt_req = PromptRequest {
@@ -710,7 +715,9 @@ while True:
             })],
             _meta: None,
         };
-        let prompt_resp = client.prompt(prompt_req).await
+        let prompt_resp = client
+            .prompt(prompt_req)
+            .await
             .expect("prompt should succeed");
         assert_eq!(prompt_resp.stop_reason, StopReason::EndTurn);
 
@@ -777,9 +784,8 @@ while True:
     #[tokio::test]
     async fn notification_received_during_prompt() {
         let (_child, channel) = spawn_mock_agent().await;
-        let pipeline: Arc<StreamingPipeline> = Arc::new(StreamingPipeline::new(
-            Arc::new(EventBus::new()),
-        ));
+        let pipeline: Arc<StreamingPipeline> =
+            Arc::new(StreamingPipeline::new(Arc::new(EventBus::new())));
         let mut client = AcpClient::new(channel, Some(pipeline.clone()));
 
         // Collect updates via callback
@@ -814,7 +820,10 @@ while True:
             additional_directories: vec![],
             _meta: None,
         };
-        client.new_session(new_session_req).await.expect("new_session");
+        client
+            .new_session(new_session_req)
+            .await
+            .expect("new_session");
 
         // prompt — the mock sends 3 session/update notifications
         let prompt_req = PromptRequest {
@@ -832,7 +841,11 @@ while True:
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let received = updates.lock().await;
-        assert!(received.len() >= 3, "expected at least 3 notifications, got {}", received.len());
+        assert!(
+            received.len() >= 3,
+            "expected at least 3 notifications, got {}",
+            received.len()
+        );
 
         // Verify they are AgentMessageChunk variants
         for update in received.iter() {
@@ -944,7 +957,10 @@ while True:
         // The read loop should have detected EOF and set stopping=true
         {
             let st = client.state.lock().await;
-            assert!(st.stopping.load(Ordering::SeqCst), "stopping flag should be set after EOF");
+            assert!(
+                st.stopping.load(Ordering::SeqCst),
+                "stopping flag should be set after EOF"
+            );
         }
     }
 
@@ -953,7 +969,8 @@ while True:
     async fn malformed_json_does_not_panic() {
         let mut child = Command::new("python3")
             .arg("-c")
-            .arg(r#"
+            .arg(
+                r#"
 import sys, json
 
 def send(obj):
@@ -995,7 +1012,8 @@ while True:
     else:
         send({"jsonrpc": "2.0", "id": req_id,
               "error": {"code": -32601, "message": "Method not found"}})
-"#)
+"#,
+            )
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -1034,7 +1052,11 @@ while True:
             _meta: None,
         };
         let result = client.new_session(new_session_req).await;
-        assert!(result.is_ok(), "new_session should succeed despite malformed JSON: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "new_session should succeed despite malformed JSON: {:?}",
+            result
+        );
 
         let _ = client.stop().await;
     }
@@ -1049,11 +1071,15 @@ while True:
 
         // Send a request to an unknown method — mock returns error response
         // but that's fine, we just check the mechanism works
-        let req = Request::new(1, "session/new", Some(serde_json::json!({
-            "cwd": "/tmp",
-            "mcpServers": [],
-            "additionalDirectories": []
-        })));
+        let req = Request::new(
+            1,
+            "session/new",
+            Some(serde_json::json!({
+                "cwd": "/tmp",
+                "mcpServers": [],
+                "additionalDirectories": []
+            })),
+        );
 
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(2),

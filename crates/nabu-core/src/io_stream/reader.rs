@@ -95,7 +95,10 @@ impl AsyncStdinReader {
         reader: &mut R,
     ) -> TransportResult<Option<Request>> {
         let mut line = String::new();
-        let bytes_read = reader.read_line(&mut line).await.map_err(TransportError::io)?;
+        let bytes_read = reader
+            .read_line(&mut line)
+            .await
+            .map_err(TransportError::io)?;
 
         if bytes_read == 0 {
             // EOF
@@ -105,7 +108,10 @@ impl AsyncStdinReader {
         // Skip blank lines (whitespace-only) by looping
         while line.trim().is_empty() {
             line.clear();
-            let bytes_read = reader.read_line(&mut line).await.map_err(TransportError::io)?;
+            let bytes_read = reader
+                .read_line(&mut line)
+                .await
+                .map_err(TransportError::io)?;
             if bytes_read == 0 {
                 return Ok(None);
             }

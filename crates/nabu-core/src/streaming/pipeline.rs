@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use crate::event_bus::{EventBus, PipelineEvent, StreamId};
 use crate::streaming::errors::StreamResult;
-use crate::streaming::session::{StreamingSession, StreamSessionHandle};
+use crate::streaming::session::{StreamSessionHandle, StreamingSession};
 
 /// The streaming pipeline — the core API for token streaming.
 ///
@@ -183,7 +183,7 @@ impl std::fmt::Debug for StreamingPipeline {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event_bus::{EventBus, PipelineEvent, StreamEvent, kinds};
+    use crate::event_bus::{kinds, EventBus, PipelineEvent, StreamEvent};
     use crate::streaming::errors::StreamManagerError;
     use std::sync::atomic::AtomicUsize;
 
@@ -292,7 +292,11 @@ mod tests {
         let pipeline = StreamingPipeline::new(bus);
         let thread_id = uuid::Uuid::new_v4();
         let handle = pipeline
-            .start_stream(Some(thread_id), Some(uuid::Uuid::nil()), Some("test-agent".into()))
+            .start_stream(
+                Some(thread_id),
+                Some(uuid::Uuid::nil()),
+                Some("test-agent".into()),
+            )
             .unwrap();
 
         assert_eq!(handle.stream_id().to_string().len(), 36); // UUID format

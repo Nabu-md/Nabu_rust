@@ -106,19 +106,35 @@ mod tests {
     fn vault_event_factories_round_trip() {
         assert_eq!(
             VaultEvent::created("a.md"),
-            VaultEvent { kind: WatcherChangeKind::Created, path: "a.md".into(), old_path: None }
+            VaultEvent {
+                kind: WatcherChangeKind::Created,
+                path: "a.md".into(),
+                old_path: None
+            }
         );
         assert_eq!(
             VaultEvent::modified("b.md"),
-            VaultEvent { kind: WatcherChangeKind::Modified, path: "b.md".into(), old_path: None }
+            VaultEvent {
+                kind: WatcherChangeKind::Modified,
+                path: "b.md".into(),
+                old_path: None
+            }
         );
         assert_eq!(
             VaultEvent::deleted("c.md"),
-            VaultEvent { kind: WatcherChangeKind::Deleted, path: "c.md".into(), old_path: None }
+            VaultEvent {
+                kind: WatcherChangeKind::Deleted,
+                path: "c.md".into(),
+                old_path: None
+            }
         );
         assert_eq!(
             VaultEvent::renamed("new.md", "old.md"),
-            VaultEvent { kind: WatcherChangeKind::Renamed, path: "new.md".into(), old_path: Some("old.md".into()) }
+            VaultEvent {
+                kind: WatcherChangeKind::Renamed,
+                path: "new.md".into(),
+                old_path: Some("old.md".into())
+            }
         );
     }
 

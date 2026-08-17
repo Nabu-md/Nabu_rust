@@ -151,7 +151,7 @@ impl ProcessingPipeline {
                 "Processor completed"
             );
 
-             object = result.object;
+            object = result.object;
 
             // Report progress after this processor
             progress.set_progress(base_progress + segment_size * 0.8);
@@ -270,7 +270,14 @@ impl Default for ProcessingPipeline {
 fn is_diagnostic_producer(name: &str) -> bool {
     matches!(
         name,
-        "harper_processor" | "harper" | "spell_checker" | "grammar" | "ai_diagnostics" | "ocr" | "metadata_validator" | "lsp_adapter"
+        "harper_processor"
+            | "harper"
+            | "spell_checker"
+            | "grammar"
+            | "ai_diagnostics"
+            | "ocr"
+            | "metadata_validator"
+            | "lsp_adapter"
     )
 }
 

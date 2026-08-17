@@ -152,7 +152,9 @@ impl std::fmt::Display for PluginApiVersion {
 }
 
 /// Severity levels for [`PluginWarningEvent`] and [`PluginErrorEvent`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+)]
 pub enum PluginEventSeverity {
     /// Informational — non-critical, no action required.
     #[serde(rename = "info")]
@@ -287,7 +289,9 @@ impl std::fmt::Display for EventSource {
 /// enum but is a strongly-typed, serializable value suitable for inclusion in
 /// event payloads. It allows event consumers (especially the frontend bridge)
 /// to reason about a plugin's current state without importing lifecycle types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+)]
 pub enum PluginLifecycleState {
     /// Plugin manifest has been discovered on disk.
     #[serde(rename = "discovered")]
@@ -677,7 +681,12 @@ impl PluginRequestEvent {
         }
     }
 
-    pub fn with_params(plugin_id: &str, request_id: Uuid, method: &str, params: serde_json::Value) -> Self {
+    pub fn with_params(
+        plugin_id: &str,
+        request_id: Uuid,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Self {
         Self {
             params: Some(params),
             ..Self::new(plugin_id, request_id, method)
@@ -729,7 +738,12 @@ impl Default for PluginResponseEvent {
 }
 
 impl PluginResponseEvent {
-    pub fn new(plugin_id: &str, request_id: Uuid, method: &str, status: PluginResponseStatus) -> Self {
+    pub fn new(
+        plugin_id: &str,
+        request_id: Uuid,
+        method: &str,
+        status: PluginResponseStatus,
+    ) -> Self {
         Self {
             plugin_id: plugin_id.to_string(),
             request_id,
@@ -742,7 +756,12 @@ impl PluginResponseEvent {
         }
     }
 
-    pub fn success(plugin_id: &str, request_id: Uuid, method: &str, result: serde_json::Value) -> Self {
+    pub fn success(
+        plugin_id: &str,
+        request_id: Uuid,
+        method: &str,
+        result: serde_json::Value,
+    ) -> Self {
         Self {
             request_id,
             method: method.to_string(),
@@ -763,7 +782,12 @@ impl PluginResponseEvent {
     pub fn cancelled(plugin_id: &str, request_id: Uuid, method: &str) -> Self {
         Self {
             status: PluginResponseStatus::Cancelled,
-            ..Self::new(plugin_id, request_id, method, PluginResponseStatus::Cancelled)
+            ..Self::new(
+                plugin_id,
+                request_id,
+                method,
+                PluginResponseStatus::Cancelled,
+            )
         }
     }
 }
@@ -1225,12 +1249,13 @@ impl PluginEvent {
             | Self::PluginUnloaded(_)
             | Self::PluginStarted(_)
             | Self::PluginStopped(_) => PluginEventCategory::Lifecycle,
-            Self::CapabilityRegistered(_)
-            | Self::CapabilityRemoved(_) => PluginEventCategory::Capability,
-            Self::PluginWarning(_)
-            | Self::PluginError(_) => PluginEventCategory::Diagnostic,
-            Self::PluginRequest(_)
-            | Self::PluginResponse(_) => PluginEventCategory::RequestResponse,
+            Self::CapabilityRegistered(_) | Self::CapabilityRemoved(_) => {
+                PluginEventCategory::Capability
+            }
+            Self::PluginWarning(_) | Self::PluginError(_) => PluginEventCategory::Diagnostic,
+            Self::PluginRequest(_) | Self::PluginResponse(_) => {
+                PluginEventCategory::RequestResponse
+            }
         }
     }
 
@@ -1279,26 +1304,18 @@ impl PluginEvent {
                     .map(Self::PluginUnregistered)
                     .map_err(|e| PluginEventError::MalformedPayload(e.to_string()))
             }
-            k if k == kinds::PLUGIN_LOADED => {
-                serde_json::from_str::<PluginLoadedEvent>(json)
-                    .map(Self::PluginLoaded)
-                    .map_err(|e| PluginEventError::MalformedPayload(e.to_string()))
-            }
-            k if k == kinds::PLUGIN_UNLOADED => {
-                serde_json::from_str::<PluginUnloadedEvent>(json)
-                    .map(Self::PluginUnloaded)
-                    .map_err(|e| PluginEventError::MalformedPayload(e.to_string()))
-            }
-            k if k == kinds::PLUGIN_STARTED => {
-                serde_json::from_str::<PluginStartedEvent>(json)
-                    .map(Self::PluginStarted)
-                    .map_err(|e| PluginEventError::MalformedPayload(e.to_string()))
-            }
-            k if k == kinds::PLUGIN_STOPPED => {
-                serde_json::from_str::<PluginStoppedEvent>(json)
-                    .map(Self::PluginStopped)
-                    .map_err(|e| PluginEventError::MalformedPayload(e.to_string()))
-            }
+            k if k == kinds::PLUGIN_LOADED => serde_json::from_str::<PluginLoadedEvent>(json)
+                .map(Self::PluginLoaded)
+                .map_err(|e| PluginEventError::MalformedPayload(e.to_string())),
+            k if k == kinds::PLUGIN_UNLOADED => serde_json::from_str::<PluginUnloadedEvent>(json)
+                .map(Self::PluginUnloaded)
+                .map_err(|e| PluginEventError::MalformedPayload(e.to_string())),
+            k if k == kinds::PLUGIN_STARTED => serde_json::from_str::<PluginStartedEvent>(json)
+                .map(Self::PluginStarted)
+                .map_err(|e| PluginEventError::MalformedPayload(e.to_string())),
+            k if k == kinds::PLUGIN_STOPPED => serde_json::from_str::<PluginStoppedEvent>(json)
+                .map(Self::PluginStopped)
+                .map_err(|e| PluginEventError::MalformedPayload(e.to_string())),
             k if k == kinds::CAPABILITY_REGISTERED => {
                 serde_json::from_str::<CapabilityRegisteredEvent>(json)
                     .map(Self::CapabilityRegistered)
@@ -1309,26 +1326,18 @@ impl PluginEvent {
                     .map(Self::CapabilityRemoved)
                     .map_err(|e| PluginEventError::MalformedPayload(e.to_string()))
             }
-            k if k == kinds::PLUGIN_WARNING => {
-                serde_json::from_str::<PluginWarningEvent>(json)
-                    .map(Self::PluginWarning)
-                    .map_err(|e| PluginEventError::MalformedPayload(e.to_string()))
-            }
-            k if k == kinds::PLUGIN_ERROR => {
-                serde_json::from_str::<PluginErrorEvent>(json)
-                    .map(Self::PluginError)
-                    .map_err(|e| PluginEventError::MalformedPayload(e.to_string()))
-            }
-            k if k == kinds::PLUGIN_REQUEST => {
-                serde_json::from_str::<PluginRequestEvent>(json)
-                    .map(Self::PluginRequest)
-                    .map_err(|e| PluginEventError::MalformedPayload(e.to_string()))
-            }
-            k if k == kinds::PLUGIN_RESPONSE => {
-                serde_json::from_str::<PluginResponseEvent>(json)
-                    .map(Self::PluginResponse)
-                    .map_err(|e| PluginEventError::MalformedPayload(e.to_string()))
-            }
+            k if k == kinds::PLUGIN_WARNING => serde_json::from_str::<PluginWarningEvent>(json)
+                .map(Self::PluginWarning)
+                .map_err(|e| PluginEventError::MalformedPayload(e.to_string())),
+            k if k == kinds::PLUGIN_ERROR => serde_json::from_str::<PluginErrorEvent>(json)
+                .map(Self::PluginError)
+                .map_err(|e| PluginEventError::MalformedPayload(e.to_string())),
+            k if k == kinds::PLUGIN_REQUEST => serde_json::from_str::<PluginRequestEvent>(json)
+                .map(Self::PluginRequest)
+                .map_err(|e| PluginEventError::MalformedPayload(e.to_string())),
+            k if k == kinds::PLUGIN_RESPONSE => serde_json::from_str::<PluginResponseEvent>(json)
+                .map(Self::PluginResponse)
+                .map_err(|e| PluginEventError::MalformedPayload(e.to_string())),
             _ => Err(PluginEventError::UnknownEventType(kind.to_string())),
         }
     }
@@ -1611,10 +1620,7 @@ impl std::error::Error for PluginEventError {}
 /// );
 /// publish_plugin_event(&event_bus, &event);
 /// ```
-pub fn publish_plugin_event(
-    event_bus: &EventBus<PipelineEvent>,
-    event: &impl PluginEventContract,
-) {
+pub fn publish_plugin_event(event_bus: &EventBus<PipelineEvent>, event: &impl PluginEventContract) {
     let kind = event.kind();
     let pipeline_event = event.to_pipeline_event();
     event_bus.publish(kind, &pipeline_event);
@@ -1691,7 +1697,9 @@ mod tests {
         let event = PluginEvent::PluginUnloaded(PluginUnloadedEvent::new("test"));
         assert_eq!(event.kind(), kinds::PLUGIN_UNLOADED);
 
-        let event = PluginEvent::CapabilityRegistered(CapabilityRegisteredEvent::new("ns:cap", "test", "desc"));
+        let event = PluginEvent::CapabilityRegistered(CapabilityRegisteredEvent::new(
+            "ns:cap", "test", "desc",
+        ));
         assert_eq!(event.kind(), kinds::CAPABILITY_REGISTERED);
 
         let event = PluginEvent::CapabilityRemoved(CapabilityRemovedEvent::new("ns:cap"));
@@ -1703,13 +1711,15 @@ mod tests {
         let event = PluginEvent::PluginError(PluginErrorEvent::new("test", "error"));
         assert_eq!(event.kind(), kinds::PLUGIN_ERROR);
 
-        let event = PluginEvent::PluginRequest(PluginRequestEvent::new(
-            "test", Uuid::nil(), "method"
-        ));
+        let event =
+            PluginEvent::PluginRequest(PluginRequestEvent::new("test", Uuid::nil(), "method"));
         assert_eq!(event.kind(), kinds::PLUGIN_REQUEST);
 
         let event = PluginEvent::PluginResponse(PluginResponseEvent::new(
-            "test", Uuid::nil(), "method", PluginResponseStatus::Success
+            "test",
+            Uuid::nil(),
+            "method",
+            PluginResponseStatus::Success,
         ));
         assert_eq!(event.kind(), kinds::PLUGIN_RESPONSE);
     }
@@ -1758,9 +1768,11 @@ mod tests {
 
     #[test]
     fn plugin_warning_event_round_trips() {
-        let event = PluginEvent::PluginWarning(
-            PluginWarningEvent::with_code("com.example.test", "disk low", "LOW_DISK"),
-        );
+        let event = PluginEvent::PluginWarning(PluginWarningEvent::with_code(
+            "com.example.test",
+            "disk low",
+            "LOW_DISK",
+        ));
         let json = serde_json::to_string(&event).unwrap();
         let back: PluginEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(event, back);
@@ -1833,10 +1845,7 @@ mod tests {
     #[test]
     fn from_kind_json_unknown_kind() {
         let result = PluginEvent::from_kind_json("unknown.event", "{}");
-        assert!(matches!(
-            result,
-            Err(PluginEventError::UnknownEventType(_))
-        ));
+        assert!(matches!(result, Err(PluginEventError::UnknownEventType(_))));
     }
 
     #[test]
@@ -1868,7 +1877,10 @@ mod tests {
     #[test]
     fn validate_rejects_unsupported_major_version() {
         let event = PluginEvent::PluginLoaded(PluginLoadedEvent {
-            api_version: PluginApiVersion { major: 99, minor: 0 },
+            api_version: PluginApiVersion {
+                major: 99,
+                minor: 0,
+            },
             ..PluginLoadedEvent::new("test", "Test", "1.0.0")
         });
         assert!(matches!(
@@ -2023,7 +2035,10 @@ mod tests {
 
     #[test]
     fn event_category_default_is_lifecycle() {
-        assert_eq!(PluginEventCategory::default(), PluginEventCategory::Lifecycle);
+        assert_eq!(
+            PluginEventCategory::default(),
+            PluginEventCategory::Lifecycle
+        );
     }
 
     #[test]
@@ -2088,7 +2103,10 @@ mod tests {
 
     #[test]
     fn lifecycle_state_default_is_unloaded() {
-        assert_eq!(PluginLifecycleState::default(), PluginLifecycleState::Unloaded);
+        assert_eq!(
+            PluginLifecycleState::default(),
+            PluginLifecycleState::Unloaded
+        );
     }
 
     #[test]
@@ -2103,10 +2121,7 @@ mod tests {
         assert_eq!(PluginLifecycleState::Started.as_str(), "started");
         assert_eq!(PluginLifecycleState::Running.as_str(), "running");
         assert_eq!(PluginLifecycleState::Stopped.as_str(), "stopped");
-        assert_eq!(
-            PluginLifecycleState::Unregistered.as_str(),
-            "unregistered"
-        );
+        assert_eq!(PluginLifecycleState::Unregistered.as_str(), "unregistered");
         assert_eq!(PluginLifecycleState::Unloaded.as_str(), "unloaded");
     }
 
@@ -2137,16 +2152,17 @@ mod tests {
 
     #[test]
     fn registered_event_kind_matches_constant() {
-        let event = PluginEvent::PluginRegistered(PluginRegisteredEvent::new(
-            "test", "Test", "1.0.0",
-        ));
+        let event =
+            PluginEvent::PluginRegistered(PluginRegisteredEvent::new("test", "Test", "1.0.0"));
         assert_eq!(event.kind(), kinds::PLUGIN_REGISTERED);
     }
 
     #[test]
     fn registered_event_plugin_id() {
         let event = PluginEvent::PluginRegistered(PluginRegisteredEvent::new(
-            "com.example.test", "Test", "1.0.0",
+            "com.example.test",
+            "Test",
+            "1.0.0",
         ));
         assert_eq!(event.plugin_id(), "com.example.test");
     }
@@ -2201,9 +2217,8 @@ mod tests {
 
     #[test]
     fn unregistered_event_round_trips() {
-        let event = PluginEvent::PluginUnregistered(PluginUnregisteredEvent::new(
-            "com.example.test",
-        ));
+        let event =
+            PluginEvent::PluginUnregistered(PluginUnregisteredEvent::new("com.example.test"));
         let json = serde_json::to_string(&event).unwrap();
         let back: PluginEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(event, back);
@@ -2229,8 +2244,7 @@ mod tests {
 
     #[test]
     fn unregistered_event_with_state_builder() {
-        let event = PluginUnregisteredEvent::new("test")
-            .with_state(PluginLifecycleState::Unloaded);
+        let event = PluginUnregisteredEvent::new("test").with_state(PluginLifecycleState::Unloaded);
         assert_eq!(event.state, PluginLifecycleState::Unloaded);
     }
 
@@ -2265,16 +2279,16 @@ mod tests {
 
     #[test]
     fn started_event_kind_matches_constant() {
-        let event = PluginEvent::PluginStarted(PluginStartedEvent::new(
-            "test", "Test", "1.0.0",
-        ));
+        let event = PluginEvent::PluginStarted(PluginStartedEvent::new("test", "Test", "1.0.0"));
         assert_eq!(event.kind(), kinds::PLUGIN_STARTED);
     }
 
     #[test]
     fn started_event_plugin_id() {
         let event = PluginEvent::PluginStarted(PluginStartedEvent::new(
-            "com.example.test", "Test", "1.0.0",
+            "com.example.test",
+            "Test",
+            "1.0.0",
         ));
         assert_eq!(event.plugin_id(), "com.example.test");
     }
@@ -2355,8 +2369,7 @@ mod tests {
 
     #[test]
     fn stopped_event_with_state_builder() {
-        let event = PluginStoppedEvent::new("test")
-            .with_state(PluginLifecycleState::Unloaded);
+        let event = PluginStoppedEvent::new("test").with_state(PluginLifecycleState::Unloaded);
         assert_eq!(event.state, PluginLifecycleState::Unloaded);
     }
 
@@ -2468,7 +2481,10 @@ mod tests {
 
     #[test]
     fn validate_rejects_unsupported_version_all_events() {
-        let bad_version = PluginApiVersion { major: 99, minor: 0 };
+        let bad_version = PluginApiVersion {
+            major: 99,
+            minor: 0,
+        };
         let events = [
             PluginEvent::PluginRegistered(PluginRegisteredEvent {
                 api_version: bad_version,
@@ -2490,7 +2506,10 @@ mod tests {
 
         for event in &events {
             assert!(
-                matches!(event.validate(), Err(PluginEventError::UnsupportedVersion(_))),
+                matches!(
+                    event.validate(),
+                    Err(PluginEventError::UnsupportedVersion(_))
+                ),
                 "expected UnsupportedVersion for {:?}",
                 event
             );
@@ -2545,9 +2564,8 @@ mod tests {
 
     #[test]
     fn contract_category_method_works_through_trait() {
-        let event = PluginEvent::PluginRegistered(PluginRegisteredEvent::new(
-            "test", "Test", "1.0.0",
-        ));
+        let event =
+            PluginEvent::PluginRegistered(PluginRegisteredEvent::new("test", "Test", "1.0.0"));
 
         fn check_contract<E: PluginEventContract>(event: &E) {
             assert_eq!(event.category(), PluginEventCategory::Lifecycle);
@@ -2610,9 +2628,8 @@ mod tests {
         let received = Arc::new(std::sync::Mutex::new(Vec::new()));
         let received_clone = received.clone();
 
-        let event = PluginEvent::PluginRegistered(PluginRegisteredEvent::new(
-            "test", "Test", "1.0.0",
-        ));
+        let event =
+            PluginEvent::PluginRegistered(PluginRegisteredEvent::new("test", "Test", "1.0.0"));
         let kind = event.kind();
 
         bus.subscribe(kind, move |pe: &PipelineEvent| {
@@ -2634,9 +2651,7 @@ mod tests {
         let received = Arc::new(std::sync::Mutex::new(false));
         let received_clone = received.clone();
 
-        let event = PluginEvent::PluginStarted(PluginStartedEvent::new(
-            "test", "Test", "1.0.0",
-        ));
+        let event = PluginEvent::PluginStarted(PluginStartedEvent::new("test", "Test", "1.0.0"));
 
         bus.subscribe(event.kind(), move |pe: &PipelineEvent| {
             if let PipelineEvent::Plugin(e) = pe {

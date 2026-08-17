@@ -35,9 +35,7 @@ pub enum DiagnosticError {
     ///
     /// Positions are compared by `(line, character)`. A valid range must have
     /// `start <= end`.
-    #[error(
-        "invalid range: start position {start} is after end position {end}"
-    )]
+    #[error("invalid range: start position {start} is after end position {end}")]
     InvalidRange {
         /// The start position that was out of order.
         start: TextPosition,
@@ -49,9 +47,7 @@ pub enum DiagnosticError {
     ///
     /// Byte offsets are 0-based UTF-8 offsets within the document. A valid
     /// pair must have `start_offset <= end_offset`.
-    #[error(
-        "invalid byte offsets: start_offset ({start}) is after end_offset ({end})"
-    )]
+    #[error("invalid byte offsets: start_offset ({start}) is after end_offset ({end})")]
     InvalidOffset {
         /// The start byte offset.
         start: usize,
@@ -120,11 +116,7 @@ impl DiagnosticError {
 
     /// Convenience constructor for [`HarperConversion`](Self::HarperConversion).
     #[inline]
-    pub fn harper_conversion(
-        reason: impl Into<String>,
-        char_index: usize,
-        doc_len: usize,
-    ) -> Self {
+    pub fn harper_conversion(reason: impl Into<String>, char_index: usize, doc_len: usize) -> Self {
         let mut context = std::collections::HashMap::new();
         context.insert("char_index".to_string(), char_index.to_string());
         context.insert("doc_char_len".to_string(), doc_len.to_string());
@@ -155,7 +147,10 @@ mod tests {
 
     #[test]
     fn invalid_offset_error() {
-        let err = DiagnosticError::InvalidOffset { start: 100, end: 50 };
+        let err = DiagnosticError::InvalidOffset {
+            start: 100,
+            end: 50,
+        };
         assert!(err.to_string().contains("100"));
         assert!(err.to_string().contains("50"));
     }
@@ -179,8 +174,7 @@ mod tests {
     fn errors_are_serializable() {
         let err = DiagnosticError::InvalidOffset { start: 10, end: 5 };
         let json = serde_json::to_string(&err).expect("serialize error");
-        let back: DiagnosticError =
-            serde_json::from_str(&json).expect("deserialize error");
+        let back: DiagnosticError = serde_json::from_str(&json).expect("deserialize error");
         assert_eq!(err, back);
     }
 

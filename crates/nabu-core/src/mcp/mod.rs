@@ -52,6 +52,4 @@ pub use protocol::{
 };
 pub use resources::ResourceProvider;
 pub use server::McpServer;
-pub use tools::{
-    ListNotesTool, ReadNoteTool, SearchNoteTool, WriteNoteTool, register_nabu_tools,
-};
+pub use tools::{register_nabu_tools, ListNotesTool, ReadNoteTool, SearchNoteTool, WriteNoteTool};

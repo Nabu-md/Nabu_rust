@@ -5,9 +5,8 @@
 //! the EventBus itself — confirming the unified event architecture.
 
 use nabu_core::diagnostic::{
-    Diagnostic, DiagnosticBatch, DiagnosticEvent, DiagnosticEventContract,
-    BatchClearedEvent, BatchRemovedEvent,
-    publish_diagnostic_event,
+    publish_diagnostic_event, BatchClearedEvent, BatchRemovedEvent, Diagnostic, DiagnosticBatch,
+    DiagnosticEvent, DiagnosticEventContract,
 };
 use nabu_core::diagnostic::{DiagnosticSeverity, TextPosition, TextRange};
 use nabu_core::event_bus::kinds;
@@ -55,9 +54,8 @@ fn batch_cleared_publishes_through_event_bus() {
     let received = Arc::new(std::sync::Mutex::new(false));
     let received_clone = received.clone();
 
-    let event = DiagnosticEvent::BatchCleared(
-        BatchClearedEvent::new("ai-assistant", "vault:doc.md"),
-    );
+    let event =
+        DiagnosticEvent::BatchCleared(BatchClearedEvent::new("ai-assistant", "vault:doc.md"));
 
     bus.subscribe(event.kind(), move |pe: &PipelineEvent| {
         if let PipelineEvent::Diagnostic(e) = pe {
@@ -78,9 +76,11 @@ fn batch_removed_publishes_through_event_bus() {
     let received = Arc::new(std::sync::Mutex::new(false));
     let received_clone = received.clone();
 
-    let event = DiagnosticEvent::BatchRemoved(
-        BatchRemovedEvent::new("ocr-engine", "vault:scan.png", uuid::Uuid::new_v4()),
-    );
+    let event = DiagnosticEvent::BatchRemoved(BatchRemovedEvent::new(
+        "ocr-engine",
+        "vault:scan.png",
+        uuid::Uuid::new_v4(),
+    ));
 
     bus.subscribe(event.kind(), move |pe: &PipelineEvent| {
         if let PipelineEvent::Diagnostic(e) = pe {
@@ -142,13 +142,15 @@ fn incremental_batch_serializes_flag() {
 /// DiagnosticEventContract trait methods work through the trait.
 #[test]
 fn event_contract_trait_works() {
-    let batch = DiagnosticBatch::new("test", "vault:doc.md", vec![
-        Diagnostic::new(
+    let batch = DiagnosticBatch::new(
+        "test",
+        "vault:doc.md",
+        vec![Diagnostic::new(
             DiagnosticSeverity::Information,
             TextRange::empty(TextPosition::new(0, 0)),
             "info",
-        ),
-    ]);
+        )],
+    );
     let event = DiagnosticEvent::BatchPublished(batch);
 
     fn check<E: DiagnosticEventContract>(event: &E) {
@@ -164,15 +166,15 @@ fn event_contract_trait_works() {
 /// The event is delivered as a PipelineEvent::Diagnostic variant.
 #[test]
 fn event_wraps_in_pipeline_event_correctly() {
-    let event = DiagnosticEvent::BatchPublished(
-        DiagnosticBatch::new("test", "vault:doc.md", vec![
-            Diagnostic::new(
-                DiagnosticSeverity::Warning,
-                TextRange::empty(TextPosition::new(0, 0)),
-                "warn",
-            ),
-        ]),
-    );
+    let event = DiagnosticEvent::BatchPublished(DiagnosticBatch::new(
+        "test",
+        "vault:doc.md",
+        vec![Diagnostic::new(
+            DiagnosticSeverity::Warning,
+            TextRange::empty(TextPosition::new(0, 0)),
+            "warn",
+        )],
+    ));
 
     let pipeline = event.to_pipeline_event();
     match &pipeline {
@@ -196,29 +198,34 @@ fn subscriber_kind_isolation() {
     let published_clone = published.clone();
     let cleared_clone = cleared.clone();
 
-    bus.subscribe(kinds::DIAGNOSTIC_BATCH_PUBLISHED, move |_pe: &PipelineEvent| {
-        *published_clone.lock().unwrap() += 1;
-    });
-    bus.subscribe(kinds::DIAGNOSTIC_BATCH_CLEARED, move |_pe: &PipelineEvent| {
-        *cleared_clone.lock().unwrap() += 1;
-    });
+    bus.subscribe(
+        kinds::DIAGNOSTIC_BATCH_PUBLISHED,
+        move |_pe: &PipelineEvent| {
+            *published_clone.lock().unwrap() += 1;
+        },
+    );
+    bus.subscribe(
+        kinds::DIAGNOSTIC_BATCH_CLEARED,
+        move |_pe: &PipelineEvent| {
+            *cleared_clone.lock().unwrap() += 1;
+        },
+    );
 
     // Publish a BatchPublished — only the published subscriber fires.
-    let event = DiagnosticEvent::BatchPublished(
-        DiagnosticBatch::new("test", "vault:doc.md", vec![
-            Diagnostic::new(
-                DiagnosticSeverity::Hint,
-                TextRange::empty(TextPosition::new(0, 0)),
-                "h",
-            ),
-        ]),
-    );
+    let event = DiagnosticEvent::BatchPublished(DiagnosticBatch::new(
+        "test",
+        "vault:doc.md",
+        vec![Diagnostic::new(
+            DiagnosticSeverity::Hint,
+            TextRange::empty(TextPosition::new(0, 0)),
+            "h",
+        )],
+    ));
     publish_diagnostic_event(&bus, &event);
 
     // Publish a BatchCleared — only the cleared subscriber fires.
-    let cleared_event = DiagnosticEvent::BatchCleared(
-        BatchClearedEvent::new("test", "vault:doc.md"),
-    );
+    let cleared_event =
+        DiagnosticEvent::BatchCleared(BatchClearedEvent::new("test", "vault:doc.md"));
     publish_diagnostic_event(&bus, &cleared_event);
 
     assert_eq!(*published.lock().unwrap(), 1);

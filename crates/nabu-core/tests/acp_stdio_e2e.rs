@@ -40,18 +40,13 @@ async fn spawn_agent(args: &[&str]) -> tokio::process::Child {
 }
 
 /// Type alias for the stdio transport + client used in tests.
-type TestClient = AcpClient<StdioTransport<BufReader<tokio::process::ChildStdout>, tokio::process::ChildStdin>>;
+type TestClient =
+    AcpClient<StdioTransport<BufReader<tokio::process::ChildStdout>, tokio::process::ChildStdin>>;
 
 /// Connect an AcpClient to the given child process's stdin/stdout.
 fn make_client(child: &mut tokio::process::Child) -> TestClient {
-    let stdin = child
-        .stdin
-        .take()
-        .expect("child has no stdin");
-    let stdout = child
-        .stdout
-        .take()
-        .expect("child has no stdout");
+    let stdin = child.stdin.take().expect("child has no stdin");
+    let stdout = child.stdout.take().expect("child has no stdout");
 
     let transport = StdioTransport::new(BufReader::new(stdout), stdin);
     let handler: Arc<dyn AcpClientHandler> = Arc::new(NoopClientHandler);
@@ -104,7 +99,10 @@ async fn full_lifecycle_stdio() {
         .expect("initialize");
 
     assert_eq!(init_resp.protocol_version, 1);
-    assert_eq!(init_resp.agent_info.as_ref().unwrap().name, "acp-test-agent");
+    assert_eq!(
+        init_resp.agent_info.as_ref().unwrap().name,
+        "acp-test-agent"
+    );
 
     // --- new session ---
     let sid = client
@@ -147,11 +145,14 @@ async fn session_update_notifications_streamed() {
     let bus: Arc<EventBus<PipelineEvent>> = Arc::new(EventBus::new());
     let pipeline = Arc::new(StreamingPipeline::new(bus));
     let stream_handle = pipeline
-        .start_stream(Some(uuid::Uuid::new_v4()), None, Some("acp-test-agent".to_string()))
+        .start_stream(
+            Some(uuid::Uuid::new_v4()),
+            None,
+            Some("acp-test-agent".to_string()),
+        )
         .expect("start_stream");
 
-    let collected: Arc<tokio::sync::Mutex<Vec<String>>> =
-        Arc::new(tokio::sync::Mutex::new(vec![]));
+    let collected: Arc<tokio::sync::Mutex<Vec<String>>> = Arc::new(tokio::sync::Mutex::new(vec![]));
     let collected_cb = collected.clone();
     let handle_cb = stream_handle.clone();
 
@@ -238,7 +239,10 @@ async fn agent_exit_after_init_returns_error_on_next_request() {
     .await;
 
     assert!(result.is_ok(), "should get an error response, not hang");
-    assert!(result.unwrap().is_err(), "new_session should fail after agent exit");
+    assert!(
+        result.unwrap().is_err(),
+        "new_session should fail after agent exit"
+    );
 }
 
 // ===========================================================================
@@ -266,7 +270,10 @@ async fn agent_exit_during_prompt() {
     .await;
 
     assert!(result.is_ok(), "should get a response, not hang");
-    assert!(result.unwrap().is_err(), "prompt should fail when agent exits");
+    assert!(
+        result.unwrap().is_err(),
+        "prompt should fail when agent exits"
+    );
 }
 
 // ===========================================================================
@@ -293,7 +300,10 @@ async fn agent_malformed_response() {
     .await;
 
     assert!(result.is_ok(), "should get a response, not hang");
-    assert!(result.unwrap().is_err(), "initialize should fail with malformed JSON");
+    assert!(
+        result.unwrap().is_err(),
+        "initialize should fail with malformed JSON"
+    );
 }
 
 // ===========================================================================
@@ -359,23 +369,26 @@ async fn concurrent_requests_no_deadlock() {
 
     // Send two prompts concurrently — this would deadlock with the old
     // implementation because the read loop holds the state lock.
-    let prompt1 = client.session_prompt(&sid, vec![ContentBlock::Text(TextContent {
-        text: "first".to_string(),
-        annotations: None,
-        _meta: None,
-    })]);
-    let prompt2 = client.session_prompt(&sid, vec![ContentBlock::Text(TextContent {
-        text: "second".to_string(),
-        annotations: None,
-        _meta: None,
-    })]);
+    let prompt1 = client.session_prompt(
+        &sid,
+        vec![ContentBlock::Text(TextContent {
+            text: "first".to_string(),
+            annotations: None,
+            _meta: None,
+        })],
+    );
+    let prompt2 = client.session_prompt(
+        &sid,
+        vec![ContentBlock::Text(TextContent {
+            text: "second".to_string(),
+            annotations: None,
+            _meta: None,
+        })],
+    );
 
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        async {
-            tokio::join!(prompt1, prompt2)
-        },
-    )
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::join!(prompt1, prompt2)
+    })
     .await;
 
     assert!(result.is_ok(), "concurrent prompts should not deadlock");
@@ -431,5 +444,8 @@ async fn process_kill_during_session() {
     .await;
 
     assert!(result.is_ok(), "should get an error, not hang");
-    assert!(result.unwrap().is_err(), "new_session should fail after kill");
+    assert!(
+        result.unwrap().is_err(),
+        "new_session should fail after kill"
+    );
 }

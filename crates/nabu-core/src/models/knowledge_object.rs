@@ -75,9 +75,7 @@ impl KnowledgeObject {
     /// the underlying `CustomPropertyValue` variant. Mirrors the backend
     /// `custom_json` helper.
     pub fn custom_property_json(&self, key: &str) -> Option<serde_json::Value> {
-        self.custom_properties
-            .get(key)
-            .map(|v| v.to_json_value())
+        self.custom_properties.get(key).map(|v| v.to_json_value())
     }
 
     /// True when this object declares a relation (of any type) pointing at
@@ -298,9 +296,7 @@ impl CustomPropertyValue {
                 serde_json::Value::Array(v.iter().cloned().map(serde_json::Value::String).collect())
             }
             CustomPropertyValue::Url(s) => serde_json::Value::String(s.clone()),
-            CustomPropertyValue::Relation(id) => {
-                serde_json::Value::String(id.to_string())
-            }
+            CustomPropertyValue::Relation(id) => serde_json::Value::String(id.to_string()),
         }
     }
 }
@@ -401,9 +397,13 @@ mod tests {
 
     #[test]
     fn custom_property_json_uses_to_json_value() {
-        let mut obj = KnowledgeObject::new(ObjectType::Note, ObjectContent::PlainText("hello world".into()));
+        let mut obj = KnowledgeObject::new(
+            ObjectType::Note,
+            ObjectContent::PlainText("hello world".into()),
+        );
         let id = Uuid::nil();
-        obj.custom_properties.insert("related".into(), CustomPropertyValue::Relation(id));
+        obj.custom_properties
+            .insert("related".into(), CustomPropertyValue::Relation(id));
         let json = obj.custom_property_json("related");
         assert_eq!(json, Some(serde_json::Value::String(id.to_string())));
         assert_eq!(obj.custom_property_json("missing"), None);

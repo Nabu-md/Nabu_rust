@@ -9,33 +9,19 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub enum PersistenceError {
     /// The thread was not found in the cache or on disk.
-    ThreadNotFound {
-        thread_id: Uuid,
-    },
+    ThreadNotFound { thread_id: Uuid },
     /// The persistence file exists but contained invalid JSON.
-    SerializationError {
-        message: String,
-    },
+    SerializationError { message: String },
     /// The deserialization failed (missing fields, type mismatch, etc.).
-    DeserializationError {
-        target: String,
-        message: String,
-    },
+    DeserializationError { target: String, message: String },
     /// The thread failed model-level validation after deserialization.
-    ValidationError {
-        thread_id: Uuid,
-        reason: String,
-    },
+    ValidationError { thread_id: Uuid, reason: String },
     /// An I/O error occurred while reading or writing a persistence file.
-    IoError {
-        message: String,
-    },
+    IoError { message: String },
     /// The store has been shut down and cannot accept requests.
     Shutdown,
     /// The given thread ID conflicts with an existing thread (duplicate).
-    DuplicateId {
-        thread_id: Uuid,
-    },
+    DuplicateId { thread_id: Uuid },
 }
 
 impl std::fmt::Display for PersistenceError {
@@ -51,11 +37,7 @@ impl std::fmt::Display for PersistenceError {
                 write!(f, "Deserialization error for '{}': {}", target, message)
             }
             PersistenceError::ValidationError { thread_id, reason } => {
-                write!(
-                    f,
-                    "Validation failed for thread {}: {}",
-                    thread_id, reason
-                )
+                write!(f, "Validation failed for thread {}: {}", thread_id, reason)
             }
             PersistenceError::IoError { message } => {
                 write!(f, "I/O error: {}", message)

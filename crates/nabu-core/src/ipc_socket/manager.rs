@@ -14,8 +14,8 @@
 //! threads, participating in the standard [`Lifecycle`] trait.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
 use tokio::net::{UnixListener, UnixStream};
@@ -93,9 +93,7 @@ impl SocketConfig {
         F: Fn(UnixStream) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = bool> + Send + 'static,
     {
-        let handler: ConnectionHandler = Arc::new(move |stream| {
-            Box::pin((handler)(stream))
-        });
+        let handler: ConnectionHandler = Arc::new(move |stream| Box::pin((handler)(stream)));
         Self {
             handler: Some(handler),
             ..self
@@ -128,14 +126,12 @@ impl SocketConfig {
 
     /// Returns the directory that should contain the socket file.
     pub fn effective_socket_dir(&self) -> PathBuf {
-        self.socket_dir
-            .clone()
-            .unwrap_or_else(|| {
-                self.socket_path
-                    .parent()
-                    .map(|p| p.to_path_buf())
-                    .unwrap_or_else(|| PathBuf::from("/tmp"))
-            })
+        self.socket_dir.clone().unwrap_or_else(|| {
+            self.socket_path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("/tmp"))
+        })
     }
 }
 
@@ -347,10 +343,7 @@ impl SocketManager {
 
         if metadata.file_type().is_socket() {
             if Self::is_stale_socket(socket_path) {
-                tracing::info!(
-                    "Removing stale socket file at '{}'",
-                    socket_path.display()
-                );
+                tracing::info!("Removing stale socket file at '{}'", socket_path.display());
                 std::fs::remove_file(socket_path)?;
             } else {
                 tracing::debug!(
@@ -366,10 +359,8 @@ impl SocketManager {
             let perms = metadata.permissions();
             let mode = perms.mode();
             if mode & 0o200 == 0 {
-                let _ = std::fs::set_permissions(
-                    socket_path,
-                    std::fs::Permissions::from_mode(0o600),
-                );
+                let _ =
+                    std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600));
             }
             std::fs::remove_file(socket_path)?;
         } else {
@@ -406,10 +397,7 @@ impl SocketManager {
         let perms = std::fs::Permissions::from_mode(SECURE_SOCKET_PERMISSIONS);
         std::fs::set_permissions(socket_path, perms)?;
 
-        tracing::debug!(
-            "Socket '{}' permissions set to 0600",
-            socket_path.display()
-        );
+        tracing::debug!("Socket '{}' permissions set to 0600", socket_path.display());
 
         Ok(())
     }
@@ -427,10 +415,7 @@ impl SocketManager {
         socket_path: PathBuf,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
-            tracing::info!(
-                "Socket accept loop started on '{}'",
-                socket_path.display()
-            );
+            tracing::info!("Socket accept loop started on '{}'", socket_path.display());
 
             loop {
                 tokio::select! {
@@ -487,16 +472,10 @@ impl SocketManager {
                         e
                     );
                 } else {
-                    tracing::debug!(
-                        "Socket file '{}' already removed",
-                        socket_path.display()
-                    );
+                    tracing::debug!("Socket file '{}' already removed", socket_path.display());
                 }
             } else {
-                tracing::info!(
-                    "Socket file removed at '{}'",
-                    socket_path.display()
-                );
+                tracing::info!("Socket file removed at '{}'", socket_path.display());
             }
 
             tracing::info!("Socket accept loop terminated");
@@ -527,20 +506,16 @@ impl SocketManager {
         Self::ensure_socket_dir(&socket_path)
             .map_err(|e| SocketError::io(e, socket_path.clone()))?;
 
-        Self::cleanup_stale_socket(&socket_path)
-            .map_err(|e| SocketError::StaleSocketRemove {
-                source: e,
-                path: socket_path.clone(),
-            })?;
+        Self::cleanup_stale_socket(&socket_path).map_err(|e| SocketError::StaleSocketRemove {
+            source: e,
+            path: socket_path.clone(),
+        })?;
 
         self.handle
             .lifecycle
             .transition_to(super::lifecycle::SocketLifecycle::Initialized)
             .map_err(|_| {
-                SocketError::lifecycle(
-                    socket_path.clone(),
-                    "Already initialized or shut down",
-                )
+                SocketError::lifecycle(socket_path.clone(), "Already initialized or shut down")
             })?;
 
         self.lifecycle
@@ -590,10 +565,7 @@ impl SocketManager {
         }
 
         if self.handle.lifecycle.is_running() {
-            tracing::warn!(
-                "Socket '{}' is already running",
-                socket_path.display()
-            );
+            tracing::warn!("Socket '{}' is already running", socket_path.display());
             return Ok(());
         }
 
@@ -605,8 +577,7 @@ impl SocketManager {
         })?;
 
         // Verify we're inside a tokio runtime.
-        tokio::runtime::Handle::try_current()
-            .map_err(|_| SocketError::NoRuntime)?;
+        tokio::runtime::Handle::try_current().map_err(|_| SocketError::NoRuntime)?;
 
         tracing::info!("Starting socket server on '{}'", socket_path.display());
 
@@ -633,12 +604,8 @@ impl SocketManager {
             .transition_to(LifecycleStage::Running)
             .map_err(|e| SocketError::lifecycle(socket_path_for_err, e.to_string()))?;
 
-        let accept_handle = Self::spawn_accept_loop(
-            listener,
-            handler,
-            self.handle.clone(),
-            socket_path.clone(),
-        );
+        let accept_handle =
+            Self::spawn_accept_loop(listener, handler, self.handle.clone(), socket_path.clone());
 
         {
             let mut guard = self.accept_handle.lock().unwrap();
@@ -730,7 +697,9 @@ impl SocketManager {
 
 impl Drop for SocketManager {
     fn drop(&mut self) {
-        self.handle.shutdown_initiated.store(true, Ordering::Release);
+        self.handle
+            .shutdown_initiated
+            .store(true, Ordering::Release);
         self.handle.shutdown_notify.notify_one();
 
         if let Ok(mut guard) = self.accept_handle.lock() {
@@ -825,7 +794,9 @@ mod tests {
         assert!(!manager.is_running());
         assert!(!manager.is_shutdown());
 
-        manager.initialize_socket().expect("initialize should succeed");
+        manager
+            .initialize_socket()
+            .expect("initialize should succeed");
         assert_eq!(manager.lifecycle_stage(), LifecycleStage::Initialized);
 
         manager.start_socket().expect("start should succeed");
@@ -833,8 +804,7 @@ mod tests {
         assert!(manager.is_running());
 
         assert!(socket_path.exists());
-        let metadata = std::fs::metadata(&socket_path)
-            .expect("socket file should exist");
+        let metadata = std::fs::metadata(&socket_path).expect("socket file should exist");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -868,12 +838,13 @@ mod tests {
 
         std::fs::write(&socket_path, b"stale").expect("write fake stale socket");
 
-        let config = SocketConfig::new(socket_path.clone()).with_handler(|_stream| async move {
-            true
-        });
+        let config =
+            SocketConfig::new(socket_path.clone()).with_handler(|_stream| async move { true });
 
         let manager = SocketManager::new(config);
-        manager.initialize_socket().expect("initialize should succeed");
+        manager
+            .initialize_socket()
+            .expect("initialize should succeed");
         assert!(!socket_path.exists());
 
         manager.start_socket().expect("start should succeed");
@@ -931,7 +902,10 @@ mod tests {
         manager.initialize_socket().expect("init");
         let result = manager.start_socket();
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SocketError::LifecycleError { .. }));
+        assert!(matches!(
+            result.unwrap_err(),
+            SocketError::LifecycleError { .. }
+        ));
 
         let _ = std::fs::remove_file(&socket_path);
         let _ = std::fs::remove_dir_all(socket_path.parent().unwrap());
@@ -942,9 +916,8 @@ mod tests {
         let socket_path = test_socket_path("no-init.sock");
         let _ = std::fs::remove_file(&socket_path);
 
-        let config = SocketConfig::new(socket_path.clone()).with_handler(|_stream| async move {
-            true
-        });
+        let config =
+            SocketConfig::new(socket_path.clone()).with_handler(|_stream| async move { true });
         let manager = SocketManager::new(config);
 
         let result = manager.start_socket();
@@ -959,9 +932,8 @@ mod tests {
         let socket_path = test_socket_path("double-shutdown.sock");
         let _ = std::fs::remove_file(&socket_path);
 
-        let config = SocketConfig::new(socket_path.clone()).with_handler(|_stream| async move {
-            true
-        });
+        let config =
+            SocketConfig::new(socket_path.clone()).with_handler(|_stream| async move { true });
         let manager = SocketManager::new(config);
 
         manager.initialize_socket().expect("init");
@@ -1062,9 +1034,8 @@ mod tests {
         let socket_path = test_socket_path("shutdown-block.sock");
         let _ = std::fs::remove_file(&socket_path);
 
-        let config = SocketConfig::new(socket_path.clone()).with_handler(|_stream| async move {
-            true
-        });
+        let config =
+            SocketConfig::new(socket_path.clone()).with_handler(|_stream| async move { true });
         let manager = SocketManager::new(config);
         manager.initialize_socket().expect("init");
         manager.start_socket().expect("start");
@@ -1091,9 +1062,8 @@ mod tests {
 
     #[test]
     fn config_with_handler_sets_handler() {
-        let config = SocketConfig::new("/tmp/test.sock").with_handler(|_stream| async move {
-            true
-        });
+        let config =
+            SocketConfig::new("/tmp/test.sock").with_handler(|_stream| async move { true });
         assert!(config.handler.is_some());
     }
 
@@ -1102,9 +1072,8 @@ mod tests {
         let socket_path = test_socket_path("handle-clone.sock");
         let _ = std::fs::remove_file(&socket_path);
 
-        let config = SocketConfig::new(socket_path.clone()).with_handler(|_stream| async move {
-            true
-        });
+        let config =
+            SocketConfig::new(socket_path.clone()).with_handler(|_stream| async move { true });
         let manager = SocketManager::new(config);
         let h1 = manager.handle();
         let h2 = manager.handle();
@@ -1130,9 +1099,7 @@ mod tests {
         let _ = std::fs::remove_file(&socket_path);
 
         let manager = SocketManager::new(
-            SocketConfig::new(socket_path.clone()).with_handler(|_stream| async move {
-                true
-            }),
+            SocketConfig::new(socket_path.clone()).with_handler(|_stream| async move { true }),
         );
         manager.initialize_socket().expect("init");
         manager.start_socket().expect("start");

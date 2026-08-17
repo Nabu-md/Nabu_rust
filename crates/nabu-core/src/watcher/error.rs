@@ -65,15 +65,20 @@ mod tests {
     #[test]
     fn variant_names_are_stable() {
         assert_eq!(
-            WatcherError::VaultNotFound { path: PathBuf::from("/x") }.variant_name(),
+            WatcherError::VaultNotFound {
+                path: PathBuf::from("/x")
+            }
+            .variant_name(),
             "vault_not_found"
         );
-        assert_eq!(WatcherError::AlreadyStarted.variant_name(), "already_started");
+        assert_eq!(
+            WatcherError::AlreadyStarted.variant_name(),
+            "already_started"
+        );
         assert_eq!(WatcherError::NotRunning.variant_name(), "not_running");
         assert_eq!(WatcherError::NotStarted.variant_name(), "not_started");
         assert_eq!(
-            WatcherError::Io(std::io::Error::new(std::io::ErrorKind::Other, "x"))
-                .variant_name(),
+            WatcherError::Io(std::io::Error::new(std::io::ErrorKind::Other, "x")).variant_name(),
             "io"
         );
     }

@@ -1,21 +1,21 @@
-use crate::diagnostic::{Diagnostic, DiagnosticCategory, DiagnosticSeverity, TextPosition, TextRange};
+use crate::diagnostic::{
+    Diagnostic, DiagnosticCategory, DiagnosticSeverity, TextPosition, TextRange,
+};
 use crate::jobs::cancellation::CancellationToken;
 use crate::jobs::workers::progress::ProgressReporter;
 use crate::models::{CustomPropertyValue, ObjectContent, ObjectType};
 use crate::native::NativeError;
-use crate::processing::processor::{ProcessingContext, ProcessingResult, Processor, ProcessingStats};
+use crate::processing::processor::{
+    ProcessingContext, ProcessingResult, ProcessingStats, Processor,
+};
 use async_trait::async_trait;
 use std::time::Instant;
 
 fn pdf_diag(severity: DiagnosticSeverity, message: String, code: &str) -> Diagnostic {
-    Diagnostic::new(
-        severity,
-        TextRange::empty(TextPosition::new(0, 0)),
-        message,
-    )
-    .with_code(code.to_string())
-    .with_source("pdf_annotation_processor".to_string())
-    .with_category(DiagnosticCategory::Metadata)
+    Diagnostic::new(severity, TextRange::empty(TextPosition::new(0, 0)), message)
+        .with_code(code.to_string())
+        .with_source("pdf_annotation_processor".to_string())
+        .with_category(DiagnosticCategory::Metadata)
 }
 
 /// Processes PDF annotations (highlights, notes, stamps) via the native
@@ -170,12 +170,11 @@ impl Processor for PdfAnnotationProcessor {
         );
 
         progress.set_progress(1.0);
-        ProcessingResult::new(object)
-            .with_stats(
-                ProcessingStats::new()
-                    .with_duration_ms(duration_ms)
-                    .with_metric("pdf_annotations".to_string(), annotations.len().to_string()),
-            )
+        ProcessingResult::new(object).with_stats(
+            ProcessingStats::new()
+                .with_duration_ms(duration_ms)
+                .with_metric("pdf_annotations".to_string(), annotations.len().to_string()),
+        )
     }
 
     fn supports(&self, object_type: &ObjectType) -> bool {
@@ -238,12 +237,17 @@ mod tests {
                 });
             assert!(info.is_some(), "pdf_annotation_info must be stored");
             assert!(
-                info.as_ref().unwrap()["annotations_extracted"].as_bool().unwrap_or(false),
+                info.as_ref().unwrap()["annotations_extracted"]
+                    .as_bool()
+                    .unwrap_or(false),
                 "annotations_extracted must be true"
             );
         } else {
             // Non-macOS: PDFKit unavailable, pdf_annotation_info warning is recorded.
-            assert!(result.modified, "object should be modified to record platform warning");
+            assert!(
+                result.modified,
+                "object should be modified to record platform warning"
+            );
             let info = result
                 .object
                 .custom_properties
@@ -254,7 +258,10 @@ mod tests {
                     }
                     _ => None,
                 });
-            assert!(info.is_some(), "pdf_annotation_info must be stored even on failure");
+            assert!(
+                info.is_some(),
+                "pdf_annotation_info must be stored even on failure"
+            );
             let warning = info.and_then(|v| v["warning"].as_str().map(|s| s.to_string()));
             assert!(warning.is_some(), "warning must be set on non-macOS");
         }

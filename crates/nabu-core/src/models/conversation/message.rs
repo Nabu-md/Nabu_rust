@@ -171,10 +171,7 @@ impl Message {
                 ));
             }
             if turn.message_id != self.id {
-                return Err(ConversationError::message_mismatch(
-                    turn.id,
-                    self.id,
-                ));
+                return Err(ConversationError::message_mismatch(turn.id, self.id));
             }
             if !seen_turn_ids.insert(turn.id) {
                 return Err(ConversationError::ordering_violation(
@@ -257,8 +254,7 @@ mod tests {
 
     #[test]
     fn message_validate_rejects_nil_turn_id() {
-        let msg = Message::new_anonymous()
-            .with_turn(make_text_turn_with_id(Uuid::nil(), "hello"));
+        let msg = Message::new_anonymous().with_turn(make_text_turn_with_id(Uuid::nil(), "hello"));
         assert!(msg.validate().is_err());
     }
 
@@ -283,16 +279,32 @@ mod tests {
     fn message_validate_rejects_duplicate_turn_ids() {
         let turn_id = Uuid::new_v4();
         let msg = Message::new_anonymous()
-            .with_turn(crate::models::conversation::Turn::new(turn_id, Uuid::nil(), "first"))
-            .with_turn(crate::models::conversation::Turn::new(turn_id, Uuid::nil(), "second"));
+            .with_turn(crate::models::conversation::Turn::new(
+                turn_id,
+                Uuid::nil(),
+                "first",
+            ))
+            .with_turn(crate::models::conversation::Turn::new(
+                turn_id,
+                Uuid::nil(),
+                "second",
+            ));
         assert!(msg.validate().is_err());
     }
 
     #[test]
     fn message_validate_accepts_valid_message() {
         let msg = Message::new_anonymous()
-            .with_turn(crate::models::conversation::Turn::new(Uuid::new_v4(), Uuid::nil(), "a"))
-            .with_turn(crate::models::conversation::Turn::new(Uuid::new_v4(), Uuid::nil(), "b"));
+            .with_turn(crate::models::conversation::Turn::new(
+                Uuid::new_v4(),
+                Uuid::nil(),
+                "a",
+            ))
+            .with_turn(crate::models::conversation::Turn::new(
+                Uuid::new_v4(),
+                Uuid::nil(),
+                "b",
+            ));
         // with_turn sets message_id, so this should pass
         assert!(msg.validate().is_ok());
     }

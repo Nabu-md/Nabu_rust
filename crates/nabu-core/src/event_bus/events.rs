@@ -1,3 +1,4 @@
+use crate::acp::types::PermissionOption;
 use crate::diagnostic::events::DiagnosticEvent;
 use crate::models::{CaptureSource, ObjectType};
 use crate::plugin::events::PluginEvent;
@@ -46,7 +47,7 @@ pub enum PipelineEvent {
     /// [`publish_diagnostic_event`](crate::diagnostic::events::publish_diagnostic_event),
     /// which wraps it in this variant.
     Diagnostic(DiagnosticEvent),
-    
+
     /// A synchronization status-change event flowing through the EventBus.
     ///
     /// Every synchronization provider (Syncthing, iCloud, Git, WebDAV, etc.)
@@ -89,6 +90,14 @@ pub enum PipelineEvent {
     /// These events are distinct from per-token [`StreamEvent`] variants and
     /// allow subscribers to track session lifecycle independently.
     Session(StreamSessionEvent),
+    /// A permission request from an ACP agent.
+    ///
+    /// Published by the [`NabuAcpHandler`](crate::agent::handler::NabuAcpHandler)
+    /// when an ACP agent sends a `session/request_permission` RPC. The frontend
+    /// listens for this event, presents the options to the user, and calls
+    /// `acp_permission_respond` with the chosen outcome. The `request_id`
+    /// field is used to match the response to the awaiting handler.
+    AcpPermissionRequested(AcpPermissionRequestEvent),
 }
 
 /// Event kind string constants for EventBus subscriptions
@@ -229,6 +238,14 @@ pub mod kinds {
     pub const SESSION_CANCELLED: &str = "session.cancelled";
     /// A streaming session was cleaned up and removed.
     pub const SESSION_CLEANED_UP: &str = "session.cleaned_up";
+
+    // --- ACP permission request event kinds ---
+    // Published by the NabuAcpHandler when an ACP agent requests permission
+    // for a tool call. The frontend listens for this, prompts the user, and
+    // calls `acp_permission_respond` with the chosen option.
+
+    /// A permission request from an ACP agent awaiting user approval.
+    pub const ACP_PERMISSION_REQUESTED: &str = "acp.permission.requested";
 }
 
 impl PipelineEvent {
@@ -253,6 +270,7 @@ impl PipelineEvent {
             PipelineEvent::Conversation(e) => e.kind(),
             PipelineEvent::Stream(e) => e.kind(),
             PipelineEvent::Session(e) => e.kind(),
+            PipelineEvent::AcpPermissionRequested(e) => e.kind(),
         }
     }
 
@@ -283,6 +301,7 @@ impl PipelineEvent {
             PipelineEvent::Conversation(e) => Some(e.timestamp()),
             PipelineEvent::Stream(e) => Some(e.timestamp()),
             PipelineEvent::Session(e) => Some(e.timestamp()),
+            PipelineEvent::AcpPermissionRequested(e) => Some(e.timestamp),
         }
     }
 }
@@ -578,7 +597,12 @@ pub struct ProcessExitedEvent {
 }
 
 impl ProcessExitedEvent {
-    pub fn new(process_id: ProcessId, name: &str, exit_code: Option<i32>, restart_count: u32) -> Self {
+    pub fn new(
+        process_id: ProcessId,
+        name: &str,
+        exit_code: Option<i32>,
+        restart_count: u32,
+    ) -> Self {
         Self {
             process_id,
             name: name.to_string(),
@@ -933,7 +957,12 @@ pub struct AgentStartedEvent {
 }
 
 impl AgentStartedEvent {
-    pub fn new(process_id: ProcessId, agent_name: &str, agent_kind: &str, pid: Option<u32>) -> Self {
+    pub fn new(
+        process_id: ProcessId,
+        agent_name: &str,
+        agent_kind: &str,
+        pid: Option<u32>,
+    ) -> Self {
         Self {
             process_id,
             agent_name: agent_name.to_string(),
@@ -984,12 +1013,7 @@ pub struct AgentRestartedEvent {
 }
 
 impl AgentRestartedEvent {
-    pub fn new(
-        process_id: ProcessId,
-        agent_name: &str,
-        restart_count: u32,
-        reason: &str,
-    ) -> Self {
+    pub fn new(process_id: ProcessId, agent_name: &str, restart_count: u32, reason: &str) -> Self {
         Self {
             process_id,
             agent_name: agent_name.to_string(),
@@ -1311,11 +1335,7 @@ pub struct StreamCompletedEvent {
 
 impl StreamCompletedEvent {
     /// Create a new `StreamCompletedEvent` with the current timestamp.
-    pub fn new(
-        stream_id: StreamId,
-        full_content: impl Into<String>,
-        total_tokens: u64,
-    ) -> Self {
+    pub fn new(stream_id: StreamId, full_content: impl Into<String>, total_tokens: u64) -> Self {
         Self {
             stream_id,
             full_content: full_content.into(),
@@ -1470,6 +1490,40 @@ impl StreamSessionEvent {
             | Self::SessionCancelled { stream_id, .. }
             | Self::SessionCleanedUp { stream_id, .. } => *stream_id,
         }
+    }
+}
+
+/// Published when an ACP agent requests user permission for a tool call.
+///
+/// The [`NabuAcpHandler`](crate::agent::handler::NabuAcpHandler) emits this
+/// event through the `EventBus` when it receives a `session/request_permission`
+/// RPC from the agent. The frontend listens for it, shows a prompt, and replies
+/// via the `acp_permission_respond` Tauri command. The handler awaits the
+/// response on a oneshot channel keyed by `request_id`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpPermissionRequestEvent {
+    /// Unique identifier for this permission request — the frontend echoes it
+    /// back in `acp_permission_respond` so the handler can match the response
+    /// to the awaiting caller.
+    pub request_id: Uuid,
+    /// The Nabu thread UUID this request belongs to.
+    pub thread_id: Uuid,
+    /// The ACP session ID assigned by the agent.
+    pub session_id: String,
+    /// The tool-call ID from the agent's request.
+    pub tool_call_id: String,
+    /// Human-readable title of the tool call being executed.
+    pub tool_call_title: Option<String>,
+    /// The permission options the user can choose from.
+    pub options: Vec<PermissionOption>,
+    /// When the event was produced.
+    pub timestamp: DateTime<Utc>,
+}
+
+impl AcpPermissionRequestEvent {
+    /// Returns the event kind string used for EventBus subscription.
+    pub fn kind(&self) -> &'static str {
+        kinds::ACP_PERMISSION_REQUESTED
     }
 }
 

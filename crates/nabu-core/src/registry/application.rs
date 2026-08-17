@@ -99,9 +99,7 @@ use crate::jobs::WorkerPool;
 use crate::pipeline_migration::PipelineExecutor;
 use crate::processing::ProcessingPipeline;
 use crate::registry::context::ApplicationContext;
-use crate::registry::lifecycle::{
-    Lifecycle, LifecycleError, LifecycleManager, LifecycleStage,
-};
+use crate::registry::lifecycle::{Lifecycle, LifecycleError, LifecycleManager, LifecycleStage};
 use crate::registry::ServiceRegistry;
 
 // ---------------------------------------------------------------------------
@@ -313,7 +311,11 @@ impl Application {
     /// no-ops in phase 2.
     pub fn shutdown(&self) -> Result<(), LifecycleError> {
         // --- 1. Shut down all lifecycle-managed services (generic mechanism) ---
-        let registry = self.context.registry.write().expect("registry lock not poisoned");
+        let registry = self
+            .context
+            .registry
+            .write()
+            .expect("registry lock not poisoned");
         let shutdown_errors = registry.shutdown_all_lifecycle_services();
         if !shutdown_errors.is_empty() {
             for err in &shutdown_errors {

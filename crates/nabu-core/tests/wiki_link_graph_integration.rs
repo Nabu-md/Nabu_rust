@@ -12,9 +12,8 @@
 //! These tests exercise the public API boundary only — no private internals.
 
 use nabu_core::graph::{
-    build_graph_from_objects, build_graph_from_vault, VaultGraph, ResolutionIndex,
-    parse_wiki_links, parse_block_references, content_as_str,
-    object_to_node, VaultSidecar,
+    build_graph_from_objects, build_graph_from_vault, content_as_str, object_to_node,
+    parse_block_references, parse_wiki_links, ResolutionIndex, VaultGraph, VaultSidecar,
 };
 use nabu_core::models::{KnowledgeObject, ObjectContent, ObjectType};
 use tempfile::tempdir;
@@ -53,7 +52,8 @@ fn build_graph_bidirectional_wiki_links() {
 
     assert_eq!(nodes.len(), 2, "two nodes expected");
     assert_eq!(
-        edges.len(), 2,
+        edges.len(),
+        2,
         "expected two content-derived edges (A→B and B→A), got {}",
         edges.len()
     );
@@ -69,9 +69,13 @@ fn build_graph_bidirectional_wiki_links() {
     }
 
     // Verify the specific A→B edge.
-    let a_to_b = edges.iter().find(|e| e.source == obj_a.id && e.target == obj_b.id);
+    let a_to_b = edges
+        .iter()
+        .find(|e| e.source == obj_a.id && e.target == obj_b.id);
     assert!(a_to_b.is_some(), "expected edge A→B from wiki-link");
-    let b_to_a = edges.iter().find(|e| e.source == obj_b.id && e.target == obj_a.id);
+    let b_to_a = edges
+        .iter()
+        .find(|e| e.source == obj_b.id && e.target == obj_a.id);
     assert!(b_to_a.is_some(), "expected edge B→A from wiki-link");
 }
 
@@ -79,7 +83,11 @@ fn build_graph_bidirectional_wiki_links() {
 /// produces zero edges.
 #[test]
 fn build_graph_unresolved_wiki_link_produces_no_edge() {
-    let obj = make_note("Lonely Note", "Reference [[Ghost Note]] here.", Some("Lonely.md"));
+    let obj = make_note(
+        "Lonely Note",
+        "Reference [[Ghost Note]] here.",
+        Some("Lonely.md"),
+    );
 
     let (nodes, edges) = build_graph_from_objects(&[obj]);
 
@@ -95,11 +103,17 @@ fn build_graph_unresolved_wiki_link_produces_no_edge() {
 /// create a self-edge — `extract_content_edges` explicitly skips `target_id == object.id`.
 #[test]
 fn build_graph_self_reference_excluded() {
-    let obj = make_note("Self Ref", "See [[Self Ref]] for more.", Some("Self Ref.md"));
+    let obj = make_note(
+        "Self Ref",
+        "See [[Self Ref]] for more.",
+        Some("Self Ref.md"),
+    );
 
     let (_, edges) = build_graph_from_objects(&[obj.clone()]);
 
-    let self_edges = edges.iter().filter(|e| e.source == obj.id && e.target == obj.id);
+    let self_edges = edges
+        .iter()
+        .filter(|e| e.source == obj.id && e.target == obj.id);
     assert_eq!(
         self_edges.count(),
         0,
@@ -116,7 +130,11 @@ fn build_graph_block_reference_edges() {
         "Transclude ((Target Block)) here.",
         Some("Block Reader.md"),
     );
-    let obj_b = make_note("Target Block", "The content to embed.", Some("Target Block.md"));
+    let obj_b = make_note(
+        "Target Block",
+        "The content to embed.",
+        Some("Target Block.md"),
+    );
 
     let (_, edges) = build_graph_from_objects(&[obj_a.clone(), obj_b.clone()]);
 
@@ -125,7 +143,10 @@ fn build_graph_block_reference_edges() {
         .filter(|e| e.relationship == "block_reference")
         .collect();
     assert_eq!(block_edges.len(), 1, "expected one block_reference edge");
-    assert!(block_edges[0].content_derived, "block_reference edge must be content-derived");
+    assert!(
+        block_edges[0].content_derived,
+        "block_reference edge must be content-derived"
+    );
     assert_eq!(block_edges[0].source, obj_a.id);
     assert_eq!(block_edges[0].target, obj_b.id);
 }
@@ -133,13 +154,20 @@ fn build_graph_block_reference_edges() {
 /// Multiple wiki-links in a single note resolve to multiple edges.
 #[test]
 fn build_graph_multiple_wiki_links() {
-    let obj_a = make_note("Hub", "Links: [[Note B]] and [[Note C]] and [[Note B]] again.", Some("Hub.md"));
+    let obj_a = make_note(
+        "Hub",
+        "Links: [[Note B]] and [[Note C]] and [[Note B]] again.",
+        Some("Hub.md"),
+    );
     let obj_b = make_note("Note B", "B content.", Some("Note B.md"));
     let obj_c = make_note("Note C", "C content.", Some("Note C.md"));
 
     let (_, edges) = build_graph_from_objects(&[obj_a.clone(), obj_b.clone(), obj_c.clone()]);
 
-    let refs: Vec<_> = edges.iter().filter(|e| e.relationship == "references").collect();
+    let refs: Vec<_> = edges
+        .iter()
+        .filter(|e| e.relationship == "references")
+        .collect();
     assert_eq!(
         refs.len(),
         3,
@@ -182,14 +210,28 @@ fn build_graph_resolution_by_title_and_path_stem() {
 fn vaultgraph_rebuild_derives_content_edges() {
     let graph = VaultGraph::new();
 
-    let obj_a = make_note("Graph Note A", "See [[Graph Note B]] for context.", Some("Graph Note A.md"));
-    let obj_b = make_note("Graph Note B", "Referenced by [[Graph Note A]].", Some("Graph Note B.md"));
+    let obj_a = make_note(
+        "Graph Note A",
+        "See [[Graph Note B]] for context.",
+        Some("Graph Note A.md"),
+    );
+    let obj_b = make_note(
+        "Graph Note B",
+        "Referenced by [[Graph Note A]].",
+        Some("Graph Note B.md"),
+    );
 
     let objs = vec![obj_a.clone(), obj_b.clone()];
-    graph.rebuild_from_objects(&objs).expect("rebuild must succeed");
+    graph
+        .rebuild_from_objects(&objs)
+        .expect("rebuild must succeed");
 
     assert_eq!(graph.node_count(), 2, "graph should have 2 nodes");
-    assert_eq!(graph.edge_count(), 2, "graph should have 2 edges (bidirectional wiki-links)");
+    assert_eq!(
+        graph.edge_count(),
+        2,
+        "graph should have 2 edges (bidirectional wiki-links)"
+    );
 
     // Verify directional queries.
     let linked = graph.linked_notes(obj_a.id);
@@ -206,7 +248,11 @@ fn vaultgraph_rebuild_derives_content_edges() {
     // Verify content-derived flag on edges.
     let edges = graph.edges();
     let content_edges: Vec<_> = edges.iter().filter(|e| e.content_derived).collect();
-    assert_eq!(content_edges.len(), 2, "all edges should be content-derived");
+    assert_eq!(
+        content_edges.len(),
+        2,
+        "all edges should be content-derived"
+    );
 }
 
 /// `rebuild_from_objects` clears the graph first — calling it twice with
@@ -252,8 +298,7 @@ fn vaultgraph_rebuild_persists_and_reloads() {
 
     // Reopen — should load from `.nabu/graph/graph.json`.
     {
-        let graph =
-            VaultGraph::with_persistence(None, vault).expect("graph reopen");
+        let graph = VaultGraph::with_persistence(None, vault).expect("graph reopen");
         assert!(
             graph.loaded_from_disk(),
             "graph should have loaded from disk on reopen"

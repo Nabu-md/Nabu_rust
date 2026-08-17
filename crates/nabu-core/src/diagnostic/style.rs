@@ -303,7 +303,13 @@ impl Default for DiagnosticStyleMap {
 impl DiagnosticStyleMap {
     /// Build a map by applying `f` to every canonical severity.
     pub fn from_severity_fn(f: impl Fn(DiagnosticSeverity) -> DiagnosticStyle) -> Self {
-        Self(DiagnosticSeverity::ALL.iter().copied().map(|s| (s, f(s))).collect())
+        Self(
+            DiagnosticSeverity::ALL
+                .iter()
+                .copied()
+                .map(|s| (s, f(s)))
+                .collect(),
+        )
     }
 
     /// Look up the style for a severity, or `None` if explicitly removed.

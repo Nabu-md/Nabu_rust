@@ -178,9 +178,7 @@ fn is_false(v: &bool) -> bool {
 /// let event = DiagnosticEvent::BatchPublished(batch);
 /// publish_diagnostic_event(&event_bus, &event);
 /// ```
-pub trait DiagnosticEventContract:
-    Send + Sync + Clone + Serialize + std::fmt::Debug
-{
+pub trait DiagnosticEventContract: Send + Sync + Clone + Serialize + std::fmt::Debug {
     /// Returns the event kind string used for EventBus subscription.
     fn kind(&self) -> &'static str;
 
@@ -620,11 +618,7 @@ pub struct BatchRemovedEvent {
 
 impl BatchRemovedEvent {
     /// Create a new `BatchRemovedEvent` with the current timestamp.
-    pub fn new(
-        origin: impl Into<String>,
-        resource_id: impl Into<String>,
-        batch_id: Uuid,
-    ) -> Self {
+    pub fn new(origin: impl Into<String>, resource_id: impl Into<String>, batch_id: Uuid) -> Self {
         Self {
             origin: origin.into(),
             resource_id: resource_id.into(),
@@ -826,7 +820,10 @@ mod tests {
 
         assert!(batch.is_incremental);
         assert!(batch.replaces.is_some());
-        assert_eq!(batch.timestamp, Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap());
+        assert_eq!(
+            batch.timestamp,
+            Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap()
+        );
     }
 
     #[test]
@@ -834,7 +831,11 @@ mod tests {
         let batch = DiagnosticBatch::new(
             "test",
             "vault:doc.md",
-            vec![sample_diagnostic(), sample_diagnostic(), sample_diagnostic()],
+            vec![
+                sample_diagnostic(),
+                sample_diagnostic(),
+                sample_diagnostic(),
+            ],
         );
         assert_eq!(batch.diagnostic_count(), 3);
     }
@@ -854,19 +855,28 @@ mod tests {
     #[test]
     fn batch_validate_rejects_empty_origin() {
         let batch = DiagnosticBatch::new("", "vault:doc.md", vec![sample_diagnostic()]);
-        assert!(matches!(batch.validate(), Err(DiagnosticEventError::EmptyOrigin)));
+        assert!(matches!(
+            batch.validate(),
+            Err(DiagnosticEventError::EmptyOrigin)
+        ));
     }
 
     #[test]
     fn batch_validate_rejects_empty_resource_id() {
         let batch = DiagnosticBatch::new("producer", "", vec![sample_diagnostic()]);
-        assert!(matches!(batch.validate(), Err(DiagnosticEventError::EmptyResourceId)));
+        assert!(matches!(
+            batch.validate(),
+            Err(DiagnosticEventError::EmptyResourceId)
+        ));
     }
 
     #[test]
     fn batch_validate_rejects_empty_diagnostics() {
         let batch = DiagnosticBatch::new("producer", "vault:doc.md", vec![]);
-        assert!(matches!(batch.validate(), Err(DiagnosticEventError::EmptyBatch)));
+        assert!(matches!(
+            batch.validate(),
+            Err(DiagnosticEventError::EmptyBatch)
+        ));
     }
 
     #[test]
@@ -879,17 +889,16 @@ mod tests {
         );
         let batch = DiagnosticBatch::new("producer", "vault:doc.md", vec![bad_diag]);
         let err = batch.validate().unwrap_err();
-        assert!(matches!(err, DiagnosticEventError::InvalidDiagnostic { .. }));
+        assert!(matches!(
+            err,
+            DiagnosticEventError::InvalidDiagnostic { .. }
+        ));
     }
 
     #[test]
     fn batch_try_new_accepts_valid() {
-        let batch = DiagnosticBatch::try_new(
-            "producer",
-            "vault:doc.md",
-            vec![sample_diagnostic()],
-        )
-        .unwrap();
+        let batch = DiagnosticBatch::try_new("producer", "vault:doc.md", vec![sample_diagnostic()])
+            .unwrap();
         assert_eq!(batch.origin, "producer");
         assert_eq!(batch.diagnostics.len(), 1);
     }
@@ -912,10 +921,7 @@ mod tests {
         let err = batch.validate().unwrap_err();
         assert!(matches!(
             err,
-            DiagnosticEventError::InvalidDiagnostic {
-                index: 1,
-                ..
-            }
+            DiagnosticEventError::InvalidDiagnostic { index: 1, .. }
         ));
     }
 
@@ -932,13 +938,19 @@ mod tests {
     #[test]
     fn cleared_event_rejects_empty_origin() {
         let event = BatchClearedEvent::new("", "vault:doc.md");
-        assert!(matches!(event.validate(), Err(DiagnosticEventError::EmptyOrigin)));
+        assert!(matches!(
+            event.validate(),
+            Err(DiagnosticEventError::EmptyOrigin)
+        ));
     }
 
     #[test]
     fn cleared_event_rejects_empty_resource_id() {
         let event = BatchClearedEvent::new("producer", "");
-        assert!(matches!(event.validate(), Err(DiagnosticEventError::EmptyResourceId)));
+        assert!(matches!(
+            event.validate(),
+            Err(DiagnosticEventError::EmptyResourceId)
+        ));
     }
 
     // --- BatchRemovedEvent ---
@@ -956,13 +968,19 @@ mod tests {
     #[test]
     fn removed_event_rejects_empty_origin() {
         let event = BatchRemovedEvent::new("", "vault:doc.md", Uuid::new_v4());
-        assert!(matches!(event.validate(), Err(DiagnosticEventError::EmptyOrigin)));
+        assert!(matches!(
+            event.validate(),
+            Err(DiagnosticEventError::EmptyOrigin)
+        ));
     }
 
     #[test]
     fn removed_event_rejects_empty_resource_id() {
         let event = BatchRemovedEvent::new("producer", "", Uuid::new_v4());
-        assert!(matches!(event.validate(), Err(DiagnosticEventError::EmptyResourceId)));
+        assert!(matches!(
+            event.validate(),
+            Err(DiagnosticEventError::EmptyResourceId)
+        ));
     }
 
     // --- DiagnosticEvent ---
@@ -973,14 +991,11 @@ mod tests {
         let event = DiagnosticEvent::BatchPublished(batch);
         assert_eq!(event.kind(), kinds::DIAGNOSTIC_BATCH_PUBLISHED);
 
-        let cleared = DiagnosticEvent::BatchCleared(
-            BatchClearedEvent::new("p", "r"),
-        );
+        let cleared = DiagnosticEvent::BatchCleared(BatchClearedEvent::new("p", "r"));
         assert_eq!(cleared.kind(), kinds::DIAGNOSTIC_BATCH_CLEARED);
 
-        let removed = DiagnosticEvent::BatchRemoved(
-            BatchRemovedEvent::new("p", "r", Uuid::new_v4()),
-        );
+        let removed =
+            DiagnosticEvent::BatchRemoved(BatchRemovedEvent::new("p", "r", Uuid::new_v4()));
         assert_eq!(removed.kind(), kinds::DIAGNOSTIC_BATCH_REMOVED);
     }
 
@@ -999,14 +1014,10 @@ mod tests {
         let published = DiagnosticEvent::BatchPublished(batch);
         assert_eq!(published.batch_id(), Some(batch_id));
 
-        let removed = DiagnosticEvent::BatchRemoved(
-            BatchRemovedEvent::new("p", "r", batch_id),
-        );
+        let removed = DiagnosticEvent::BatchRemoved(BatchRemovedEvent::new("p", "r", batch_id));
         assert_eq!(removed.batch_id(), Some(batch_id));
 
-        let cleared = DiagnosticEvent::BatchCleared(
-            BatchClearedEvent::new("p", "r"),
-        );
+        let cleared = DiagnosticEvent::BatchCleared(BatchClearedEvent::new("p", "r"));
         assert_eq!(cleared.batch_id(), None);
     }
 
@@ -1032,7 +1043,10 @@ mod tests {
     fn event_validate_delegates_to_inner() {
         let batch = DiagnosticBatch::new("", "vault:doc.md", vec![sample_diagnostic()]);
         let event = DiagnosticEvent::BatchPublished(batch);
-        assert!(matches!(event.validate(), Err(DiagnosticEventError::EmptyOrigin)));
+        assert!(matches!(
+            event.validate(),
+            Err(DiagnosticEventError::EmptyOrigin)
+        ));
     }
 
     // --- DiagnosticEventContract trait ---
@@ -1123,7 +1137,8 @@ mod tests {
             event.batch_id().unwrap(),
             event.timestamp()
         );
-        let back: DiagnosticEvent = serde_json::from_str(&with_extra).expect("deserialize with extra field");
+        let back: DiagnosticEvent =
+            serde_json::from_str(&with_extra).expect("deserialize with extra field");
         assert!(back.validate().is_err()); // empty diagnostics
     }
 
@@ -1165,9 +1180,8 @@ mod tests {
         let received = Arc::new(std::sync::Mutex::new(0usize));
         let received_clone = received.clone();
 
-        let event = DiagnosticEvent::BatchCleared(
-            BatchClearedEvent::new("spell-checker", "vault:doc.md"),
-        );
+        let event =
+            DiagnosticEvent::BatchCleared(BatchClearedEvent::new("spell-checker", "vault:doc.md"));
         bus.subscribe(event.kind(), move |pe: &PipelineEvent| {
             if let PipelineEvent::Diagnostic(e) = pe {
                 let _ = e;
@@ -1186,9 +1200,11 @@ mod tests {
         let received = Arc::new(std::sync::Mutex::new(0usize));
         let received_clone = received.clone();
 
-        let event = DiagnosticEvent::BatchRemoved(
-            BatchRemovedEvent::new("ai", "vault:doc.md", Uuid::new_v4()),
-        );
+        let event = DiagnosticEvent::BatchRemoved(BatchRemovedEvent::new(
+            "ai",
+            "vault:doc.md",
+            Uuid::new_v4(),
+        ));
         bus.subscribe(event.kind(), move |pe: &PipelineEvent| {
             if let PipelineEvent::Diagnostic(_) = pe {
                 *received_clone.lock().unwrap() += 1;
@@ -1208,12 +1224,18 @@ mod tests {
         let cleared_clone = cleared_count.clone();
         let published_clone = published_count.clone();
 
-        bus.subscribe(kinds::DIAGNOSTIC_BATCH_CLEARED, move |_pe: &PipelineEvent| {
-            *cleared_clone.lock().unwrap() += 1;
-        });
-        bus.subscribe(kinds::DIAGNOSTIC_BATCH_PUBLISHED, move |_pe: &PipelineEvent| {
-            *published_clone.lock().unwrap() += 1;
-        });
+        bus.subscribe(
+            kinds::DIAGNOSTIC_BATCH_CLEARED,
+            move |_pe: &PipelineEvent| {
+                *cleared_clone.lock().unwrap() += 1;
+            },
+        );
+        bus.subscribe(
+            kinds::DIAGNOSTIC_BATCH_PUBLISHED,
+            move |_pe: &PipelineEvent| {
+                *published_clone.lock().unwrap() += 1;
+            },
+        );
 
         // Publish a BatchPublished event — only the published subscriber
         // should fire.
@@ -1251,9 +1273,15 @@ mod tests {
         assert!(!DiagnosticEventError::EmptyOrigin.to_string().is_empty());
         assert!(!DiagnosticEventError::EmptyResourceId.to_string().is_empty());
         assert!(!DiagnosticEventError::EmptyBatch.to_string().is_empty());
-        assert!(DiagnosticEventError::invalid_diagnostic(2, "bad range").to_string().contains("index 2"));
-        assert!(DiagnosticEventError::SerializationError("fail".into()).to_string().contains("fail"));
-        assert!(DiagnosticEventError::UnknownEventKind("bad".into()).to_string().contains("bad"));
+        assert!(DiagnosticEventError::invalid_diagnostic(2, "bad range")
+            .to_string()
+            .contains("index 2"));
+        assert!(DiagnosticEventError::SerializationError("fail".into())
+            .to_string()
+            .contains("fail"));
+        assert!(DiagnosticEventError::UnknownEventKind("bad".into())
+            .to_string()
+            .contains("bad"));
     }
 
     #[test]

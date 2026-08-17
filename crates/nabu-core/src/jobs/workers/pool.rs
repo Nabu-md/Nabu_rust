@@ -3,12 +3,8 @@ use crate::jobs::workers::backpressure::BackpressureController;
 use crate::jobs::workers::executor::ExecutorRegistry;
 use crate::jobs::workers::shutdown::ShutdownCoordinator;
 use crate::jobs::workers::worker::Worker;
-use crate::registry::metrics::{
-    CounterMetric, GaugeMetric, MetricsAggregator, ServiceMetrics,
-};
-use crate::registry::lifecycle::{
-    Lifecycle, LifecycleManager, LifecycleStage,
-};
+use crate::registry::lifecycle::{Lifecycle, LifecycleManager, LifecycleStage};
+use crate::registry::metrics::{CounterMetric, GaugeMetric, MetricsAggregator, ServiceMetrics};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -141,9 +137,7 @@ impl WorkerPool {
 
         // Cannot restart a shut-down pool
         if self.lifecycle.is_shutdown() {
-            return Err(
-                "Worker pool has been shut down and cannot be restarted".into(),
-            );
+            return Err("Worker pool has been shut down and cannot be restarted".into());
         }
 
         // Verify runtime context is available before mutating state.
@@ -165,8 +159,7 @@ impl WorkerPool {
                 operation = "start",
                 "Initializing worker pool"
             );
-            self.lifecycle
-                .transition_to(LifecycleStage::Initialized)?;
+            self.lifecycle.transition_to(LifecycleStage::Initialized)?;
         }
         self.lifecycle.transition_to(LifecycleStage::Running)?;
 
@@ -288,8 +281,7 @@ impl WorkerPool {
         }
 
         // --- Lifecycle state transition ---
-        self.lifecycle
-            .transition_to(LifecycleStage::Shutdown)?;
+        self.lifecycle.transition_to(LifecycleStage::Shutdown)?;
 
         tracing::info!(
             subsystem = "worker",
@@ -363,8 +355,7 @@ impl Lifecycle for WorkerPool {
             operation = "initialize",
             "Initializing worker pool"
         );
-        self.lifecycle
-            .transition_to(LifecycleStage::Initialized)?;
+        self.lifecycle.transition_to(LifecycleStage::Initialized)?;
         Ok(())
     }
 

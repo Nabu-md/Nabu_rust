@@ -443,18 +443,10 @@ impl Queue for DurableJobQueue {
 impl MetricsAggregator for DurableJobQueue {
     fn metrics(&self) -> ServiceMetrics {
         let total = self.count().unwrap_or(0) as i64;
-        let queued = self
-            .count_by_status(JobStatus::Queued)
-            .unwrap_or(0) as i64;
-        let running = self
-            .count_by_status(JobStatus::Running)
-            .unwrap_or(0) as i64;
-        let completed = self
-            .count_by_status(JobStatus::Completed)
-            .unwrap_or(0) as i64;
-        let failed = self
-            .count_by_status(JobStatus::Failed)
-            .unwrap_or(0) as i64;
+        let queued = self.count_by_status(JobStatus::Queued).unwrap_or(0) as i64;
+        let running = self.count_by_status(JobStatus::Running).unwrap_or(0) as i64;
+        let completed = self.count_by_status(JobStatus::Completed).unwrap_or(0) as i64;
+        let failed = self.count_by_status(JobStatus::Failed).unwrap_or(0) as i64;
 
         ServiceMetrics {
             service: "job_queue".to_string(),

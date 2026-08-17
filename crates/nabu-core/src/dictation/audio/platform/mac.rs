@@ -13,7 +13,10 @@
 
 use super::super::{CapturedAudio, DictationError, Microphone};
 use objc2::runtime::{AnyClass, NSObject};
-use objc2::{msg_send, rc::{Allocated, Retained}};
+use objc2::{
+    msg_send,
+    rc::{Allocated, Retained},
+};
 use std::ffi::CStr;
 use std::ffi::CString;
 use std::path::PathBuf;
@@ -93,11 +96,8 @@ impl PlatformMicrophone {
                 DictationError::CaptureInitFailed("system clock is before the UNIX epoch".into())
             })?
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "nabu-dictation-{}-{}.wav",
-            std::process::id(),
-            now
-        ));
+        let path =
+            std::env::temp_dir().join(format!("nabu-dictation-{}-{}.wav", std::process::id(), now));
         Ok(Self {
             output_path: path,
             control_tx: None,
@@ -282,7 +282,9 @@ impl Microphone for PlatformMicrophone {
         let tx = self.control_tx.take().ok_or(DictationError::NotActive)?;
         let handle = self.handle.take().ok_or(DictationError::NotActive)?;
         let _ = tx.send(Control::Stop);
-        let end = handle.join().map_err(|_| DictationError::CaptureInterrupted)?;
+        let end = handle
+            .join()
+            .map_err(|_| DictationError::CaptureInterrupted)?;
         if let Some(e) = end.error {
             return Err(DictationError::CaptureInitFailed(e));
         }

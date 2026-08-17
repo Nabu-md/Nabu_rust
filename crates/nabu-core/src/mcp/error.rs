@@ -90,7 +90,10 @@ impl McpError {
     }
 
     pub fn not_initialized() -> Self {
-        Self::new(McpErrorKind::NotInitialized, "MCP server must be initialized first")
+        Self::new(
+            McpErrorKind::NotInitialized,
+            "MCP server must be initialized first",
+        )
     }
 
     pub fn invalid_params(message: impl Into<String>) -> Self {

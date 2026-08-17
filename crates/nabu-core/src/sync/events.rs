@@ -400,10 +400,7 @@ impl SyncStatusChanged {
 /// ```
 ///
 /// [`EventBus`]: crate::event_bus::EventBus
-pub fn publish_sync_status_changed(
-    event_bus: &EventBus<PipelineEvent>,
-    event: &SyncStatusChanged,
-) {
+pub fn publish_sync_status_changed(event_bus: &EventBus<PipelineEvent>, event: &SyncStatusChanged) {
     if let Err(e) = event.validate() {
         tracing::warn!(
             error = %e,
@@ -482,21 +479,25 @@ impl SyncSubscriber {
     ///
     /// Returns `Err(SyncError)` if subscription fails (e.g. the EventBus is
     /// in an inconsistent state — this should never happen in practice).
-    pub fn register(&self, bus: &EventBus<PipelineEvent>) -> SyncResult<crate::event_bus::Subscription> {
+    pub fn register(
+        &self,
+        bus: &EventBus<PipelineEvent>,
+    ) -> SyncResult<crate::event_bus::Subscription> {
         let callback = self.callback.clone();
-        let subscription = bus.subscribe(kinds::SYNC_STATUS_CHANGED, move |event: &PipelineEvent| {
-            if let PipelineEvent::Sync(sync_event) = event {
-                // Validate the event payload before forwarding.
-                if sync_event.validate().is_ok() {
-                    callback(sync_event);
-                } else {
-                    tracing::warn!(
-                        event_kind = kinds::SYNC_STATUS_CHANGED,
-                        "Dropping invalid SyncStatusChanged event in subscriber"
-                    );
+        let subscription =
+            bus.subscribe(kinds::SYNC_STATUS_CHANGED, move |event: &PipelineEvent| {
+                if let PipelineEvent::Sync(sync_event) = event {
+                    // Validate the event payload before forwarding.
+                    if sync_event.validate().is_ok() {
+                        callback(sync_event);
+                    } else {
+                        tracing::warn!(
+                            event_kind = kinds::SYNC_STATUS_CHANGED,
+                            "Dropping invalid SyncStatusChanged event in subscriber"
+                        );
+                    }
                 }
-            }
-        });
+            });
 
         Ok(subscription)
     }
@@ -584,8 +585,7 @@ mod tests {
 
     #[test]
     fn sync_model_event_validate_rejects_empty_folder_id() {
-        let event = SyncStatusChanged::default()
-            .with_previous(SyncStatus::Idle);
+        let event = SyncStatusChanged::default().with_previous(SyncStatus::Idle);
         assert!(event.validate().is_err());
     }
 
@@ -610,16 +610,15 @@ mod tests {
     #[test]
     fn sync_model_event_validate_invalid_progress() {
         let bad_progress = SyncProgress::new("test").with_percentage(150.0);
-        let event = SyncStatusChanged::new("f1", "s", SyncStatus::Syncing)
-            .with_progress(bad_progress);
+        let event =
+            SyncStatusChanged::new("f1", "s", SyncStatus::Syncing).with_progress(bad_progress);
         assert!(event.validate().is_err());
     }
 
     #[test]
     fn sync_model_event_validate_ok_with_valid_progress() {
         let progress = SyncProgress::new("uploading").with_percentage(50.0);
-        let event = SyncStatusChanged::new("f1", "s", SyncStatus::Syncing)
-            .with_progress(progress);
+        let event = SyncStatusChanged::new("f1", "s", SyncStatus::Syncing).with_progress(progress);
         assert!(event.validate().is_ok());
     }
 
@@ -670,8 +669,7 @@ mod tests {
     #[test]
     fn sync_model_event_timestamp_accessor() {
         let ts = Utc::now();
-        let event = SyncStatusChanged::new("f1", "s", SyncStatus::Idle)
-            .with_timestamp(ts);
+        let event = SyncStatusChanged::new("f1", "s", SyncStatus::Idle).with_timestamp(ts);
         assert_eq!(event.timestamp(), ts);
     }
 

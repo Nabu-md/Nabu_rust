@@ -104,7 +104,10 @@ impl ResourceProvider {
     }
 
     /// Read a resource by URI.
-    pub fn read_resource(&self, params: &ReadResourceParams) -> Result<ReadResourceResult, McpError> {
+    pub fn read_resource(
+        &self,
+        params: &ReadResourceParams,
+    ) -> Result<ReadResourceResult, McpError> {
         let uri = &params.uri;
 
         if uri == "notes://all" {
@@ -113,8 +116,9 @@ impl ResourceProvider {
             for obj in &objects {
                 notes.push(note_summary(obj));
             }
-            let text = serde_json::to_string_pretty(&json!({ "count": notes.len(), "notes": notes }))
-                .unwrap_or_else(|_| "{}".to_string());
+            let text =
+                serde_json::to_string_pretty(&json!({ "count": notes.len(), "notes": notes }))
+                    .unwrap_or_else(|_| "{}".to_string());
             return Ok(ReadResourceResult {
                 contents: vec![ResourceContents {
                     uri: uri.clone(),
@@ -196,7 +200,7 @@ fn content_as_text(content: &ObjectContent) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{KnowledgeObject, ObjectMetadata, ObjectType, ObjectContent};
+    use crate::models::{KnowledgeObject, ObjectContent, ObjectMetadata, ObjectType};
     use tempfile::tempdir;
 
     fn make_storage() -> (Arc<StorageManager>, tempfile::TempDir) {
@@ -206,12 +210,15 @@ mod tests {
     }
 
     fn make_note(path: &str, content: &str) -> KnowledgeObject {
-        KnowledgeObject::new(ObjectType::Note, ObjectContent::Markdown(content.to_string()))
-            .with_metadata(ObjectMetadata {
-                vault_path: Some(path.to_string()),
-                title: Some("Test Note".to_string()),
-                ..Default::default()
-            })
+        KnowledgeObject::new(
+            ObjectType::Note,
+            ObjectContent::Markdown(content.to_string()),
+        )
+        .with_metadata(ObjectMetadata {
+            vault_path: Some(path.to_string()),
+            title: Some("Test Note".to_string()),
+            ..Default::default()
+        })
     }
 
     #[test]
@@ -240,7 +247,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.contents.len(), 1);
-        assert_eq!(result.contents[0].mime_type.as_deref(), Some("application/json"));
+        assert_eq!(
+            result.contents[0].mime_type.as_deref(),
+            Some("application/json")
+        );
         let text = result.contents[0].text.as_ref().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(text).unwrap();
         assert_eq!(parsed["count"], 1);

@@ -116,7 +116,10 @@ impl DictationService {
     /// Pre-flight check + begin real-time capture.
     pub fn start(&self) -> Result<(), DictationError> {
         let current = self.status();
-        if matches!(current, DictationState::Recording | DictationState::Processing) {
+        if matches!(
+            current,
+            DictationState::Recording | DictationState::Processing
+        ) {
             return Err(DictationError::AlreadyActive);
         }
 
@@ -321,7 +324,10 @@ mod tests {
         }
     }
 
-    fn mock_transcriber(available: bool, text: Result<String, DictationError>) -> Arc<MockTranscriber> {
+    fn mock_transcriber(
+        available: bool,
+        text: Result<String, DictationError>,
+    ) -> Arc<MockTranscriber> {
         Arc::new(MockTranscriber {
             available,
             path: Some(PathBuf::from("model.bin")),
@@ -340,7 +346,12 @@ mod tests {
         svc.start().expect("start ok");
         assert_eq!(svc.status(), DictationState::Recording);
         let text = svc.stop().await.expect("stop ok");
-        assert_eq!(svc.status(), DictationState::Completed { text: "hello world".into() });
+        assert_eq!(
+            svc.status(),
+            DictationState::Completed {
+                text: "hello world".into()
+            }
+        );
         assert_eq!(text, "hello world");
         assert_eq!(transcriber.received.lock().unwrap().len(), 1);
     }
@@ -361,7 +372,10 @@ mod tests {
         svc.stop().await.unwrap();
         let got = received.lock().unwrap();
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0], payload, "transcriber must receive the exact captured bytes");
+        assert_eq!(
+            got[0], payload,
+            "transcriber must receive the exact captured bytes"
+        );
     }
 
     // Test 3 — missing Whisper model fails explicitly, no fake transcription.
@@ -375,9 +389,15 @@ mod tests {
         });
         let svc = svc_with(ok_mic(vec![0u8; 48]), transcriber);
         let err = svc.start().unwrap_err();
-        assert!(matches!(err, DictationError::ModelNotFound(_)), "got {err:?}");
+        assert!(
+            matches!(err, DictationError::ModelNotFound(_)),
+            "got {err:?}"
+        );
         assert!(matches!(svc.status(), DictationState::Failed { .. }));
-        assert!(svc.stop().await.is_err(), "no transcription should be produced");
+        assert!(
+            svc.stop().await.is_err(),
+            "no transcription should be produced"
+        );
         assert!(svc.active.lock().unwrap().is_none());
     }
 
@@ -394,7 +414,10 @@ mod tests {
         let svc = svc_with(ok_mic(vec![0u8; 48]), transcriber);
         svc.start().unwrap();
         let err = svc.stop().await.unwrap_err();
-        assert!(matches!(err, DictationError::ModelNotFound(_)), "got {err:?}");
+        assert!(
+            matches!(err, DictationError::ModelNotFound(_)),
+            "got {err:?}"
+        );
         assert!(matches!(svc.status(), DictationState::Failed { .. }));
     }
 
@@ -417,9 +440,15 @@ mod tests {
         };
         let svc = svc_with(bad_mic, transcriber);
         let err = svc.start().unwrap_err();
-        assert!(matches!(err, DictationError::CaptureInitFailed(_)), "got {err:?}");
+        assert!(
+            matches!(err, DictationError::CaptureInitFailed(_)),
+            "got {err:?}"
+        );
         assert!(matches!(svc.status(), DictationState::Failed { .. }));
-        assert!(svc.active.lock().unwrap().is_none(), "no session should be retained");
+        assert!(
+            svc.active.lock().unwrap().is_none(),
+            "no session should be retained"
+        );
     }
 
     // Test 4b — microphone permission denied is reported distinctly.
@@ -439,7 +468,10 @@ mod tests {
         };
         let svc = svc_with(mic, transcriber);
         let err = svc.start().unwrap_err();
-        assert!(matches!(err, DictationError::PermissionDenied), "got {err:?}");
+        assert!(
+            matches!(err, DictationError::PermissionDenied),
+            "got {err:?}"
+        );
     }
 
     // Test 5 — successful transcription reaches the result boundary.
@@ -458,7 +490,9 @@ mod tests {
         assert_eq!(text, "Nabu records audio");
         assert_eq!(
             svc.status(),
-            DictationState::Completed { text: "Nabu records audio".into() }
+            DictationState::Completed {
+                text: "Nabu records audio".into()
+            }
         );
     }
 
@@ -478,9 +512,18 @@ mod tests {
 
         svc.cancel().unwrap();
         assert_eq!(svc.status(), DictationState::Cancelled);
-        assert!(svc.active.lock().unwrap().is_none(), "session must be released");
-        assert!(received.lock().unwrap().is_empty(), "no audio should reach transcriber");
-        assert!(svc.stop().await.is_err(), "no false successful transcription");
+        assert!(
+            svc.active.lock().unwrap().is_none(),
+            "session must be released"
+        );
+        assert!(
+            received.lock().unwrap().is_empty(),
+            "no audio should reach transcriber"
+        );
+        assert!(
+            svc.stop().await.is_err(),
+            "no false successful transcription"
+        );
     }
 
     // Test 7 — double-start is rejected.

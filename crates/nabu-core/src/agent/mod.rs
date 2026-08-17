@@ -98,28 +98,28 @@
 
 #![cfg(not(target_arch = "wasm32"))]
 
+pub mod acp_client;
 pub mod config;
 pub mod errors;
+pub mod handler;
 pub mod manager;
 pub mod process;
 pub mod registry;
-pub mod stdio_channel;
-pub mod acp_client;
-pub mod handler;
 pub mod session;
+pub mod stdio_channel;
 
 // Re-export public types at the module level for ergonomic access.
+pub use acp_client::{AcpClient, AcpClientError};
 pub use config::{
     AgentConfig, AgentKind, AgentMetadata, AgentName, JsonRpcConfig, StdioTransportConfig,
 };
 pub use errors::{AgentManagerError, AgentResult};
+pub use handler::NabuAcpHandler;
 pub use manager::{AgentManager, AgentManagerSummary};
 pub use process::{AgentProcess, AgentProcessState, AgentSnapshot};
 pub use registry::{AgentRegistry, RegistryError, RegistryResult};
-pub use stdio_channel::StdioChannel;
-pub use acp_client::{AcpClient, AcpClientError};
-pub use handler::NabuAcpHandler;
 pub use session::{AcpConnectConfig, AcpSessionError, AcpSessionManager};
+pub use stdio_channel::StdioChannel;
 
 // Re-export ProcessId from the event_bus module for convenience.
 pub use crate::event_bus::ProcessId;

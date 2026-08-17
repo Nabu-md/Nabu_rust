@@ -109,10 +109,19 @@ impl AcpError {
     }
 
     /// Convenience: create an `InvalidState` error for an invalid transition.
-    pub fn invalid_transition(current: impl std::fmt::Debug, target: &str, msg: impl Into<String>) -> Self {
+    pub fn invalid_transition(
+        current: impl std::fmt::Debug,
+        target: &str,
+        msg: impl Into<String>,
+    ) -> Self {
         Self::new(
             ErrorKind::InvalidState,
-            format!("invalid transition from {:?} to '{}': {}", current, target, msg.into()),
+            format!(
+                "invalid transition from {:?} to '{}': {}",
+                current,
+                target,
+                msg.into()
+            ),
         )
     }
 

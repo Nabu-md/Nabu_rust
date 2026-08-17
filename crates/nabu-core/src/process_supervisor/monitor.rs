@@ -112,10 +112,7 @@ impl Default for SupervisorContext {
 /// Publish a process supervision event through the EventBus.
 ///
 /// Does nothing if no EventBus is registered (e.g. in tests without one).
-fn publish_event(
-    event_bus: &Option<Arc<EventBus<PipelineEvent>>>,
-    event: &ProcessEvent,
-) {
+fn publish_event(event_bus: &Option<Arc<EventBus<PipelineEvent>>>, event: &ProcessEvent) {
     if let Some(bus) = event_bus {
         bus.publish(event.kind(), &PipelineEvent::Process(event.clone()));
     }
@@ -208,7 +205,8 @@ pub(crate) async fn monitor_process(
             rec.last_error = None;
 
             // Publish health change
-            let prev_status = compute_health(&rec.state, rec.restart_count, rec.last_error.as_deref());
+            let prev_status =
+                compute_health(&rec.state, rec.restart_count, rec.last_error.as_deref());
             // State is now Starting, so health is Starting
             let new_status = ProcessHealthStatus::Starting;
             if prev_status != new_status {
@@ -234,9 +232,7 @@ pub(crate) async fn monitor_process(
 
         // ─── Spawn the child ───
         let mut cmd = Command::new(config.command.clone());
-        cmd.args(&config.args)
-            .envs(&config.env)
-            .kill_on_drop(true);
+        cmd.args(&config.args).envs(&config.env).kill_on_drop(true);
 
         let spawn_result = if let Some(dir) = &config.working_dir {
             cmd.current_dir(dir).spawn()
@@ -322,9 +318,7 @@ pub(crate) async fn monitor_process(
 
                 // Determine exit code and success status
                 let (exit_code, exited_successfully) = match exit_status {
-                    Ok(status) => {
-                        (status.code().or(Some(-1)), status.success())
-                    }
+                    Ok(status) => (status.code().or(Some(-1)), status.success()),
                     Err(e) => {
                         tracing::warn!(
                             subsystem = "supervisor",
@@ -385,13 +379,7 @@ pub(crate) async fn monitor_process(
                     };
                     let (pid_val, name_val) = (rec.id, rec.name.clone());
                     drop(rec);
-                    publish_health_event(
-                        &event_bus,
-                        pid_val,
-                        &name_val,
-                        status,
-                        terminal_state,
-                    );
+                    publish_health_event(&event_bus, pid_val, &name_val, status, terminal_state);
                 }
 
                 // Publish the terminal event
@@ -538,8 +526,7 @@ pub(crate) async fn monitor_process(
 
                 {
                     let rec = record.lock().unwrap();
-                    let (pid_val, restart_count) =
-                        (rec.id, rec.restart_count);
+                    let (pid_val, restart_count) = (rec.id, rec.restart_count);
                     drop(rec);
 
                     publish_event(
@@ -693,8 +680,7 @@ pub(crate) async fn monitor_process(
 
                 {
                     let rec = record.lock().unwrap();
-                    let (pid_val, restart_count) =
-                        (rec.id, rec.restart_count);
+                    let (pid_val, restart_count) = (rec.id, rec.restart_count);
                     drop(rec);
 
                     publish_event(
@@ -769,11 +755,7 @@ fn set_terminal_state(
         ProcessState::Stopped => {
             publish_event(
                 event_bus,
-                &ProcessEvent::Stopped(ProcessStoppedEvent::new(
-                    process_id,
-                    &name,
-                    reason,
-                )),
+                &ProcessEvent::Stopped(ProcessStoppedEvent::new(process_id, &name, reason)),
             );
             publish_health_event(
                 event_bus,
@@ -786,12 +768,7 @@ fn set_terminal_state(
         ProcessState::Exited => {
             publish_event(
                 event_bus,
-                &ProcessEvent::Exited(ProcessExitedEvent::new(
-                    process_id,
-                    &name,
-                    exit_code,
-                    0,
-                )),
+                &ProcessEvent::Exited(ProcessExitedEvent::new(process_id, &name, exit_code, 0)),
             );
             publish_health_event(
                 event_bus,
@@ -805,11 +782,7 @@ fn set_terminal_state(
             publish_event(
                 event_bus,
                 &ProcessEvent::Failed(ProcessFailedEvent::new(
-                    process_id,
-                    &name,
-                    exit_code,
-                    reason,
-                    0,
+                    process_id, &name, exit_code, reason, 0,
                 )),
             );
             publish_health_event(

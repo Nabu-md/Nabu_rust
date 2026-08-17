@@ -216,7 +216,11 @@ pub struct PluginInvocationRequest {
 
 impl PluginInvocationRequest {
     /// Create a new invocation request with the minimum required fields.
-    pub fn new(plugin_id: impl Into<String>, capability: impl Into<String>, method: impl Into<String>) -> Self {
+    pub fn new(
+        plugin_id: impl Into<String>,
+        capability: impl Into<String>,
+        method: impl Into<String>,
+    ) -> Self {
         Self {
             plugin_id: plugin_id.into(),
             capability: capability.into(),
@@ -255,7 +259,9 @@ impl PluginInvocationRequest {
     /// Generate a request ID if one is not already present in the metadata.
     /// Returns the request ID to use for this invocation.
     pub fn ensure_request_id(&mut self) -> Uuid {
-        let md = self.metadata.get_or_insert_with(InvocationMetadata::default);
+        let md = self
+            .metadata
+            .get_or_insert_with(InvocationMetadata::default);
         if let Some(id) = md.request_id {
             id
         } else {
@@ -327,7 +333,11 @@ impl PluginInvocationError {
         }
     }
 
-    pub fn with_detail(code: impl Into<String>, message: impl Into<String>, detail: impl Into<String>) -> Self {
+    pub fn with_detail(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
         Self {
             code: code.into(),
             message: message.into(),
@@ -397,7 +407,10 @@ pub struct ExecutionMetadata {
 
 impl PluginInvocationResponse {
     /// Construct a successful response with the given result.
-    pub fn success(result: Option<serde_json::Value>, execution: Option<ExecutionMetadata>) -> Self {
+    pub fn success(
+        result: Option<serde_json::Value>,
+        execution: Option<ExecutionMetadata>,
+    ) -> Self {
         Self {
             success: true,
             status: PluginInvocationStatus::Success,

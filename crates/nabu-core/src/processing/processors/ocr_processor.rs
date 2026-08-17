@@ -1,10 +1,12 @@
+use crate::diagnostic::{
+    Diagnostic, DiagnosticCategory, DiagnosticSeverity, TextPosition, TextRange,
+};
 use crate::jobs::cancellation::CancellationToken;
 use crate::jobs::workers::progress::ProgressReporter;
 use crate::models::{CustomPropertyValue, KnowledgeObject, ObjectContent, ObjectType};
-use crate::processing::processor::{ProcessingResult, Processor, ProcessingStats};
-use crate::processing::processor::ProcessingContext;
-use crate::diagnostic::{Diagnostic, DiagnosticCategory, DiagnosticSeverity, TextPosition, TextRange};
 use crate::native::NativeError;
+use crate::processing::processor::ProcessingContext;
+use crate::processing::processor::{ProcessingResult, ProcessingStats, Processor};
 use async_trait::async_trait;
 use std::time::Instant;
 
@@ -62,14 +64,10 @@ fn store_ocr_info(
 }
 
 fn ocr_diagnostic(severity: DiagnosticSeverity, message: String, code: &str) -> Diagnostic {
-    Diagnostic::new(
-        severity,
-        TextRange::empty(TextPosition::new(0, 0)),
-        message,
-    )
-    .with_code(code.to_string())
-    .with_source("ocr_processor".to_string())
-    .with_category(DiagnosticCategory::Ocr)
+    Diagnostic::new(severity, TextRange::empty(TextPosition::new(0, 0)), message)
+        .with_code(code.to_string())
+        .with_source("ocr_processor".to_string())
+        .with_category(DiagnosticCategory::Ocr)
 }
 
 /// Performs OCR on image, scan, and screenshot content.
@@ -168,8 +166,7 @@ impl Processor for OcrProcessor {
                     Some(1),
                     Some(duration_ms),
                     Some(is_scanned),
-                    Some("OCR engine unavailable on this platform (requires macOS)")
-                    ,
+                    Some("OCR engine unavailable on this platform (requires macOS)"),
                 );
                 return ProcessingResult::new(object)
                     .add_diagnostic(ocr_diagnostic(
@@ -268,10 +265,7 @@ impl Processor for OcrProcessor {
         object.metadata.word_count = Some(text.split_whitespace().count());
 
         let stem = slug_from_filename(filename.as_deref());
-        let vault_path = format!(
-            "Inbox/{}.ocr.md",
-            crate::inbox::model::slugify(&stem)
-        );
+        let vault_path = format!("Inbox/{}.ocr.md", crate::inbox::model::slugify(&stem));
         object.metadata.vault_path = Some(vault_path);
         object.content = ObjectContent::Markdown(text.clone());
 
@@ -286,12 +280,11 @@ impl Processor for OcrProcessor {
 
         progress.set_progress(1.0);
 
-        ProcessingResult::new(object)
-            .with_stats(
-                ProcessingStats::new()
-                    .with_duration_ms(duration_ms)
-                    .with_metric("ocr_lines".to_string(), line_count.to_string()),
-            )
+        ProcessingResult::new(object).with_stats(
+            ProcessingStats::new()
+                .with_duration_ms(duration_ms)
+                .with_metric("ocr_lines".to_string(), line_count.to_string()),
+        )
     }
 
     fn supports(&self, object_type: &ObjectType) -> bool {
@@ -390,18 +383,30 @@ mod tests {
                 "content should be Markdown after successful OCR"
             );
             assert!(
-                result.object.metadata.vault_path.as_deref().unwrap_or("").ends_with(".ocr.md"),
+                result
+                    .object
+                    .metadata
+                    .vault_path
+                    .as_deref()
+                    .unwrap_or("")
+                    .ends_with(".ocr.md"),
                 "vault_path should end with .ocr.md, got: {:?}",
                 result.object.metadata.vault_path
             );
 
             // Source image metadata preserved.
             assert!(
-                result.object.custom_properties.contains_key("source_image_mime"),
+                result
+                    .object
+                    .custom_properties
+                    .contains_key("source_image_mime"),
                 "source image MIME must be preserved"
             );
             assert!(
-                result.object.custom_properties.contains_key("source_image_filename"),
+                result
+                    .object
+                    .custom_properties
+                    .contains_key("source_image_filename"),
                 "source image filename must be preserved"
             );
 
@@ -419,12 +424,16 @@ mod tests {
                 .custom_properties
                 .get("ocr_info")
                 .and_then(|v| match v {
-                    CustomPropertyValue::Text(s) => serde_json::from_str::<serde_json::Value>(s).ok(),
+                    CustomPropertyValue::Text(s) => {
+                        serde_json::from_str::<serde_json::Value>(s).ok()
+                    }
                     _ => None,
                 });
-            assert!(ocr_info.is_some(), "ocr_info must be stored even on failure");
-            let warning = ocr_info
-                .and_then(|v| v["warning"].as_str().map(|s| s.to_string()));
+            assert!(
+                ocr_info.is_some(),
+                "ocr_info must be stored even on failure"
+            );
+            let warning = ocr_info.and_then(|v| v["warning"].as_str().map(|s| s.to_string()));
             assert!(
                 warning.is_some(),
                 "warning must be set when OCR engine is unavailable"
@@ -435,7 +444,10 @@ mod tests {
                 "binary content must be preserved on OCR failure"
             );
             // A diagnostic must be emitted.
-            assert!(result.has_diagnostics(), "a diagnostic must be emitted for platform failure");
+            assert!(
+                result.has_diagnostics(),
+                "a diagnostic must be emitted for platform failure"
+            );
         }
     }
 
@@ -500,11 +512,8 @@ mod tests {
             }
         } else {
             assert!(ocr_info.is_some(), "ocr_info must be stored on non-macOS");
-            let warning = ocr_info
-                .and_then(|v| v["warning"].as_str().map(|s| s.to_string()));
-            assert!(
-                warning.is_some(), "warning must be set on non-macOS"
-            );
+            let warning = ocr_info.and_then(|v| v["warning"].as_str().map(|s| s.to_string()));
+            assert!(warning.is_some(), "warning must be set on non-macOS");
         }
     }
 
@@ -554,8 +563,8 @@ mod tests {
             serde_json::from_str(&raw.unwrap()).expect("ocr_info must be valid JSON");
 
         // Simulate the deserialization step from knowledge_object_to_inbox_item
-        let parsed: OcrInfo =
-            serde_json::from_value(json_value).expect("ocr_info JSON must deserialize into OcrInfo");
+        let parsed: OcrInfo = serde_json::from_value(json_value)
+            .expect("ocr_info JSON must deserialize into OcrInfo");
 
         if cfg!(target_os = "macos") {
             assert!(

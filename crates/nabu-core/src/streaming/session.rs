@@ -249,18 +249,12 @@ impl StreamingSession {
 
     /// Returns the start timestamp (when the first token was published), if any.
     pub fn started_at(&self) -> Option<DateTime<Utc>> {
-        *self
-            .started_at
-            .lock()
-            .expect("started_at lock poisoned")
+        *self.started_at.lock().expect("started_at lock poisoned")
     }
 
     /// Returns the end timestamp (when a terminal state was entered), if any.
     pub fn ended_at(&self) -> Option<DateTime<Utc>> {
-        *self
-            .ended_at
-            .lock()
-            .expect("ended_at lock poisoned")
+        *self.ended_at.lock().expect("ended_at lock poisoned")
     }
 
     /// Returns a snapshot of this session's metadata.
@@ -286,7 +280,10 @@ impl StreamingSession {
     /// [`StreamSessionEvent::SessionCreated`] + [`StreamSessionEvent::SessionStarted`]
     /// (session-level).
     pub fn publish_started(&self) -> StreamResult<()> {
-        let bus = self.event_bus.as_ref().ok_or(StreamManagerError::NoEventBus)?;
+        let bus = self
+            .event_bus
+            .as_ref()
+            .ok_or(StreamManagerError::NoEventBus)?;
 
         // Publish StreamEvent::Started
         let started_event = StreamEvent::Started(crate::event_bus::StreamStartedEvent::new(
@@ -320,10 +317,7 @@ impl StreamingSession {
 
         // Mark as started
         {
-            let mut started_at = self
-                .started_at
-                .lock()
-                .expect("started_at lock poisoned");
+            let mut started_at = self.started_at.lock().expect("started_at lock poisoned");
             *started_at = Some(now);
         }
 
@@ -364,23 +358,20 @@ impl StreamingSession {
             });
         }
 
-        let bus = self.event_bus.as_ref().ok_or(StreamManagerError::NoEventBus)?;
+        let bus = self
+            .event_bus
+            .as_ref()
+            .ok_or(StreamManagerError::NoEventBus)?;
 
         // Atomically: transition state, append content, increment sequence, publish.
         let token_str = token.into();
 
         // Transition Active → Streaming on first token
         {
-            let mut state_guard = self
-                .state
-                .lock()
-                .expect("session state lock poisoned");
+            let mut state_guard = self.state.lock().expect("session state lock poisoned");
             if *state_guard == StreamState::Active {
                 *state_guard = StreamState::Streaming;
-                let mut started_at = self
-                    .started_at
-                    .lock()
-                    .expect("started_at lock poisoned");
+                let mut started_at = self.started_at.lock().expect("started_at lock poisoned");
                 *started_at = Some(Utc::now());
             }
         }
@@ -423,7 +414,10 @@ impl StreamingSession {
             });
         }
 
-        let bus = self.event_bus.as_ref().ok_or(StreamManagerError::NoEventBus)?;
+        let bus = self
+            .event_bus
+            .as_ref()
+            .ok_or(StreamManagerError::NoEventBus)?;
 
         let (content, sequence) = {
             let content = self
@@ -451,10 +445,7 @@ impl StreamingSession {
     /// `StreamSessionEvent::SessionCleanedUp` session-level event, then
     /// marks the session as `Completed`.
     pub fn complete(&self) -> StreamResult<()> {
-        let mut state_guard = self
-            .state
-            .lock()
-            .expect("session state lock poisoned");
+        let mut state_guard = self.state.lock().expect("session state lock poisoned");
         if state_guard.is_terminal() {
             return Err(StreamManagerError::StreamAlreadyTerminal {
                 stream_id: self.stream_id,
@@ -466,14 +457,14 @@ impl StreamingSession {
 
         let ended_at = Utc::now();
         {
-            let mut ended = self
-                .ended_at
-                .lock()
-                .expect("ended_at lock poisoned");
+            let mut ended = self.ended_at.lock().expect("ended_at lock poisoned");
             *ended = Some(ended_at);
         }
 
-        let bus = self.event_bus.as_ref().ok_or(StreamManagerError::NoEventBus)?;
+        let bus = self
+            .event_bus
+            .as_ref()
+            .ok_or(StreamManagerError::NoEventBus)?;
 
         let (content, token_count) = {
             let content = self
@@ -515,10 +506,7 @@ impl StreamingSession {
     pub fn cancel(&self, reason: impl Into<String>) -> StreamResult<()> {
         self.cancelled.store(true, Ordering::Release);
 
-        let mut state_guard = self
-            .state
-            .lock()
-            .expect("session state lock poisoned");
+        let mut state_guard = self.state.lock().expect("session state lock poisoned");
         if state_guard.is_terminal() {
             return Err(StreamManagerError::StreamAlreadyTerminal {
                 stream_id: self.stream_id,
@@ -530,14 +518,14 @@ impl StreamingSession {
 
         let ended_at = Utc::now();
         {
-            let mut ended = self
-                .ended_at
-                .lock()
-                .expect("ended_at lock poisoned");
+            let mut ended = self.ended_at.lock().expect("ended_at lock poisoned");
             *ended = Some(ended_at);
         }
 
-        let bus = self.event_bus.as_ref().ok_or(StreamManagerError::NoEventBus)?;
+        let bus = self
+            .event_bus
+            .as_ref()
+            .ok_or(StreamManagerError::NoEventBus)?;
 
         let (content, token_count) = {
             let content = self
@@ -578,10 +566,7 @@ impl StreamingSession {
     /// session as `Failed`. After this call, `publish_token` will return
     /// [`StreamManagerError::Failed`].
     pub fn fail(&self, error: impl Into<String>) -> StreamResult<()> {
-        let mut state_guard = self
-            .state
-            .lock()
-            .expect("session state lock poisoned");
+        let mut state_guard = self.state.lock().expect("session state lock poisoned");
         if state_guard.is_terminal() {
             return Err(StreamManagerError::StreamAlreadyTerminal {
                 stream_id: self.stream_id,
@@ -593,14 +578,14 @@ impl StreamingSession {
 
         let ended_at = Utc::now();
         {
-            let mut ended = self
-                .ended_at
-                .lock()
-                .expect("ended_at lock poisoned");
+            let mut ended = self.ended_at.lock().expect("ended_at lock poisoned");
             *ended = Some(ended_at);
         }
 
-        let bus = self.event_bus.as_ref().ok_or(StreamManagerError::NoEventBus)?;
+        let bus = self
+            .event_bus
+            .as_ref()
+            .ok_or(StreamManagerError::NoEventBus)?;
 
         let (content, token_count) = {
             let content = self
@@ -617,10 +602,7 @@ impl StreamingSession {
             content,
             error.into(),
         ));
-        bus.publish(
-            kinds::STREAM_FAILED,
-            &PipelineEvent::Stream(failed_event),
-        );
+        bus.publish(kinds::STREAM_FAILED, &PipelineEvent::Stream(failed_event));
 
         Ok(())
     }
@@ -675,10 +657,7 @@ impl StreamSessionHandle {
 
     /// Returns the current state of this stream.
     pub fn state(&self) -> StreamState {
-        self.session
-            .lock()
-            .expect("session lock poisoned")
-            .state()
+        self.session.lock().expect("session lock poisoned").state()
     }
 
     /// Returns `true` if the stream is in an active (non-terminal) state.
@@ -725,28 +704,19 @@ impl StreamSessionHandle {
     ///
     /// See [`StreamingSession::publish_token`] for details.
     pub fn publish_token(&self, token: impl Into<String>) -> StreamResult<()> {
-        let session = self
-            .session
-            .lock()
-            .expect("session lock poisoned");
+        let session = self.session.lock().expect("session lock poisoned");
         session.publish_token(token)
     }
 
     /// Publishes a partial content update event.
     pub fn publish_partial_update(&self) -> StreamResult<()> {
-        let session = self
-            .session
-            .lock()
-            .expect("session lock poisoned");
+        let session = self.session.lock().expect("session lock poisoned");
         session.publish_partial_update()
     }
 
     /// Publishes the "stream started" events.
     pub fn publish_started(&self) -> StreamResult<()> {
-        let session = self
-            .session
-            .lock()
-            .expect("session lock poisoned");
+        let session = self.session.lock().expect("session lock poisoned");
         session.publish_started()
     }
 
@@ -755,28 +725,19 @@ impl StreamSessionHandle {
     /// After cancellation, no further tokens can be published. The
     /// cancellation reason is published through the EventBus.
     pub fn cancel(&self, reason: impl Into<String>) -> StreamResult<()> {
-        let session = self
-            .session
-            .lock()
-            .expect("session lock poisoned");
+        let session = self.session.lock().expect("session lock poisoned");
         session.cancel(reason)
     }
 
     /// Completes this stream normally.
     pub fn complete(&self) -> StreamResult<()> {
-        let session = self
-            .session
-            .lock()
-            .expect("session lock poisoned");
+        let session = self.session.lock().expect("session lock poisoned");
         session.complete()
     }
 
     /// Fails this stream with an error.
     pub fn fail(&self, error: impl Into<String>) -> StreamResult<()> {
-        let session = self
-            .session
-            .lock()
-            .expect("session lock poisoned");
+        let session = self.session.lock().expect("session lock poisoned");
         session.fail(error)
     }
 }
@@ -808,8 +769,8 @@ impl std::fmt::Debug for StreamSessionHandle {
 mod tests {
     use super::*;
     use crate::event_bus::{EventBus, PipelineEvent};
-    use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
+    use std::sync::Arc;
     use std::sync::Mutex;
 
     fn test_bus() -> Arc<EventBus<PipelineEvent>> {
@@ -818,13 +779,7 @@ mod tests {
 
     #[test]
     fn session_starts_in_active_state() {
-        let session = StreamingSession::new(
-            Uuid::new_v4(),
-            None,
-            None,
-            None,
-            Some(test_bus()),
-        );
+        let session = StreamingSession::new(Uuid::new_v4(), None, None, None, Some(test_bus()));
         assert_eq!(session.state(), StreamState::Active);
         assert!(session.is_active());
         assert!(!session.is_terminal());
@@ -842,26 +797,14 @@ mod tests {
             started_count_clone.fetch_add(1, Ordering::SeqCst);
         });
 
-        let session = StreamingSession::new(
-            Uuid::new_v4(),
-            None,
-            None,
-            None,
-            Some(bus.clone()),
-        );
+        let session = StreamingSession::new(Uuid::new_v4(), None, None, None, Some(bus.clone()));
         assert!(session.publish_started().is_ok());
         assert!(started_count.load(Ordering::SeqCst) >= 1);
     }
 
     #[test]
     fn publish_token_transitions_to_streaming() {
-        let session = StreamingSession::new(
-            Uuid::new_v4(),
-            None,
-            None,
-            None,
-            Some(test_bus()),
-        );
+        let session = StreamingSession::new(Uuid::new_v4(), None, None, None, Some(test_bus()));
         session.publish_started().unwrap();
         session.publish_token("hello").unwrap();
         assert_eq!(session.state(), StreamState::Streaming);
@@ -871,13 +814,7 @@ mod tests {
 
     #[test]
     fn publish_multiple_tokens_preserves_ordering() {
-        let session = StreamingSession::new(
-            Uuid::new_v4(),
-            None,
-            None,
-            None,
-            Some(test_bus()),
-        );
+        let session = StreamingSession::new(Uuid::new_v4(), None, None, None, Some(test_bus()));
         session.publish_started().unwrap();
         session.publish_token("hello ").unwrap();
         session.publish_token("world").unwrap();
@@ -887,13 +824,7 @@ mod tests {
 
     #[test]
     fn complete_transitions_to_completed() {
-        let session = StreamingSession::new(
-            Uuid::new_v4(),
-            None,
-            None,
-            None,
-            Some(test_bus()),
-        );
+        let session = StreamingSession::new(Uuid::new_v4(), None, None, None, Some(test_bus()));
         session.publish_started().unwrap();
         session.publish_token("hello").unwrap();
         session.complete().unwrap();
@@ -903,13 +834,7 @@ mod tests {
 
     #[test]
     fn cancel_prevents_further_tokens() {
-        let session = StreamingSession::new(
-            Uuid::new_v4(),
-            None,
-            None,
-            None,
-            Some(test_bus()),
-        );
+        let session = StreamingSession::new(Uuid::new_v4(), None, None, None, Some(test_bus()));
         session.publish_started().unwrap();
         session.cancel("user requested").unwrap();
         assert_eq!(session.state(), StreamState::Cancelled);
@@ -922,13 +847,7 @@ mod tests {
 
     #[test]
     fn fail_transitions_to_failed() {
-        let session = StreamingSession::new(
-            Uuid::new_v4(),
-            None,
-            None,
-            None,
-            Some(test_bus()),
-        );
+        let session = StreamingSession::new(Uuid::new_v4(), None, None, None, Some(test_bus()));
         session.publish_started().unwrap();
         session.publish_token("partial").unwrap();
         session.fail("connection lost").unwrap();
@@ -938,13 +857,7 @@ mod tests {
 
     #[test]
     fn publish_token_on_terminal_fails() {
-        let session = StreamingSession::new(
-            Uuid::new_v4(),
-            None,
-            None,
-            None,
-            Some(test_bus()),
-        );
+        let session = StreamingSession::new(Uuid::new_v4(), None, None, None, Some(test_bus()));
         session.publish_started().unwrap();
         session.complete().unwrap();
 
@@ -966,13 +879,7 @@ mod tests {
             }
         });
 
-        let session = StreamingSession::new(
-            Uuid::new_v4(),
-            None,
-            None,
-            None,
-            Some(bus),
-        );
+        let session = StreamingSession::new(Uuid::new_v4(), None, None, None, Some(bus));
         session.publish_started().unwrap();
         for i in 0..5 {
             session.publish_token(format!("token{}", i)).unwrap();
@@ -997,13 +904,7 @@ mod tests {
 
     #[test]
     fn metadata_can_be_set_and_read() {
-        let session = StreamingSession::new(
-            Uuid::new_v4(),
-            None,
-            None,
-            None,
-            Some(test_bus()),
-        );
+        let session = StreamingSession::new(Uuid::new_v4(), None, None, None, Some(test_bus()));
         session.set_metadata("model", serde_json::json!("gpt-4"));
         session.set_metadata("temperature", serde_json::json!(0.7));
 

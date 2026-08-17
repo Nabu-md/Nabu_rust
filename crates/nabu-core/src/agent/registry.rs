@@ -86,10 +86,7 @@ impl AgentRegistry {
     pub fn register(&self, process: AgentProcess) -> RegistryResult<()> {
         let name = process.name().to_string();
 
-        let mut agents = self
-            .agents
-            .write()
-            .expect("agent registry lock poisoned");
+        let mut agents = self.agents.write().expect("agent registry lock poisoned");
 
         if agents.contains_key(&name) {
             return Err(RegistryError::AlreadyRegistered(name));
@@ -136,10 +133,7 @@ impl AgentRegistry {
     /// been stopped before calling this. The registry does not interact
     /// with the `ProcessSupervisor`.
     pub fn unregister(&self, name: &str) -> RegistryResult<()> {
-        let mut agents = self
-            .agents
-            .write()
-            .expect("agent registry lock poisoned");
+        let mut agents = self.agents.write().expect("agent registry lock poisoned");
 
         if agents.remove(name).is_some() {
             tracing::debug!(
@@ -165,25 +159,27 @@ impl AgentRegistry {
 
     /// Returns the number of agents currently in the `Running` management state.
     pub fn running_count(&self) -> usize {
-        let agents = self
-            .agents
-            .read()
-            .expect("agent registry lock poisoned");
+        let agents = self.agents.read().expect("agent registry lock poisoned");
         agents
             .values()
-            .filter(|proc| proc.lock().expect("agent process lock poisoned").is_running())
+            .filter(|proc| {
+                proc.lock()
+                    .expect("agent process lock poisoned")
+                    .is_running()
+            })
             .count()
     }
 
     /// Returns the number of agents in terminal states.
     pub fn stopped_count(&self) -> usize {
-        let agents = self
-            .agents
-            .read()
-            .expect("agent registry lock poisoned");
+        let agents = self.agents.read().expect("agent registry lock poisoned");
         agents
             .values()
-            .filter(|proc| proc.lock().expect("agent process lock poisoned").is_stopped())
+            .filter(|proc| {
+                proc.lock()
+                    .expect("agent process lock poisoned")
+                    .is_stopped()
+            })
             .count()
     }
 
@@ -192,10 +188,7 @@ impl AgentRegistry {
     /// The snapshot is a point-in-time copy — mutations to the registry
     /// after this call will not be reflected.
     pub fn snapshots(&self) -> Vec<AgentSnapshot> {
-        let agents = self
-            .agents
-            .read()
-            .expect("agent registry lock poisoned");
+        let agents = self.agents.read().expect("agent registry lock poisoned");
         agents
             .values()
             .map(|proc| {
@@ -207,10 +200,7 @@ impl AgentRegistry {
 
     /// Returns the names of all registered agents.
     pub fn names(&self) -> Vec<String> {
-        let agents = self
-            .agents
-            .read()
-            .expect("agent registry lock poisoned");
+        let agents = self.agents.read().expect("agent registry lock poisoned");
         agents.keys().cloned().collect()
     }
 
@@ -219,35 +209,28 @@ impl AgentRegistry {
     /// Returns `None` if the agent is not registered or has no process ID
     /// (e.g. it was stopped).
     pub fn process_id(&self, name: &str) -> Option<ProcessId> {
-        let agents = self
-            .agents
-            .read()
-            .expect("agent registry lock poisoned");
+        let agents = self.agents.read().expect("agent registry lock poisoned");
         agents.get(name).and_then(|proc| {
-            proc.lock().expect("agent process lock poisoned").process_id()
+            proc.lock()
+                .expect("agent process lock poisoned")
+                .process_id()
         })
     }
 
     /// Returns the agent's management state, if registered.
     pub fn state(&self, name: &str) -> Option<AgentProcessState> {
-        let agents = self
-            .agents
-            .read()
-            .expect("agent registry lock poisoned");
-        agents.get(name).map(|proc| {
-            proc.lock().expect("agent process lock poisoned").state()
-        })
+        let agents = self.agents.read().expect("agent registry lock poisoned");
+        agents
+            .get(name)
+            .map(|proc| proc.lock().expect("agent process lock poisoned").state())
     }
 
     /// Returns a snapshot of a specific agent, if registered.
     pub fn snapshot(&self, name: &str) -> Option<AgentSnapshot> {
-        let agents = self
-            .agents
-            .read()
-            .expect("agent registry lock poisoned");
-        agents.get(name).map(|proc| {
-            proc.lock().expect("agent process lock poisoned").snapshot()
-        })
+        let agents = self.agents.read().expect("agent registry lock poisoned");
+        agents
+            .get(name)
+            .map(|proc| proc.lock().expect("agent process lock poisoned").snapshot())
     }
 }
 
@@ -294,7 +277,9 @@ mod tests {
         let registry = AgentRegistry::new();
         let config = AgentConfig::new("test-agent", "echo");
 
-        registry.register(AgentProcess::new(config.clone())).unwrap();
+        registry
+            .register(AgentProcess::new(config.clone()))
+            .unwrap();
         let result = registry.register(AgentProcess::new(config));
         assert!(matches!(result, Err(RegistryError::AlreadyRegistered(_))));
     }
@@ -356,8 +341,12 @@ mod tests {
     #[test]
     fn snapshots_returns_all() {
         let registry = AgentRegistry::new();
-        registry.register(AgentProcess::new(AgentConfig::new("a", "echo"))).unwrap();
-        registry.register(AgentProcess::new(AgentConfig::new("b", "echo"))).unwrap();
+        registry
+            .register(AgentProcess::new(AgentConfig::new("a", "echo")))
+            .unwrap();
+        registry
+            .register(AgentProcess::new(AgentConfig::new("b", "echo")))
+            .unwrap();
 
         let snapshots = registry.snapshots();
         assert_eq!(snapshots.len(), 2);
@@ -370,8 +359,12 @@ mod tests {
     #[test]
     fn names_returns_all() {
         let registry = AgentRegistry::new();
-        registry.register(AgentProcess::new(AgentConfig::new("alpha", "echo"))).unwrap();
-        registry.register(AgentProcess::new(AgentConfig::new("beta", "echo"))).unwrap();
+        registry
+            .register(AgentProcess::new(AgentConfig::new("alpha", "echo")))
+            .unwrap();
+        registry
+            .register(AgentProcess::new(AgentConfig::new("beta", "echo")))
+            .unwrap();
 
         let names = registry.names();
         let mut sorted = names.clone();
@@ -402,14 +395,18 @@ mod tests {
     #[test]
     fn process_id_returns_none_for_unstarted() {
         let registry = AgentRegistry::new();
-        registry.register(AgentProcess::new(AgentConfig::new("test", "echo"))).unwrap();
+        registry
+            .register(AgentProcess::new(AgentConfig::new("test", "echo")))
+            .unwrap();
         assert!(registry.process_id("test").is_none());
     }
 
     #[test]
     fn process_id_returns_id_after_mark_started() {
         let registry = AgentRegistry::new();
-        registry.register(AgentProcess::new(AgentConfig::new("test", "echo"))).unwrap();
+        registry
+            .register(AgentProcess::new(AgentConfig::new("test", "echo")))
+            .unwrap();
 
         let handle = registry.get("test").unwrap();
         let id = ProcessId::new_v4();
@@ -421,7 +418,9 @@ mod tests {
     #[test]
     fn state_returns_agent_state() {
         let registry = AgentRegistry::new();
-        registry.register(AgentProcess::new(AgentConfig::new("test", "echo"))).unwrap();
+        registry
+            .register(AgentProcess::new(AgentConfig::new("test", "echo")))
+            .unwrap();
 
         let handle = registry.get("test").unwrap();
         let id = ProcessId::new_v4();
@@ -431,10 +430,7 @@ mod tests {
             proc.mark_running();
         }
 
-        assert_eq!(
-            registry.state("test"),
-            Some(AgentProcessState::Running)
-        );
+        assert_eq!(registry.state("test"), Some(AgentProcessState::Running));
     }
 
     #[test]

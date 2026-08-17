@@ -73,9 +73,9 @@ use crate::event_bus::{EventBus, PipelineEvent};
 use crate::plugin::capability::CapabilityRegistry;
 use crate::plugin::dependency::{validate_dependencies, DependencyReport};
 use crate::plugin::events::{
-    CapabilityRegisteredEvent, CapabilityRemovedEvent, PluginErrorEvent, PluginEvent,
-    PluginEventSeverity, PluginLoadedEvent, PluginRequestEvent, PluginResponseEvent,
-    PluginResponseStatus, PluginUnloadedEvent, publish_plugin_event,
+    publish_plugin_event, CapabilityRegisteredEvent, CapabilityRemovedEvent, PluginErrorEvent,
+    PluginEvent, PluginEventSeverity, PluginLoadedEvent, PluginRequestEvent, PluginResponseEvent,
+    PluginResponseStatus, PluginUnloadedEvent,
 };
 use crate::plugin::features::FeatureRegistry;
 use crate::plugin::invocation::{
@@ -146,7 +146,10 @@ impl std::fmt::Debug for PluginManager {
         f.debug_struct("PluginManager")
             .field("manifest_count", &self.manifests.len())
             .field("lifecycle_count", &self.lifecycles.len())
-            .field("capability_count", &self.capability_registry.capability_count())
+            .field(
+                "capability_count",
+                &self.capability_registry.capability_count(),
+            )
             .field("provider_count", &self.providers.len())
             .field("nabu_version", &self.nabu_version)
             .field("event_bus_attached", &self.event_bus.is_some())
@@ -164,8 +167,8 @@ impl PluginManager {
     /// This is the canonical constructor for production use — it requires no
     /// arguments and performs no plugin discovery or loading.
     pub fn for_application() -> Self {
-        let version = Version::parse(crate::APPLICATION_VERSION)
-            .unwrap_or_else(|_| Version::new(0, 1, 0));
+        let version =
+            Version::parse(crate::APPLICATION_VERSION).unwrap_or_else(|_| Version::new(0, 1, 0));
         Self::new(version)
     }
 
@@ -588,9 +591,11 @@ impl PluginManager {
     fn emit_capability_registered(&self, provider_id: &str, capability_ids: &[String]) {
         if let Some(bus) = &self.event_bus {
             for cap_id in capability_ids {
-                let event = PluginEvent::CapabilityRegistered(
-                    CapabilityRegisteredEvent::new(cap_id, provider_id, ""),
-                );
+                let event = PluginEvent::CapabilityRegistered(CapabilityRegisteredEvent::new(
+                    cap_id,
+                    provider_id,
+                    "",
+                ));
                 publish_plugin_event(bus, &event);
             }
         }
@@ -600,8 +605,7 @@ impl PluginManager {
     fn emit_capability_removed(&self, capability_ids: &[String]) {
         if let Some(bus) = &self.event_bus {
             for cap_id in capability_ids {
-                let event =
-                    PluginEvent::CapabilityRemoved(CapabilityRemovedEvent::new(cap_id));
+                let event = PluginEvent::CapabilityRemoved(CapabilityRemovedEvent::new(cap_id));
                 publish_plugin_event(bus, &event);
             }
         }
@@ -614,11 +618,7 @@ impl PluginManager {
     /// for provider registration — every provider that is successfully
     /// tracked by the `PluginManager` emits this event when an `EventBus`
     /// is attached.
-    fn emit_plugin_loaded(
-        &self,
-        provider_id: &str,
-        provider: &Arc<dyn CapabilityProvider>,
-    ) {
+    fn emit_plugin_loaded(&self, provider_id: &str, provider: &Arc<dyn CapabilityProvider>) {
         if let Some(bus) = &self.event_bus {
             let event = PluginEvent::PluginLoaded(PluginLoadedEvent::new(
                 provider_id,
@@ -636,8 +636,7 @@ impl PluginManager {
     /// removed from the registry.
     fn emit_plugin_unloaded(&self, provider_id: &str) {
         if let Some(bus) = &self.event_bus {
-            let event =
-                PluginEvent::PluginUnloaded(PluginUnloadedEvent::new(provider_id));
+            let event = PluginEvent::PluginUnloaded(PluginUnloadedEvent::new(provider_id));
             publish_plugin_event(bus, &event);
         }
     }
@@ -655,12 +654,16 @@ impl PluginManager {
         err: &ProviderError,
     ) {
         let (severity, code, error_msg) = match err {
-            ProviderError::InitializationFailed { reason, .. } => {
-                (PluginEventSeverity::Error, "INIT_FAILED", reason.to_string())
-            }
-            ProviderError::ShutdownFailed { reason, .. } => {
-                (PluginEventSeverity::Error, "SHUTDOWN_FAILED", reason.to_string())
-            }
+            ProviderError::InitializationFailed { reason, .. } => (
+                PluginEventSeverity::Error,
+                "INIT_FAILED",
+                reason.to_string(),
+            ),
+            ProviderError::ShutdownFailed { reason, .. } => (
+                PluginEventSeverity::Error,
+                "SHUTDOWN_FAILED",
+                reason.to_string(),
+            ),
             ProviderError::DuplicateProvider { .. } => (
                 PluginEventSeverity::Warning,
                 "DUPLICATE_PROVIDER",
@@ -700,11 +703,7 @@ impl PluginManager {
     ///
     /// The event's `method` field combines the capability and method name
     /// (e.g. `"ocr:tesseract:recognize"`) to provide full routing context.
-    fn emit_invocation_request(
-        &self,
-        request: &PluginInvocationRequest,
-        request_id: &uuid::Uuid,
-    ) {
+    fn emit_invocation_request(&self, request: &PluginInvocationRequest, request_id: &uuid::Uuid) {
         if let Some(bus) = &self.event_bus {
             let method = format!("{}:{}", request.capability, request.method);
             let event = PluginEvent::PluginRequest(PluginRequestEvent::with_params(
@@ -754,21 +753,13 @@ impl PluginManager {
                         .as_ref()
                         .map(|e| e.to_string())
                         .unwrap_or_else(|| "Unknown error".to_string());
-                    PluginResponseEvent::error(
-                        &request.plugin_id,
-                        request_id,
-                        &method,
-                        &err_msg,
-                    )
+                    PluginResponseEvent::error(&request.plugin_id, request_id, &method, &err_msg)
                 }
                 PluginResponseStatus::Cancelled => {
                     PluginResponseEvent::cancelled(&request.plugin_id, request_id, &method)
                 }
             };
-            publish_plugin_event(
-                bus,
-                &PluginEvent::PluginResponse(event),
-            );
+            publish_plugin_event(bus, &PluginEvent::PluginResponse(event));
         }
     }
 
@@ -1119,10 +1110,7 @@ impl PluginManager {
                 let response = PluginInvocationResponse::error(
                     PluginInvocationError::new(
                         "PLUGIN_NOT_FOUND",
-                        format!(
-                            "No provider registered for plugin '{}'",
-                            request.plugin_id
-                        ),
+                        format!("No provider registered for plugin '{}'", request.plugin_id),
                     ),
                     Some(ExecutionMetadata {
                         request_id: Some(request_id),
@@ -1140,10 +1128,7 @@ impl PluginManager {
             let response = PluginInvocationResponse::error(
                 PluginInvocationError::new(
                     "CAPABILITY_NOT_FOUND",
-                    format!(
-                        "Capability '{}' is not registered",
-                        request.capability
-                    ),
+                    format!("Capability '{}' is not registered", request.capability),
                 ),
                 Some(ExecutionMetadata {
                     request_id: Some(request_id),
@@ -1218,17 +1203,13 @@ impl PluginManager {
 
                 // Publish a PluginErrorEvent for the panic through the EventBus.
                 if let Some(bus) = &self.event_bus {
-                    let mut error_event =
-                        PluginErrorEvent::critical(&request.plugin_id, panic_str);
+                    let mut error_event = PluginErrorEvent::critical(&request.plugin_id, panic_str);
                     error_event.code = Some("PROVIDER_PANIC".to_string());
                     error_event.detail = Some(format!(
                         "method: {}, capability: {}",
                         request.method, request.capability
                     ));
-                    publish_plugin_event(
-                        bus,
-                        &PluginEvent::PluginError(error_event),
-                    );
+                    publish_plugin_event(bus, &PluginEvent::PluginError(error_event));
                 }
 
                 PluginInvocationResponse::error(
@@ -1674,11 +1655,11 @@ mod tests {
             vec![Capability::new("ns", "a", "A")],
         )))
         .unwrap();
-        let result = pm.validate_provider(&UnitProvider::new(
-            "com.example.dup",
-            vec![],
+        let result = pm.validate_provider(&UnitProvider::new("com.example.dup", vec![]));
+        assert!(matches!(
+            result,
+            Err(ProviderError::DuplicateProvider { .. })
         ));
-        assert!(matches!(result, Err(ProviderError::DuplicateProvider { .. })));
     }
 
     #[test]
@@ -1687,7 +1668,11 @@ mod tests {
         // "nabu:event_bus" is a built-in capability.
         let result = pm.validate_provider(&UnitProvider::new(
             "com.example.conflict",
-            vec![Capability::new("nabu", "event_bus", "Conflicts with builtin")],
+            vec![Capability::new(
+                "nabu",
+                "event_bus",
+                "Conflicts with builtin",
+            )],
         ));
         assert!(matches!(
             result,
@@ -1707,7 +1692,10 @@ mod tests {
                 required: false,
             }],
         ));
-        assert!(matches!(result, Err(ProviderError::InvalidCapability { .. })));
+        assert!(matches!(
+            result,
+            Err(ProviderError::InvalidCapability { .. })
+        ));
     }
 
     #[test]
@@ -1843,28 +1831,25 @@ mod tests {
         let bus: EventBus<PipelineEvent> = EventBus::new();
         let registered = Arc::new(std::sync::Mutex::new(Vec::new()));
         let removed = Arc::new(std::sync::Mutex::new(Vec::new()));
-        bus.subscribe(
-            crate::event_bus::kinds::CAPABILITY_REGISTERED,
-            {
-                let registered = registered.clone();
-                move |pe: &PipelineEvent| {
-                    if let PipelineEvent::Plugin(crate::plugin::events::PluginEvent::CapabilityRegistered(ref e)) = pe {
-                        registered.lock().unwrap().push(e.capability_id.clone());
-                    }
+        bus.subscribe(crate::event_bus::kinds::CAPABILITY_REGISTERED, {
+            let registered = registered.clone();
+            move |pe: &PipelineEvent| {
+                if let PipelineEvent::Plugin(
+                    crate::plugin::events::PluginEvent::CapabilityRegistered(ref e),
+                ) = pe
+                {
+                    registered.lock().unwrap().push(e.capability_id.clone());
                 }
-            },
-        );
-        bus.subscribe(
-            crate::event_bus::kinds::CAPABILITY_REMOVED,
-            {
-                let removed = removed.clone();
-                move |pe: &PipelineEvent| {
-                    if let PipelineEvent::Plugin(PluginEvent::CapabilityRemoved(ref e)) = pe {
-                        removed.lock().unwrap().push(e.capability_id.clone());
-                    }
+            }
+        });
+        bus.subscribe(crate::event_bus::kinds::CAPABILITY_REMOVED, {
+            let removed = removed.clone();
+            move |pe: &PipelineEvent| {
+                if let PipelineEvent::Plugin(PluginEvent::CapabilityRemoved(ref e)) = pe {
+                    removed.lock().unwrap().push(e.capability_id.clone());
                 }
-            },
-        );
+            }
+        });
 
         let mut pm = PluginManager::new(Version::new(1, 0, 0)).with_event_bus(bus);
         pm.register_provider(shared(UnitProvider::new(

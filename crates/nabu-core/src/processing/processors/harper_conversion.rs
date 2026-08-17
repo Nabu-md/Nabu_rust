@@ -23,11 +23,11 @@
 //! pure functions with no shared mutable state. They can be called from any
 //! thread context.
 
-use crate::diagnostic::{
-    Decoration, Diagnostic, DiagnosticCategory, DiagnosticError, DiagnosticSeverity,
-    Suggestion, SuggestionApplicability, SuggestionPriority, TextRange, TextPosition,
-};
 use crate::diagnostic::style::DecorationCategory;
+use crate::diagnostic::{
+    Decoration, Diagnostic, DiagnosticCategory, DiagnosticError, DiagnosticSeverity, Suggestion,
+    SuggestionApplicability, SuggestionPriority, TextPosition, TextRange,
+};
 use harper_core::linting::{Lint, LintKind, Suggestion as HarperSuggestion};
 
 /// Convert a single Harper [`Lint`] into a Nabu [`Diagnostic`].
@@ -155,12 +155,7 @@ fn convert_suggestion(
     match harper_suggestion {
         HarperSuggestion::ReplaceWith(chars) => {
             let new_text: String = chars.iter().collect();
-            Suggestion::try_new(
-                "Replace with suggestion".to_string(),
-                range,
-                new_text,
-            )
-            .map(|s| {
+            Suggestion::try_new("Replace with suggestion".to_string(), range, new_text).map(|s| {
                 s.with_kind("replace")
                     .with_applicability(SuggestionApplicability::Always)
                     .with_priority(SuggestionPriority::High)
@@ -175,29 +170,18 @@ fn convert_suggestion(
             } else {
                 TextRange::empty(insert_pos)
             };
-            Suggestion::try_new(
-                "Insert after".to_string(),
-                empty_range,
-                new_text,
-            )
-            .map(|s| {
+            Suggestion::try_new("Insert after".to_string(), empty_range, new_text).map(|s| {
                 s.with_kind("insert")
                     .with_applicability(SuggestionApplicability::Always)
                     .with_priority(SuggestionPriority::Normal)
             })
         }
-        HarperSuggestion::Remove => {
-            Suggestion::try_new(
-                "Remove".to_string(),
-                range,
-                String::new(),
-            )
+        HarperSuggestion::Remove => Suggestion::try_new("Remove".to_string(), range, String::new())
             .map(|s| {
                 s.with_kind("remove")
                     .with_applicability(SuggestionApplicability::Always)
                     .with_priority(SuggestionPriority::High)
-            })
-        }
+            }),
     }
 }
 
@@ -228,14 +212,9 @@ pub fn char_index_to_position(
 
     for (i, &c) in source_chars.iter().enumerate() {
         if i == char_index {
-            let line_chars: String = source_chars[line_start_char_index..i]
-                .iter()
-                .collect();
+            let line_chars: String = source_chars[line_start_char_index..i].iter().collect();
             let character = utf8_str_to_utf16_units(&line_chars);
-            let byte_offset = source_chars[..i]
-                .iter()
-                .map(|c| c.len_utf8())
-                .sum();
+            let byte_offset = source_chars[..i].iter().map(|c| c.len_utf8()).sum();
             return Ok((TextPosition::new(line, character as u32), byte_offset));
         }
         if c == '\n' {
@@ -245,14 +224,9 @@ pub fn char_index_to_position(
     }
 
     if char_index == source_chars.len() {
-        let line_str: String = source_chars[line_start_char_index..]
-            .iter()
-            .collect();
+        let line_str: String = source_chars[line_start_char_index..].iter().collect();
         let character = utf8_str_to_utf16_units(&line_str);
-        let byte_offset = source_chars
-            .iter()
-            .map(|c| c.len_utf8())
-            .sum();
+        let byte_offset = source_chars.iter().map(|c| c.len_utf8()).sum();
         return Ok((TextPosition::new(line, character as u32), byte_offset));
     }
 
@@ -281,12 +255,7 @@ fn utf8_str_to_utf16_units(s: &str) -> usize {
 mod tests {
     use super::*;
 
-    fn make_lint(
-        start: usize,
-        end: usize,
-        kind: LintKind,
-        message: &str,
-    ) -> Lint {
+    fn make_lint(start: usize, end: usize, kind: LintKind, message: &str) -> Lint {
         Lint {
             span: harper_core::Span::new(start, end),
             lint_kind: kind,
@@ -488,7 +457,10 @@ mod tests {
 
         let diag = convert_lint(&lint, &source).unwrap();
         assert!(diag.code.is_some());
-        assert_eq!(diag.code.as_deref(), Some(lint.lint_kind.to_string_key().as_str()));
+        assert_eq!(
+            diag.code.as_deref(),
+            Some(lint.lint_kind.to_string_key().as_str())
+        );
     }
 
     #[test]

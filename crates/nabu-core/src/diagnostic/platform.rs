@@ -61,10 +61,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::diagnostic::{
-    Diagnostic, DiagnosticBatch, DiagnosticError, DiagnosticEvent,
-};
 use crate::diagnostic::events::publish_diagnostic_event;
+use crate::diagnostic::{Diagnostic, DiagnosticBatch, DiagnosticError, DiagnosticEvent};
 use crate::event_bus::{EventBus, PipelineEvent};
 use serde::{Deserialize, Serialize};
 
@@ -117,7 +115,11 @@ impl std::fmt::Display for DiagnosticPlatformError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ProviderNotFound { origin } => {
-                write!(f, "no diagnostic provider registered for origin '{}'", origin)
+                write!(
+                    f,
+                    "no diagnostic provider registered for origin '{}'",
+                    origin
+                )
             }
             Self::InvalidRequest { detail } => {
                 write!(f, "invalid diagnostic request: {}", detail)
@@ -320,23 +322,25 @@ impl DiagnosticPlatform {
         // 2. Resolve provider (default to "harper" if origin is None)
         let origin = origin.unwrap_or("harper");
         let providers = self.providers.read().expect("providers lock poisoned");
-        let provider = providers.get(origin).ok_or_else(|| {
-            DiagnosticPlatformError::ProviderNotFound {
-                origin: origin.to_string(),
-            }
-        })?;
+        let provider =
+            providers
+                .get(origin)
+                .ok_or_else(|| DiagnosticPlatformError::ProviderNotFound {
+                    origin: origin.to_string(),
+                })?;
 
         // 3. Clone the provider Arc to avoid holding the read lock during analysis
         let provider_clone = Arc::clone(provider);
         drop(providers);
 
         // 4. Run analysis (providers handle their own thread safety internally)
-        let diagnostics = provider_clone
-            .analyze(text)
-            .map_err(|e| DiagnosticPlatformError::ProviderError {
-                origin: origin.to_string(),
-                detail: e.to_string(),
-            })?;
+        let diagnostics =
+            provider_clone
+                .analyze(text)
+                .map_err(|e| DiagnosticPlatformError::ProviderError {
+                    origin: origin.to_string(),
+                    detail: e.to_string(),
+                })?;
 
         // 5. Validate each diagnostic
         for (i, diag) in diagnostics.iter().enumerate() {
@@ -462,7 +466,9 @@ mod tests {
         let provider = Arc::new(TestProvider::new("harper", vec![diag.clone()]));
         platform.register_provider(provider);
 
-        let batch = platform.retrieve("hello world", "vault:doc.md", None).unwrap();
+        let batch = platform
+            .retrieve("hello world", "vault:doc.md", None)
+            .unwrap();
         assert_eq!(batch.origin, "harper");
         assert_eq!(batch.resource_id, "vault:doc.md");
         assert_eq!(batch.diagnostics.len(), 1);
@@ -473,10 +479,15 @@ mod tests {
     #[test]
     fn platform_retrieve_with_explicit_origin() {
         let platform = DiagnosticPlatform::new();
-        let provider = Arc::new(TestProvider::new("custom-checker", vec![sample_diagnostic()]));
+        let provider = Arc::new(TestProvider::new(
+            "custom-checker",
+            vec![sample_diagnostic()],
+        ));
         platform.register_provider(provider);
 
-        let batch = platform.retrieve("text", "vault:doc.md", Some("custom-checker")).unwrap();
+        let batch = platform
+            .retrieve("text", "vault:doc.md", Some("custom-checker"))
+            .unwrap();
         assert_eq!(batch.origin, "custom-checker");
     }
 
@@ -497,7 +508,10 @@ mod tests {
         platform.register_provider(provider);
 
         let err = platform.retrieve("", "vault:doc.md", None).unwrap_err();
-        assert!(matches!(err, DiagnosticPlatformError::InvalidRequest { .. }));
+        assert!(matches!(
+            err,
+            DiagnosticPlatformError::InvalidRequest { .. }
+        ));
         assert!(err.to_string().contains("text must not be empty"));
     }
 
@@ -508,7 +522,10 @@ mod tests {
         platform.register_provider(provider);
 
         let err = platform.retrieve("text", "", None).unwrap_err();
-        assert!(matches!(err, DiagnosticPlatformError::InvalidRequest { .. }));
+        assert!(matches!(
+            err,
+            DiagnosticPlatformError::InvalidRequest { .. }
+        ));
         assert!(err.to_string().contains("resource_id must not be empty"));
     }
 
@@ -516,7 +533,10 @@ mod tests {
     fn platform_retrieve_provider_not_found() {
         let platform = DiagnosticPlatform::new();
         let result = platform.retrieve("text", "vault:doc.md", Some("nonexistent"));
-        assert!(matches!(result, Err(DiagnosticPlatformError::ProviderNotFound { .. })));
+        assert!(matches!(
+            result,
+            Err(DiagnosticPlatformError::ProviderNotFound { .. })
+        ));
         assert!(result.unwrap_err().to_string().contains("nonexistent"));
     }
 
@@ -524,17 +544,24 @@ mod tests {
     fn platform_retrieve_default_origin_not_found() {
         let platform = DiagnosticPlatform::new();
         let result = platform.retrieve("text", "vault:doc.md", None);
-        assert!(matches!(result, Err(DiagnosticPlatformError::ProviderNotFound { .. })));
+        assert!(matches!(
+            result,
+            Err(DiagnosticPlatformError::ProviderNotFound { .. })
+        ));
         assert!(result.unwrap_err().to_string().contains("harper"));
     }
 
     #[test]
     fn platform_retrieve_propagates_provider_error() {
         let platform = DiagnosticPlatform::new();
-        let provider = Arc::new(FailingProvider { origin: "failing".to_string() });
+        let provider = Arc::new(FailingProvider {
+            origin: "failing".to_string(),
+        });
         platform.register_provider(provider);
 
-        let err = platform.retrieve("text", "vault:doc.md", Some("failing")).unwrap_err();
+        let err = platform
+            .retrieve("text", "vault:doc.md", Some("failing"))
+            .unwrap_err();
         assert!(matches!(err, DiagnosticPlatformError::ProviderError { .. }));
         assert!(err.to_string().contains("failing"));
     }
@@ -551,8 +578,13 @@ mod tests {
         let provider = Arc::new(TestProvider::new("bad", vec![bad_diag]));
         platform.register_provider(provider);
 
-        let err = platform.retrieve("text", "vault:doc.md", Some("bad")).unwrap_err();
-        assert!(matches!(err, DiagnosticPlatformError::InvalidDiagnostic { .. }));
+        let err = platform
+            .retrieve("text", "vault:doc.md", Some("bad"))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DiagnosticPlatformError::InvalidDiagnostic { .. }
+        ));
         assert!(err.to_string().contains("bad"));
     }
 
@@ -567,8 +599,13 @@ mod tests {
         let provider = Arc::new(TestProvider::new("bad-range", vec![bad_diag]));
         platform.register_provider(provider);
 
-        let err = platform.retrieve("text", "vault:doc.md", Some("bad-range")).unwrap_err();
-        assert!(matches!(err, DiagnosticPlatformError::InvalidDiagnostic { .. }));
+        let err = platform
+            .retrieve("text", "vault:doc.md", Some("bad-range"))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DiagnosticPlatformError::InvalidDiagnostic { .. }
+        ));
     }
 
     #[test]
@@ -583,8 +620,13 @@ mod tests {
         let provider = Arc::new(TestProvider::new("mixed", vec![good, bad]));
         platform.register_provider(provider);
 
-        let err = platform.retrieve("text", "vault:doc.md", Some("mixed")).unwrap_err();
-        assert!(matches!(err, DiagnosticPlatformError::InvalidDiagnostic { .. }));
+        let err = platform
+            .retrieve("text", "vault:doc.md", Some("mixed"))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DiagnosticPlatformError::InvalidDiagnostic { .. }
+        ));
         if let DiagnosticPlatformError::InvalidDiagnostic { detail, .. } = err {
             assert!(detail.contains("index 1"));
         }
@@ -607,11 +649,14 @@ mod tests {
         let received = Arc::new(std::sync::Mutex::new(Vec::new()));
         let received_clone = received.clone();
 
-        event_bus.subscribe(crate::event_bus::kinds::DIAGNOSTIC_BATCH_PUBLISHED, move |pe: &PipelineEvent| {
-            if let PipelineEvent::Diagnostic(e) = pe {
-                received_clone.lock().unwrap().push(e.clone());
-            }
-        });
+        event_bus.subscribe(
+            crate::event_bus::kinds::DIAGNOSTIC_BATCH_PUBLISHED,
+            move |pe: &PipelineEvent| {
+                if let PipelineEvent::Diagnostic(e) = pe {
+                    received_clone.lock().unwrap().push(e.clone());
+                }
+            },
+        );
 
         let platform = DiagnosticPlatform::with_event_bus(event_bus);
         let provider = Arc::new(TestProvider::new("harper", vec![sample_diagnostic()]));

@@ -458,7 +458,10 @@ mod tests {
     fn remove_by_provider_unknown_returns_empty() {
         let mut cr = CapabilityRegistry::new();
         cr.register_builtin();
-        assert_eq!(cr.remove_by_provider("no_such_provider"), Vec::<String>::new());
+        assert_eq!(
+            cr.remove_by_provider("no_such_provider"),
+            Vec::<String>::new()
+        );
         assert!(cr.has("nabu:event_bus"));
     }
 }

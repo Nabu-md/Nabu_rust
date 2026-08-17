@@ -378,8 +378,11 @@ impl AgentSnapshot {
 
     /// Returns the last error message, if any.
     pub fn last_error(&self) -> Option<&str> {
-        self.metadata.last_error.as_deref()
-            .or_else(|| self.process_snapshot.as_ref().and_then(|s| s.last_error.as_deref()))
+        self.metadata.last_error.as_deref().or_else(|| {
+            self.process_snapshot
+                .as_ref()
+                .and_then(|s| s.last_error.as_deref())
+        })
     }
 }
 
@@ -466,10 +469,8 @@ mod tests {
 
         assert_eq!(proc.lifecycle.stage(), LifecycleStage::Created);
 
-        proc.transition_state(
-            AgentProcessState::Starting,
-            LifecycleStage::Initialized,
-        ).unwrap();
+        proc.transition_state(AgentProcessState::Starting, LifecycleStage::Initialized)
+            .unwrap();
 
         assert_eq!(proc.lifecycle.stage(), LifecycleStage::Initialized);
         assert_eq!(proc.state(), AgentProcessState::Starting);
@@ -480,16 +481,13 @@ mod tests {
         let config = AgentConfig::new("test-agent", "echo");
         let mut proc = AgentProcess::new(config);
 
-        proc.transition_state(
-            AgentProcessState::Starting,
-            LifecycleStage::Initialized,
-        ).unwrap();
+        proc.transition_state(AgentProcessState::Starting, LifecycleStage::Initialized)
+            .unwrap();
 
         // Cannot go backward from Initialized to Created
-        assert!(proc.transition_state(
-            AgentProcessState::Registered,
-            LifecycleStage::Created,
-        ).is_err());
+        assert!(proc
+            .transition_state(AgentProcessState::Registered, LifecycleStage::Created,)
+            .is_err());
     }
 
     #[test]

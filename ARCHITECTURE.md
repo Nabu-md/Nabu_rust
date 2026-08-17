@@ -1,117 +1,120 @@
 # Architecture
 
-Nabu is an Electron desktop app with three layers: **main process** (system), **preload bridge** (secure IPC), and **renderer process** (UI). Data flows in one direction through the pipeline.
+Nabu is a **Tauri v2** desktop application built on a **Rust core**
+(`crates/nabu-core`) with a **Dioxus/WASM** user interface (`crates/nabu-ui`)
+rendered inside a Tauri WebView. Content flows through the capture →
+processing → storage → index pipeline.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Renderer Process (React 19)              │
-│  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌─────────┐  │
-│  │  App.tsx  │   │ NoteView │   │  Blocks  │   │ Graph   │  │
-│  │ (state)  │──▶│ (render) │──▶│ (custom) │   │ (d3-f)  │  │
-│  └────┬─────┘   └──────────┘   └──────────┘   └─────────┘  │
-│       │                                                      │
-│  ┌────▼─────┐   ┌──────────┐   ┌──────────┐                │
-│  │ FileTree │   │ Sidebar  │   │ Settings  │                │
-│  └──────────┘   └──────────┘   └──────────┘                │
-└──────────────────────┬──────────────────────────────────────┘
-                       │  contextBridge (preload)
-┌──────────────────────▼──────────────────────────────────────┐
-│                    Main Process (Electron)                    │
-│                                                              │
-│  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌─────────┐  │
-│  │  IPC.ts  │   │ Parser   │   │ State    │   │ Watcher │  │
-│  │ handlers │──▶│ (remark) │──▶│ Manager  │──▶│(chokidar│  │
-│  └──────────┘   └──────────┘   └──────────┘   └─────────┘  │
-│       │                                                      │
-│  ┌────▼─────┐   ┌──────────┐   ┌──────────┐                │
-│  │ Vector   │   │ Settings │   │ Templates│                │
-│  │ Index    │   │ (JSON)   │   │ Engine   │                │
-│  └──────────┘   └──────────┘   └──────────┘                │
-└──────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│                              Tauri v2 Host (Rust)                           │
+│                                                                            │
+│  ┌──────────────────┐   ┌────────────────────┐   ┌──────────────────┐      │
+│  │  src-tauri/src   │   │  crates/nabu-core  │   │  native/platform │      │
+│  │  tauri commands  │   │  models, storage,  │   │  macOS: Vision,  │      │
+│  │  settings, main  │   │  indexer, capture  │   │  screencapture, │      │
+│  │  (IPC bridge)    │   │  ACP/MCP servers   │   │  whisper        │      │
+│  └────────┬─────────┘   └────────┬───────────┘   └──────────────────┘      │
+│           │                      │                                          │
+│           │  Tauri webview (wasm-bindgen)                                  │
+│           ▼                                                                  │
+│  ┌──────────────────────────────────────────────────────────────────┐      │
+│  │              crates/nabu-ui (Dioxus 0.6.3, WASM)                   │      │
+│  │  App, NoteView, Blocks, Graph, FileTree, Sidebar, Settings       │      │
+│  │  (built by `cargo dioxus build`, served via index.html)           │      │
+│  └──────────────────────────────────────────────────────────────────┘      │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Data Flow
 
-1. **File System → Watcher:** chokidar detects file changes (create, modify, delete) in the vault directory. Changes are debounced and emitted as events.
+1. **Capture → Core:** Content is captured from the clipboard, screen, file
+   drops, watch folders, URLs, emails, GitHub/YouTube links, and native
+   messaging hosts. Capture handlers produce [`KnowledgeObject`](crates/nabu-core/src/models)
+   values and enqueue them on the job queue.
 
-2. **Watcher → State Manager:** The StateManager receives file events, updates the AST cache (parsed markdown), the full-text index, and the tag index. A `PendingWriteLock` prevents races between file writes and user edits.
+2. **Pipeline → Indexer:** The processing pipeline
+   (`crates/nabu-core/src/processing`) runs OCR (macOS Vision), generates text
+   embeddings, transcribes audio (whisper), and parses markdown into a graph.
+   The indexer maintains the full-text, tag, and vector indexes. A write lock
+   prevents races between file writes and edits.
 
-3. **State → IPC → Renderer:** State changes are pushed to the renderer via IPC. The renderer's `App.tsx` dispatches actions through a `useReducer` and React Context.
+3. **Core → Tauri → UI:** State changes are surfaced to the Dioxus UI through
+   typed Tauri commands (IPC). The webview layer re-renders from the resulting
+   state.
 
-4. **Renderer IPC → Main:** User actions (edit note, toggle task, rename file) go through `contextBridge` → IPC handlers → StateManager → File System.
+4. **UI → Tauri → Core:** User actions (edit note, toggle task, rename file,
+   run a tool) go through named `#[tauri::command]` handlers →
+   `nabu-core` → file system.
 
 ## Key Modules
 
-### Main Process (`src/main/`)
+### Tauri Host (`src-tauri/`)
 
-- **`index.ts`** — App lifecycle, window creation, application menu.
-- **`ipc.ts`** — Registers 14+ Zod-validated IPC handlers. Every message between processes is validated against a schema before processing.
-- **`parser.ts`** — Markdown → AST pipeline using unified/remark. Parses frontmatter, wiki-links, toggle blocks, and task lists into a structured tree.
-- **`state.ts`** — Central state: vault file tree, AST cache (LRU), full-text index, tag index, file hash map. All mutations go through the `PendingWriteLock`.
-- **`watcher.ts`** — chokidar-based file watcher with configurable debounce, restart on error, and filtering for `.md` and `.nabu/` cache files.
-- **`settings.ts`** — Persists user settings (theme, vault path, preferences) as JSON in Electron's `userData`.
-- **`vector.ts`** — ONNX-based vector index for semantic context search. Uses the bundled `bge-micro-v2` model.
-- **`templates.ts`** — Template engine that substitutes `{{title}}`, `{{date}}`, `{{time}}` variables in template files.
+- `Cargo.toml`, `build.rs` (`tauri_build::build()`), `tauri.conf.json` — shell
+  configuration, window definition, bundle/icons, and the beforeDev/beforeBuild
+  hooks that build the Dioxus frontend.
+- `src/main.rs` / `src/lib.rs` — Tauri application entry point and plugin setup.
+- `src/commands.rs` — `#[tauri::command]` handlers exposing `nabu-core` to the
+  UI (inbox, templates, history, recovery, statistics, settings, dictation, IPC).
+- `src/settings.rs` — settings persistence via Tauri's settings layer.
+- `src/dictation.rs` — dictation IPC wiring (clipboard cache, file-drop capture).
+- `src/history.rs`, `src/recovery.rs`, `src/diagnostics.rs`, `src/event_bridge.rs`
+  — history/recovery session management, diagnostics, and native-event bridging.
+- `scripts/` — build/dev scripts (`build-dioxus.sh`, `run-dioxus.sh`,
+  `gen-icons.sh`).
 
-### Preload (`src/preload/`)
+### Rust Core (`crates/nabu-core/`)
 
-- **`index.ts`** — `contextBridge.exposeInMainWorld` exposing a typed `electronAPI` object. Each method maps to an IPC channel validated by Zod.
-- **`index.d.ts`** — Type declarations for the global `electronAPI` used by the renderer.
+- `src/models/` — `KnowledgeObject`, content types, capture sources, metadata.
+- `src/storage/` — vault persistence via the `StorageManager` and sidecar stores.
+- `src/indexer.rs` — full-text, tag, and graph indexes; `KnowledgeGraph`.
+- `src/capture/` — capture handlers (clipboard, screenshot, file drop, watch
+  folder, URL, email, GitHub, YouTube) producing `KnowledgeObject`s.
+- `src/processing/` — processing pipelines, OCR (Vision), embeddings,
+  transcription (whisper).
+- `src/native/` — macOS FFI: `screenshot` (`screencapture`), `vision` (OCR),
+  `whisper` (transcription), `pdfkit`.
+- `src/acp/` — ACP (Agent Communication Protocol) server and client over stdio.
+- `src/mcp/` — MCP (Model Context Protocol) server.
+- `src/rpc/` — JSON-RPC types shared by ACP/MCP.
+- `src/bin/` — `nabu-mcp-server` and `acp-test-agent` binaries.
 
-### Renderer (`src/renderer/`)
+### UI (`crates/nabu-ui/`)
 
-- **`App.tsx`** — Root component: manages app state via `useReducer`, wires IPC listeners, renders the layout (sidebar + content area).
-- **`components/SetupWizard.tsx`** — First-launch flow for creating or opening a vault.
-- **`components/FileTree.tsx`** — Recursive tree of files and folders with context menus for rename, delete, create.
-- **`components/NoteView.tsx`** — Renders note content from the parsed AST. Supports inline editing (`Cmd+E`), auto-save (1s debounce), and backlinks panel.
-- **`components/blocks/`** — Custom renderers for remark AST node types:
-  - `CodeBlock.tsx` — Syntax-highlighted code with copy button
-  - `TaskList.tsx` — Interactive checkboxes that persist to disk
-  - `ToggleBlock.tsx` — Collapsible toggle sections (`> [!faq]-`)
-  - `WikiLink.tsx` — Clickable `[[page-name]]` links with fuzzy navigation
-- **`components/GraphView.tsx`** — d3-force directed graph on HTML Canvas. Nodes are notes, edges are wiki-links. Drag, pan, zoom.
-- **`components/SettingsPanel.tsx`** — Theme switching (dark/light/system), vault path management.
-- **`components/TagsPanel.tsx`** — Tag browsing and filtering from YAML frontmatter.
-- **`components/Sidebar.tsx`** — Layout shell: file tree, search, tag panel, settings toggle.
-- **`components/ContextPane.tsx`** — Backlinks and context for the active note.
-- **`components/ActivityTimeline.tsx`** — Recent file changes and activity log.
-- **`components/Versions.tsx`** — Electron and app version display.
+A standalone Dioxus 0.6.3 workspace (`crate-type = ["cdylib", "rlib"]`),
+compiled to `wasm32-unknown-unknown` and bundled into the Tauri WebView.
 
-### Shared (`src/shared/`)
-
-- **`channels.ts`** — IPC channel enum (string constants for every channel).
-- **`schemas.ts`** — Zod v4 schemas for every IPC message. One schema per channel.
-- **`types.ts`** — TypeScript interfaces and types used across both processes.
-- **`graph.ts`** — Pure function for building a graph from wiki-link relationships. Idempotent, no side effects.
-- **`indexing.ts`** — Pure functions for building full-text and tag indexes from parsed notes.
+- `src/lib.rs` — Dioxus app entry: the `App` root component and view routing.
+- `src/components/` — view-mode components (settings panel, inbox, templates,
+  history, recovery, statistics, dictation pill).
+- `src/ipc.rs` — typed IPC clients that invoke the `#[tauri::command]`
+  handlers in `src-tauri/src/commands.rs`.
+- `index.html` + Tailwind (`npm run css:build` → `generated/tailwind.css`) —
+  boot splash and stylesheet consumed by the build/dev hooks.
 
 ## Security Architecture
 
-### Sandboxed HTML Rendering
+The UI runs as a **sandboxed WebView** rather than a Node-integrated renderer:
 
-User-authored HTML content (embedded in markdown notes) is rendered inside a **sandboxed iframe**. The iframe uses the `sandbox` attribute with minimal permissions:
-
-```html
-<iframe
-  sandbox="allow-scripts"
-  src="about:blank"
-></iframe>
-```
-
-- `nodeIntegration` is **disabled** — no access to Node.js APIs.
-- `contextIsolation` is **enabled** — no access to Electron internals.
-- The iframe communicates with Nabu only via `window.postMessage`.
-
-### IPC Security
-
-- Every IPC message is validated against a **Zod schema** before the handler executes.
-- Channel names are string enums — no dynamic channel routing.
-- The preload script exposes only a curated set of functions via `contextBridge`. The renderer never has direct access to `ipcRenderer`.
+- The Dioxus/WASM bundle has no Node.js access and no direct filesystem access.
+- All privileged operations are gated behind explicitly-declared Tauri commands
+  (`src-tauri/src/commands.rs`). The webview invokes each command by name; there
+  is no dynamic channel routing.
+- IPC arguments are typed at the Rust call sites via serde across the Tauri
+  bridge, and sensitive operations (vault path, file writes) are validated
+  server-side.
 
 ## Tech Decisions
 
-- **Electron** over Tauri for mature file-watching and simpler native module bundling.
-- **Tailwind CSS v4** over CSS-in-JS for zero runtime cost and consistent design tokens.
-- **Zod v4** over JSON Schema for cleaner TypeScript inference and dual-process validation.
-- **useReducer + Context** over Redux for simplicity — the state shape is not complex enough to warrant a store library.
-- **d3-force** over a graph library for full control over the physics simulation and rendering.
+- **Tauri v2** over Electron — a Rust core running in a single native WebView,
+  yielding a far smaller bundle size and attack surface than an Electron/Node
+  runtime.
+- **Dioxus 0.6 (WASM)** over React — a native-Rust UI compiled to WebAssembly
+  that shares types and logic directly with `nabu-core`.
+- **Tailwind CSS** for styling — the stylesheet is built at compile time
+  (`npm run css:build`) rather than shipped as a runtime CSS-in-JS dependency.
+- **ACP + MCP** for agent/tool integration — both protocols are implemented
+  natively in Rust within `crates/nabu-core` (`src/acp/`, `src/mcp/`).
+- **useReducer + Context** over Redux — retained for the Dioxus app state; the
+  state shape is not complex enough to warrant a store library.

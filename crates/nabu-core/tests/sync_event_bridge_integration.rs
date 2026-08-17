@@ -36,13 +36,16 @@ use std::thread;
 use nabu_core::event_bus::kinds;
 use nabu_core::event_bus::{EventBus, PipelineEvent};
 use nabu_core::sync::{
-    publish_sync_status_changed, SyncStatus, SyncStatusChanged, SyncSubscriber,
-    SyncProgress, SyncError,
+    publish_sync_status_changed, SyncError, SyncProgress, SyncStatus, SyncStatusChanged,
+    SyncSubscriber,
 };
 
 /// Helper: a simple forwarding callback that counts events received.
 /// In production, this would be the IPC bridge's `forward_to_tauri` function.
-fn counting_forwarder() -> (Arc<AtomicUsize>, Arc<dyn Fn(&SyncStatusChanged) + Send + Sync>) {
+fn counting_forwarder() -> (
+    Arc<AtomicUsize>,
+    Arc<dyn Fn(&SyncStatusChanged) + Send + Sync>,
+) {
     let count = Arc::new(AtomicUsize::new(0));
     let count_clone = count.clone();
     let callback: Arc<dyn Fn(&SyncStatusChanged) + Send + Sync> =
@@ -234,8 +237,7 @@ fn sync_event_bridge_invalid_progress_dropped_at_publish() {
     subscriber.register(&bus).unwrap();
 
     let bad_progress = SyncProgress::new("test").with_percentage(150.0);
-    let event = SyncStatusChanged::new("f1", "s", SyncStatus::Syncing)
-        .with_progress(bad_progress);
+    let event = SyncStatusChanged::new("f1", "s", SyncStatus::Syncing).with_progress(bad_progress);
 
     publish_sync_status_changed(&bus, &event);
 
@@ -335,7 +337,10 @@ fn sync_event_bridge_concurrent_publication() {
         handle.join().unwrap();
     }
 
-    assert_eq!(count.load(Ordering::SeqCst), num_threads * events_per_thread);
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        num_threads * events_per_thread
+    );
 }
 
 #[test]
@@ -359,11 +364,8 @@ fn sync_event_bridge_concurrent_multiple_folders() {
         let folder_id = format!("folder-{i}");
         handles.push(thread::spawn(move || {
             for j in 0..25 {
-                let event = SyncStatusChanged::new(
-                    folder_id.clone(),
-                    "syncthing",
-                    SyncStatus::Syncing,
-                );
+                let event =
+                    SyncStatusChanged::new(folder_id.clone(), "syncthing", SyncStatus::Syncing);
                 publish_sync_status_changed(&bus, &event);
                 let _ = j;
             }
@@ -466,10 +468,7 @@ fn sync_event_bridge_subscription_can_unsubscribe() {
     });
     let subscription = subscriber.register(&bus).unwrap();
 
-    publish_sync_status_changed(
-        &bus,
-        &SyncStatusChanged::new("f1", "s", SyncStatus::Idle),
-    );
+    publish_sync_status_changed(&bus, &SyncStatusChanged::new("f1", "s", SyncStatus::Idle));
     assert_eq!(count.load(Ordering::SeqCst), 1);
 
     // Unsubscribe and verify no more events are received.
@@ -488,10 +487,7 @@ fn sync_event_bridge_subscription_can_unsubscribe() {
     });
     sub2.register(&bus).unwrap();
 
-    publish_sync_status_changed(
-        &bus,
-        &SyncStatusChanged::new("f3", "s", SyncStatus::Idle),
-    );
+    publish_sync_status_changed(&bus, &SyncStatusChanged::new("f3", "s", SyncStatus::Idle));
     assert_eq!(count2.load(Ordering::SeqCst), 1);
 }
 

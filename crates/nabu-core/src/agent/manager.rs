@@ -64,12 +64,8 @@ use crate::acp::types::{
 };
 use crate::event_bus::{EventBus, PipelineEvent};
 use crate::process_supervisor::{ProcessConfig, ProcessId, ProcessState, ProcessSupervisor};
-use crate::registry::lifecycle::{
-    Lifecycle, LifecycleManager, LifecycleStage,
-};
-use crate::registry::metrics::{
-    CounterMetric, GaugeMetric, MetricsAggregator, ServiceMetrics,
-};
+use crate::registry::lifecycle::{Lifecycle, LifecycleManager, LifecycleStage};
+use crate::registry::metrics::{CounterMetric, GaugeMetric, MetricsAggregator, ServiceMetrics};
 use crate::streaming::StreamingPipeline;
 
 use super::acp_client::AcpClient;
@@ -476,13 +472,20 @@ impl AgentManager {
                 .get(name)
                 .ok_or_else(|| AgentManagerError::AgentNotFound(name.to_string()))?;
             let proc = process_handle.lock().expect("agent process lock poisoned");
-            proc.config.process.working_dir
+            proc.config
+                .process
+                .working_dir
                 .as_ref()
                 .map(|p| p.to_string_lossy().to_string())
         };
 
         let new_session_req = NewSessionRequest {
-            cwd: cwd.unwrap_or_else(|| std::env::current_dir().unwrap().to_string_lossy().to_string()),
+            cwd: cwd.unwrap_or_else(|| {
+                std::env::current_dir()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+            }),
             mcp_servers: vec![],
             additional_directories: vec![],
             _meta: None,
@@ -599,7 +602,11 @@ impl AgentManager {
             // Wait briefly for the process to terminate
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
             while std::time::Instant::now() < deadline {
-                if self.supervisor.get_state(pid).is_none_or(|s| s.is_terminal()) {
+                if self
+                    .supervisor
+                    .get_state(pid)
+                    .is_none_or(|s| s.is_terminal())
+                {
                     break;
                 }
                 std::thread::sleep(MONITOR_POLL_INTERVAL);
@@ -641,7 +648,12 @@ impl AgentManager {
             let proc = process_handle.lock().expect("agent process lock poisoned");
             proc.metadata.start_count
         };
-        self.publish_agent_restarted(name, supervisor_pid, restart_count, "user requested restart");
+        self.publish_agent_restarted(
+            name,
+            supervisor_pid,
+            restart_count,
+            "user requested restart",
+        );
 
         Ok(supervisor_pid)
     }
@@ -743,7 +755,12 @@ impl AgentManager {
             let proc = process_handle.lock().expect("agent process lock poisoned");
             proc.metadata.start_count
         };
-        self.publish_agent_restarted(name, supervisor_pid, restart_count, "user requested restart");
+        self.publish_agent_restarted(
+            name,
+            supervisor_pid,
+            restart_count,
+            "user requested restart",
+        );
 
         Ok(supervisor_pid)
     }
@@ -764,9 +781,9 @@ impl AgentManager {
             .ok_or_else(|| AgentManagerError::AgentNotFound(name.to_string()))?;
 
         // Enrich with the process supervisor's snapshot
-        let process_snapshot = snapshot.process_id.and_then(|pid| {
-            self.supervisor.get_snapshot(pid)
-        });
+        let process_snapshot = snapshot
+            .process_id
+            .and_then(|pid| self.supervisor.get_snapshot(pid));
 
         let process_state = process_snapshot.as_ref().map(|s| s.state);
 
@@ -807,9 +824,9 @@ impl AgentManager {
             .into_iter()
             .map(|mut s| {
                 // Enrich with process supervisor snapshot
-                s.process_snapshot = s.process_id.and_then(|pid| {
-                    self.supervisor.get_snapshot(pid)
-                });
+                s.process_snapshot = s
+                    .process_id
+                    .and_then(|pid| self.supervisor.get_snapshot(pid));
                 s.process_state = s.process_snapshot.as_ref().map(|ps| ps.state);
                 s
             })
@@ -913,12 +930,8 @@ impl AgentManager {
         if let Some(bus) = &self.event_bus {
             let pid = self.supervisor.get_pid(process_id);
             let kind_str = config.kind.to_string();
-            let event = crate::event_bus::events::AgentStartedEvent::new(
-                process_id,
-                name,
-                &kind_str,
-                pid,
-            );
+            let event =
+                crate::event_bus::events::AgentStartedEvent::new(process_id, name, &kind_str, pid);
             bus.publish(
                 crate::event_bus::kinds::AGENT_STARTED,
                 &PipelineEvent::Agent(crate::event_bus::events::AgentEvent::Started(event)),
@@ -928,11 +941,7 @@ impl AgentManager {
 
     fn publish_agent_stopped(&self, name: &str, process_id: ProcessId, reason: &str) {
         if let Some(bus) = &self.event_bus {
-            let event = crate::event_bus::events::AgentStoppedEvent::new(
-                process_id,
-                name,
-                reason,
-            );
+            let event = crate::event_bus::events::AgentStoppedEvent::new(process_id, name, reason);
             bus.publish(
                 crate::event_bus::kinds::AGENT_STOPPED,
                 &PipelineEvent::Agent(crate::event_bus::events::AgentEvent::Stopped(event)),
@@ -940,7 +949,13 @@ impl AgentManager {
         }
     }
 
-    fn publish_agent_restarted(&self, name: &str, process_id: ProcessId, restart_count: u32, reason: &str) {
+    fn publish_agent_restarted(
+        &self,
+        name: &str,
+        process_id: ProcessId,
+        restart_count: u32,
+        reason: &str,
+    ) {
         if let Some(bus) = &self.event_bus {
             let event = crate::event_bus::events::AgentRestartedEvent::new(
                 process_id,
@@ -956,7 +971,15 @@ impl AgentManager {
     }
 
     #[allow(dead_code)]
-    fn publish_agent_crashed(&self, name: &str, process_id: ProcessId, error: String, exit_code: Option<i32>, pid: Option<u32>, restart_count: u32) {
+    fn publish_agent_crashed(
+        &self,
+        name: &str,
+        process_id: ProcessId,
+        error: String,
+        exit_code: Option<i32>,
+        pid: Option<u32>,
+        restart_count: u32,
+    ) {
         if let Some(bus) = &self.event_bus {
             let event = crate::event_bus::events::AgentCrashedEvent::new(
                 process_id,
@@ -1258,10 +1281,7 @@ mod tests {
         // Not initialized yet
         let config = AgentConfig::new("test", "echo");
         let result = manager.register(config);
-        assert!(matches!(
-            result,
-            Err(AgentManagerError::NotReady { .. })
-        ));
+        assert!(matches!(result, Err(AgentManagerError::NotReady { .. })));
     }
 
     #[test]
@@ -1336,8 +1356,8 @@ mod tests {
         manager.initialize().unwrap();
         manager.start().unwrap();
 
-        let config = AgentConfig::new("test-agent", "echo")
-            .with_restart_policy(RestartPolicy::Never);
+        let config =
+            AgentConfig::new("test-agent", "echo").with_restart_policy(RestartPolicy::Never);
         manager.register(config).unwrap();
 
         let summary = manager.summary();
@@ -1419,16 +1439,20 @@ mod tests {
         manager.start().unwrap();
 
         // Register and start multiple agents
-        manager.register(
-            AgentConfig::new("sleeper-1", "sleep")
-                .with_arg("30".to_string())
-                .with_restart_policy(RestartPolicy::Never)
-        ).unwrap();
-        manager.register(
-            AgentConfig::new("sleeper-2", "sleep")
-                .with_arg("30".to_string())
-                .with_restart_policy(RestartPolicy::Never)
-        ).unwrap();
+        manager
+            .register(
+                AgentConfig::new("sleeper-1", "sleep")
+                    .with_arg("30".to_string())
+                    .with_restart_policy(RestartPolicy::Never),
+            )
+            .unwrap();
+        manager
+            .register(
+                AgentConfig::new("sleeper-2", "sleep")
+                    .with_arg("30".to_string())
+                    .with_restart_policy(RestartPolicy::Never),
+            )
+            .unwrap();
 
         let _pid1 = manager.start_agent("sleeper-1").unwrap();
         let _pid2 = manager.start_agent("sleeper-2").unwrap();
@@ -1460,16 +1484,24 @@ mod tests {
         let stopped_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
         let started_clone = started_count.clone();
-        bus.subscribe(crate::event_bus::kinds::AGENT_STARTED, move |_event: &PipelineEvent| {
-            started_clone.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-        });
+        bus.subscribe(
+            crate::event_bus::kinds::AGENT_STARTED,
+            move |_event: &PipelineEvent| {
+                started_clone.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            },
+        );
 
         let stopped_clone = stopped_count.clone();
-        bus.subscribe(crate::event_bus::kinds::AGENT_STOPPED, move |_event: &PipelineEvent| {
-            stopped_clone.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-        });
+        bus.subscribe(
+            crate::event_bus::kinds::AGENT_STOPPED,
+            move |_event: &PipelineEvent| {
+                stopped_clone.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            },
+        );
 
-        manager.register(AgentConfig::new("test", "echo").with_restart_policy(RestartPolicy::Never)).unwrap();
+        manager
+            .register(AgentConfig::new("test", "echo").with_restart_policy(RestartPolicy::Never))
+            .unwrap();
         manager.start_agent("test").unwrap();
 
         // The event should have been published synchronously

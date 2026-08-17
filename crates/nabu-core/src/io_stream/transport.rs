@@ -270,9 +270,7 @@ impl StdioTransport {
     /// transport (the real work happens in `start_transport`).
     pub fn start_transport(&self) -> TransportResult<()> {
         if self.lifecycle.is_shutdown() {
-            return Err(TransportError::lifecycle(
-                "transport is already shut down",
-            ));
+            return Err(TransportError::lifecycle("transport is already shut down"));
         }
 
         if !self.lifecycle.is_at_least(LifecycleStage::Initialized) {
@@ -286,8 +284,8 @@ impl StdioTransport {
         }
 
         // Ensure we're in a tokio runtime
-        let runtime_handle = tokio::runtime::Handle::try_current()
-            .map_err(|_| TransportError::NoRuntime)?;
+        let runtime_handle =
+            tokio::runtime::Handle::try_current().map_err(|_| TransportError::NoRuntime)?;
 
         // Clone the router and writer into the task
         let router = self.router.clone();

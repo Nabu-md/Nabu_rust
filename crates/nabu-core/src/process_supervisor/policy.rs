@@ -267,10 +267,7 @@ mod tests {
         assert_eq!(RestartPolicy::Never.max_restarts(), Some(0));
         assert_eq!(RestartPolicy::Always.max_restarts(), None);
         assert_eq!(RestartPolicy::OnFailure.max_restarts(), None);
-        assert_eq!(
-            RestartPolicy::limited_retries(5).max_restarts(),
-            Some(5)
-        );
+        assert_eq!(RestartPolicy::limited_retries(5).max_restarts(), Some(5));
     }
 
     #[test]

@@ -5621,6 +5621,34 @@ pub(crate) async fn acp_list_sessions_impl(ctx: &ApplicationContext) -> Result<V
     manager.list_sessions().await.map_err(|e| e.to_string())
 }
 
+/// Delivers a user's permission response to the awaiting ACP handler.
+///
+/// Called from the frontend after the user approves or denies a permission
+/// request shown via an `AcpPermissionRequested` platform event. The
+/// `thread_id` identifies the session; `request_id` matches the pending
+/// oneshot in `NabuAcpHandler::request_permission`.
+#[tauri::command]
+pub async fn acp_permission_respond(
+    ctx: State<'_, ApplicationContext>,
+    thread_id: String,
+    request_id: String,
+    outcome: nabu_core::acp::types::PermissionOutcome,
+) -> Result<(), String> {
+    let manager = ctx
+        .resolve::<nabu_core::agent::AcpSessionManager>("acp_session_manager")
+        .ok_or_else(|| "AcpSessionManager is not registered".to_string())?;
+
+    let thread_uuid = uuid::Uuid::parse_str(&thread_id)
+        .map_err(|e| format!("Invalid thread id: {e}"))?;
+    let request_uuid = uuid::Uuid::parse_str(&request_id)
+        .map_err(|e| format!("Invalid request id: {e}"))?;
+
+    manager
+        .respond_to_permission(thread_uuid, request_uuid, outcome)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Response for the `acp_list_sessions` command.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcpSessionSummary {

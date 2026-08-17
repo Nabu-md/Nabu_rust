@@ -28,11 +28,11 @@ use nabu_core::jobs::{DurableJobQueue, ExecutorRegistry, Job, JobStatus, Queue, 
 use nabu_core::models::{KnowledgeObject, ObjectContent, ObjectType, Thread};
 use nabu_core::pipeline_migration::PipelineExecutor;
 use nabu_core::processing::ProcessingPipeline;
-use nabu_core::registry::lifecycle::LifecycleStage;
-use nabu_core::registry::Application;
-use nabu_core::registry::health::{HealthStatus, LifecycleStageInfo};
 use nabu_core::registry::context::ApplicationContext;
 use nabu_core::registry::context::ApplicationContextBuilder;
+use nabu_core::registry::health::{HealthStatus, LifecycleStageInfo};
+use nabu_core::registry::lifecycle::LifecycleStage;
+use nabu_core::registry::Application;
 use nabu_core::registry::ServiceRegistry;
 use nabu_core::storage::StorageManager;
 use tempfile::tempdir;
@@ -66,7 +66,8 @@ fn build_full_context() -> (ApplicationContext, tempfile::TempDir) {
 
 fn build_full_context_on(vault_path: std::path::PathBuf) -> ApplicationContext {
     let event_bus: Arc<EventBus<PipelineEvent>> = Arc::new(EventBus::new());
-    let registry: Arc<StdRwLock<ServiceRegistry>> = Arc::new(StdRwLock::new(ServiceRegistry::new()));
+    let registry: Arc<StdRwLock<ServiceRegistry>> =
+        Arc::new(StdRwLock::new(ServiceRegistry::new()));
 
     let mut capability_registry = nabu_core::plugin::CapabilityRegistry::new();
     capability_registry.register_builtin();
@@ -104,8 +105,7 @@ fn build_full_context_on(vault_path: std::path::PathBuf) -> ApplicationContext {
     ctx.register("pipeline", pipeline.clone());
 
     let queue = Arc::new(
-        DurableJobQueue::new(vault_path.join(".nabu").join("queue"))
-            .expect("DurableJobQueue"),
+        DurableJobQueue::new(vault_path.join(".nabu").join("queue")).expect("DurableJobQueue"),
     );
     ctx.register("job_queue", queue.clone());
     ctx.register_metrics_aggregator("job_queue", queue.clone());
@@ -132,7 +132,6 @@ fn build_full_context_on(vault_path: std::path::PathBuf) -> ApplicationContext {
 
     ctx
 }
-
 
 // ---------------------------------------------------------------------------
 // Helper: Build a minimal Application (required services only) on a temp vault
@@ -283,9 +282,12 @@ async fn lifecycle_full_storage_publishes_item_stored_event() {
 
     let event_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let event_count_clone = event_count.clone();
-    event_bus.subscribe(nabu_core::event_bus::kinds::ITEM_STORED, move |_event: &PipelineEvent| {
-        event_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    });
+    event_bus.subscribe(
+        nabu_core::event_bus::kinds::ITEM_STORED,
+        move |_event: &PipelineEvent| {
+            event_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        },
+    );
 
     storage.save(&test_knowledge_object()).expect("save");
 
@@ -389,7 +391,10 @@ async fn lifecycle_full_double_shutdown_is_safe() {
     assert!(ctx.is_shutdown());
 
     let second = ctx.shutdown();
-    assert!(second.is_ok(), "second shutdown should be a no-op, not an error");
+    assert!(
+        second.is_ok(),
+        "second shutdown should be a no-op, not an error"
+    );
     assert!(ctx.is_shutdown());
 }
 
@@ -423,7 +428,10 @@ async fn lifecycle_full_health_check_after_shutdown() {
     let health_shutdown = ctx.health_check();
     assert!(health_shutdown.initialized);
     assert!(!health_shutdown.running);
-    assert_eq!(health_shutdown.lifecycle_stage, LifecycleStageInfo::Shutdown);
+    assert_eq!(
+        health_shutdown.lifecycle_stage,
+        LifecycleStageInfo::Shutdown
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -528,7 +536,10 @@ async fn lifecycle_full_job_queue_survives_restart() {
             serde_json::json!({ "order": 42 }),
             "metadata_extraction",
         );
-        ctx.job_queue().expect("job_queue").enqueue(job).expect("enqueue");
+        ctx.job_queue()
+            .expect("job_queue")
+            .enqueue(job)
+            .expect("enqueue");
 
         ctx.shutdown().ok();
     }
@@ -581,8 +592,14 @@ async fn lifecycle_full_session_restoration() {
         ctx.initialize().expect("initialize");
         ctx.start().expect("start");
 
-        ctx.storage_manager().expect("storage").save(&saved_obj).expect("save obj");
-        ctx.conversation_store().expect("conv").save(&saved_thread).expect("save thread");
+        ctx.storage_manager()
+            .expect("storage")
+            .save(&saved_obj)
+            .expect("save obj");
+        ctx.conversation_store()
+            .expect("conv")
+            .save(&saved_thread)
+            .expect("save thread");
 
         let health = ctx.health_check();
         assert_eq!(health.overall_status, HealthStatus::Healthy);
@@ -698,7 +715,10 @@ async fn lifecycle_full_health_check_stage_reflects_current_phase() {
     // After shutdown — Shutdown
     ctx.shutdown().expect("shutdown");
     let health_shutdown = ctx.health_check();
-    assert_eq!(health_shutdown.lifecycle_stage, LifecycleStageInfo::Shutdown);
+    assert_eq!(
+        health_shutdown.lifecycle_stage,
+        LifecycleStageInfo::Shutdown
+    );
     assert!(!health_shutdown.running);
     assert!(health_shutdown.initialized);
 }
@@ -767,9 +787,12 @@ async fn lifecycle_full_event_bus_subscribes_and_receives_events() {
     let received = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let received_clone = received.clone();
 
-    event_bus.subscribe(nabu_core::event_bus::kinds::ITEM_STORED, move |_event: &PipelineEvent| {
-        received_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    });
+    event_bus.subscribe(
+        nabu_core::event_bus::kinds::ITEM_STORED,
+        move |_event: &PipelineEvent| {
+            received_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        },
+    );
 
     let storage = ctx.storage_manager().expect("storage");
     storage.save(&test_knowledge_object()).expect("save");
@@ -794,12 +817,18 @@ async fn lifecycle_full_event_bus_multiple_subscribers_receive_events() {
     let counter_a_clone = counter_a.clone();
     let counter_b_clone = counter_b.clone();
 
-    event_bus.subscribe(nabu_core::event_bus::kinds::ITEM_STORED, move |_event: &PipelineEvent| {
-        counter_a_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    });
-    event_bus.subscribe(nabu_core::event_bus::kinds::ITEM_STORED, move |_event: &PipelineEvent| {
-        counter_b_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    });
+    event_bus.subscribe(
+        nabu_core::event_bus::kinds::ITEM_STORED,
+        move |_event: &PipelineEvent| {
+            counter_a_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        },
+    );
+    event_bus.subscribe(
+        nabu_core::event_bus::kinds::ITEM_STORED,
+        move |_event: &PipelineEvent| {
+            counter_b_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        },
+    );
 
     let storage = ctx.storage_manager().expect("storage");
     storage.save(&test_knowledge_object()).expect("save");
@@ -820,15 +849,21 @@ async fn lifecycle_full_event_bus_event_delivery_after_shutdown_stops() {
     let received = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let received_clone = received.clone();
 
-    event_bus.subscribe(nabu_core::event_bus::kinds::ITEM_STORED, move |_event: &PipelineEvent| {
-        received_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    });
+    event_bus.subscribe(
+        nabu_core::event_bus::kinds::ITEM_STORED,
+        move |_event: &PipelineEvent| {
+            received_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        },
+    );
 
     let storage = ctx.storage_manager().expect("storage");
     storage.save(&test_knowledge_object()).expect("save");
 
     let count_before = received.load(std::sync::atomic::Ordering::SeqCst);
-    assert!(count_before >= 1, "should have received events while running");
+    assert!(
+        count_before >= 1,
+        "should have received events while running"
+    );
 
     ctx.shutdown().expect("shutdown");
 
@@ -839,5 +874,8 @@ async fn lifecycle_full_event_bus_event_delivery_after_shutdown_stops() {
     // The event bus subscription remains, but the context is no longer running.
     // No new events should be published by the context's lifecycle management.
     let count_after = received.load(std::sync::atomic::Ordering::SeqCst);
-    assert_eq!(count_before, count_after, "no new events should fire after shutdown");
+    assert_eq!(
+        count_before, count_after,
+        "no new events should fire after shutdown"
+    );
 }

@@ -41,12 +41,7 @@ fn sync_model_integration_folder_new() {
 #[test]
 fn sync_model_integration_folder_with_id() {
     let id = Uuid::new_v4();
-    let folder = SyncFolder::with_id(
-        id,
-        "/data/photos",
-        "Photos",
-        "icloud",
-    );
+    let folder = SyncFolder::with_id(id, "/data/photos", "Photos", "icloud");
     assert_eq!(folder.id, id);
 }
 
@@ -156,7 +151,10 @@ fn sync_model_integration_folder_serde_ignores_unknown_fields() {
     assert_eq!(folder.display_name, "Vault");
     assert_eq!(folder.provider_id, "syncthing");
     assert_eq!(folder.status, SyncStatus::Conflict);
-    assert_eq!(folder.config.conflict_resolution, ConflictResolution::KeepLocal);
+    assert_eq!(
+        folder.config.conflict_resolution,
+        ConflictResolution::KeepLocal
+    );
     assert_eq!(folder.config.encryption_enabled, true);
 }
 
@@ -214,8 +212,14 @@ fn sync_model_integration_status_serialized_strings() {
 #[test]
 fn sync_model_integration_status_display_matches_label() {
     assert_eq!(format!("{}", SyncStatus::Idle), SyncStatus::Idle.label());
-    assert_eq!(format!("{}", SyncStatus::Syncing), SyncStatus::Syncing.label());
-    assert_eq!(format!("{}", SyncStatus::UpToDate), SyncStatus::UpToDate.label());
+    assert_eq!(
+        format!("{}", SyncStatus::Syncing),
+        SyncStatus::Syncing.label()
+    );
+    assert_eq!(
+        format!("{}", SyncStatus::UpToDate),
+        SyncStatus::UpToDate.label()
+    );
 }
 
 #[test]

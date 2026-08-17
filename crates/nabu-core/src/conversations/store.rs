@@ -114,10 +114,12 @@ impl ConversationStore {
         Self::with_vault_path(vault_path, Some(event_bus))
     }
 
-    fn with_vault_path(vault_path: impl Into<PathBuf>, event_bus: Option<EventBus<PipelineEvent>>) -> Self {
+    fn with_vault_path(
+        vault_path: impl Into<PathBuf>,
+        event_bus: Option<EventBus<PipelineEvent>>,
+    ) -> Self {
         let vault_path = vault_path.into();
-        let conversations_dir =
-            vault_path.join(".nabu").join(CONVERSATIONS_DIR_NAME);
+        let conversations_dir = vault_path.join(".nabu").join(CONVERSATIONS_DIR_NAME);
         let manifest_path = conversations_dir.join(MANIFEST_FILE_NAME);
 
         Self {
@@ -291,12 +293,11 @@ impl ConversationStore {
         }
 
         let json = std::fs::read_to_string(&file_path)?;
-        let thread: Thread = serde_json::from_str(&json).map_err(|e| {
-            PersistenceError::DeserializationError {
+        let thread: Thread =
+            serde_json::from_str(&json).map_err(|e| PersistenceError::DeserializationError {
                 target: id.to_string(),
                 message: e.to_string(),
-            }
-        })?;
+            })?;
 
         Self::validate_thread(&thread)?;
 
@@ -504,10 +505,7 @@ impl ConversationStore {
             }
         }
 
-        tracing::info!(
-            threads = count,
-            "Loaded conversations from disk"
-        );
+        tracing::info!(threads = count, "Loaded conversations from disk");
 
         Ok(count)
     }
@@ -570,8 +568,7 @@ impl Lifecycle for ConversationStore {
         self.ensure_dirs()?;
         let count = self.reload_from_disk()?;
 
-        self.lifecycle
-            .transition_to(LifecycleStage::Initialized)?;
+        self.lifecycle.transition_to(LifecycleStage::Initialized)?;
 
         tracing::info!(
             subsystem = "conversations",
@@ -586,13 +583,10 @@ impl Lifecycle for ConversationStore {
 
     fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         if self.lifecycle.is_shutdown() {
-            return Err(
-                "ConversationStore has been shut down and cannot be restarted".into(),
-            );
+            return Err("ConversationStore has been shut down and cannot be restarted".into());
         }
         if self.lifecycle.stage() == LifecycleStage::Created {
-            self.lifecycle
-                .transition_to(LifecycleStage::Initialized)?;
+            self.lifecycle.transition_to(LifecycleStage::Initialized)?;
         }
         self.lifecycle.transition_to(LifecycleStage::Running)?;
 
@@ -617,8 +611,7 @@ impl Lifecycle for ConversationStore {
         // Flush: ensure the manifest is consistent with the in-memory cache.
         let _ = self.write_manifest();
 
-        self.lifecycle
-            .transition_to(LifecycleStage::Shutdown)?;
+        self.lifecycle.transition_to(LifecycleStage::Shutdown)?;
 
         tracing::info!(
             subsystem = "conversations",
@@ -661,9 +654,9 @@ mod tests {
 
         let msg = Message::new_anonymous()
             .with_role(Role::System)
-            .with_turn(
-                Turn::new_anonymous(TurnContent::text("You are a helpful assistant.")),
-            );
+            .with_turn(Turn::new_anonymous(TurnContent::text(
+                "You are a helpful assistant.",
+            )));
         thread = thread.with_message(msg);
 
         let user_msg = Message::new_anonymous()
@@ -673,7 +666,9 @@ mod tests {
 
         let assistant_msg = Message::new_anonymous()
             .with_role(Role::Assistant)
-            .with_turn(Turn::new_anonymous(TurnContent::text("Hi there! How can I help?")));
+            .with_turn(Turn::new_anonymous(TurnContent::text(
+                "Hi there! How can I help?",
+            )));
         thread = thread.with_message(assistant_msg);
 
         thread
@@ -1023,9 +1018,7 @@ mod tests {
 
         // All message IDs should be preserved after save/reload.
         assert_eq!(loaded.messages.len(), thread.messages.len());
-        for (original, restored) in
-            thread.messages.iter().zip(loaded.messages.iter())
-        {
+        for (original, restored) in thread.messages.iter().zip(loaded.messages.iter()) {
             assert_eq!(original.id, restored.id);
             assert_eq!(original.thread_id, restored.thread_id);
         }
@@ -1038,7 +1031,9 @@ mod tests {
 
         let turn = Turn::new(Uuid::new_v4(), Uuid::new_v4(), TurnContent::text("content"));
         let mut thread = Thread::new().with_title("Turn Test");
-        let msg = Message::new_anonymous().with_role(Role::User).with_turn(turn.clone());
+        let msg = Message::new_anonymous()
+            .with_role(Role::User)
+            .with_turn(turn.clone());
         thread = thread.with_message(msg);
 
         store.save(&thread).unwrap();
@@ -1046,7 +1041,10 @@ mod tests {
 
         assert_eq!(loaded.messages[0].turns.len(), 1);
         assert_eq!(loaded.messages[0].turns[0].id, turn.id);
-        assert_eq!(loaded.messages[0].turns[0].message_id, loaded.messages[0].id);
+        assert_eq!(
+            loaded.messages[0].turns[0].message_id,
+            loaded.messages[0].id
+        );
     }
 
     #[test]

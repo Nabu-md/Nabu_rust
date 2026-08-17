@@ -324,8 +324,7 @@ impl Lifecycle for PipelineExecutor {
             operation = "initialize",
             "PipelineExecutor initialized"
         );
-        self.lifecycle
-            .transition_to(LifecycleStage::Initialized)?;
+        self.lifecycle.transition_to(LifecycleStage::Initialized)?;
         Ok(())
     }
 
@@ -340,9 +339,7 @@ impl Lifecycle for PipelineExecutor {
     fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         // Cannot restart a shut-down executor
         if self.lifecycle.is_shutdown() {
-            return Err(
-                "PipelineExecutor has been shut down and cannot be restarted".into(),
-            );
+            return Err("PipelineExecutor has been shut down and cannot be restarted".into());
         }
 
         // Auto-advance Created → Initialized so callers can call start()
@@ -354,8 +351,7 @@ impl Lifecycle for PipelineExecutor {
                 operation = "start",
                 "Initializing pipeline executor"
             );
-            self.lifecycle
-                .transition_to(LifecycleStage::Initialized)?;
+            self.lifecycle.transition_to(LifecycleStage::Initialized)?;
         }
 
         // Guard against duplicate start — transition Running → Running is a
@@ -370,8 +366,7 @@ impl Lifecycle for PipelineExecutor {
             return Ok(());
         }
 
-        self.lifecycle
-            .transition_to(LifecycleStage::Running)?;
+        self.lifecycle.transition_to(LifecycleStage::Running)?;
 
         tracing::info!(
             subsystem = "pipeline",
@@ -396,8 +391,7 @@ impl Lifecycle for PipelineExecutor {
             "PipelineExecutor shutting down"
         );
 
-        self.lifecycle
-            .transition_to(LifecycleStage::Shutdown)?;
+        self.lifecycle.transition_to(LifecycleStage::Shutdown)?;
 
         tracing::info!(
             subsystem = "pipeline",
@@ -572,7 +566,10 @@ mod tests {
     }
 
     impl RecordingProcessor {
-        fn new() -> (Self, Arc<std::sync::Mutex<Option<crate::models::ObjectContent>>>) {
+        fn new() -> (
+            Self,
+            Arc<std::sync::Mutex<Option<crate::models::ObjectContent>>>,
+        ) {
             let recorded = Arc::new(std::sync::Mutex::new(None));
             (
                 Self {
@@ -612,10 +609,10 @@ mod tests {
     /// correctly (not a title-only or empty placeholder).
     #[tokio::test]
     async fn test_text_content_reaches_classifier() {
-        use crate::capture::{CaptureEngine, CaptureRequest};
         use crate::capture::handler::CaptureData;
-        use crate::jobs::queue::{DurableJobQueue, Queue};
+        use crate::capture::{CaptureEngine, CaptureRequest};
         use crate::jobs::cancellation::CancellationToken;
+        use crate::jobs::queue::{DurableJobQueue, Queue};
         use crate::jobs::workers::progress::ProgressReporter;
         use crate::models::CustomPropertyValue;
         use crate::processing::pipeline::ProcessingPipeline;
@@ -631,9 +628,7 @@ mod tests {
 
         // Distinctive invoice text — the classifier requires ≥2 keyword hits.
         let distinctive_text = "INVOICE #9999\nInvoice Date: 2024-01-15\nTotal Due: $500.00\nPayment Terms: Net 30\nbill to: Someone Corp";
-        let request = CaptureRequest::new(CaptureData::Text(
-            distinctive_text.to_string(),
-        ));
+        let request = CaptureRequest::new(CaptureData::Text(distinctive_text.to_string()));
         engine.ingest(request).await.unwrap();
 
         // Dequeue the persisted job
@@ -655,7 +650,11 @@ mod tests {
         let result = executor
             .execute(&job, ProgressReporter::noop(), CancellationToken::new())
             .await;
-        assert!(result.is_ok(), "execution should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "execution should succeed: {:?}",
+            result.err()
+        );
 
         // Reload the object from storage and verify classification
         let object_id = job.object_id.unwrap();
@@ -686,10 +685,10 @@ mod tests {
     /// cannot execute (the test validates the data boundary, not OCR output).
     #[tokio::test]
     async fn test_image_bytes_reach_ocr() {
-        use crate::capture::{CaptureEngine, CaptureRequest};
         use crate::capture::handler::CaptureData;
-        use crate::jobs::queue::{DurableJobQueue, Queue};
+        use crate::capture::{CaptureEngine, CaptureRequest};
         use crate::jobs::cancellation::CancellationToken;
+        use crate::jobs::queue::{DurableJobQueue, Queue};
         use crate::jobs::workers::progress::ProgressReporter;
         use crate::models::ObjectContent;
         use crate::processing::pipeline::ProcessingPipeline;
@@ -702,7 +701,9 @@ mod tests {
         engine.set_queue(queue.clone());
         engine.register(Arc::new(crate::capture::handler::ClipboardHandler));
 
-        let image_bytes = vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d];
+        let image_bytes = vec![
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+        ];
         let request = CaptureRequest::new(CaptureData::Binary {
             mime_type: "image/png".to_string(),
             data: image_bytes.clone(),
@@ -726,12 +727,18 @@ mod tests {
         let result = executor
             .execute(&job, ProgressReporter::noop(), CancellationToken::new())
             .await;
-        assert!(result.is_ok(), "execution should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "execution should succeed: {:?}",
+            result.err()
+        );
 
         // Verify the OCR processor received the real image bytes
-        let received = recorded.lock().unwrap().take().expect(
-            "recording processor should have captured the object content",
-        );
+        let received = recorded
+            .lock()
+            .unwrap()
+            .take()
+            .expect("recording processor should have captured the object content");
         match &received {
             ObjectContent::Binary {
                 mime_type, data, ..
@@ -754,8 +761,8 @@ mod tests {
     /// after the restart.
     #[tokio::test]
     async fn test_durable_text_restart() {
-        use crate::capture::{CaptureEngine, CaptureRequest};
         use crate::capture::handler::CaptureData;
+        use crate::capture::{CaptureEngine, CaptureRequest};
         use crate::jobs::queue::{DurableJobQueue, Queue};
         use crate::models::ObjectContent;
 
@@ -767,9 +774,7 @@ mod tests {
         engine.register(Arc::new(crate::capture::handler::ClipboardHandler));
 
         let distinctive_text = "Restart test content with distinctive marker #RESTART123";
-        let request = CaptureRequest::new(CaptureData::Text(
-            distinctive_text.to_string(),
-        ));
+        let request = CaptureRequest::new(CaptureData::Text(distinctive_text.to_string()));
         engine.ingest(request).await.unwrap();
 
         // Capture the job id
@@ -795,7 +800,10 @@ mod tests {
             ObjectContent::PlainText(s) => {
                 assert_eq!(s, distinctive_text, "text content must survive restart");
             }
-            _ => panic!("expected PlainText content after restart, got {:?}", object.content),
+            _ => panic!(
+                "expected PlainText content after restart, got {:?}",
+                object.content
+            ),
         }
     }
 
@@ -806,8 +814,8 @@ mod tests {
     /// available and unchanged after the restart.
     #[tokio::test]
     async fn test_durable_binary_restart() {
-        use crate::capture::{CaptureEngine, CaptureRequest};
         use crate::capture::handler::CaptureData;
+        use crate::capture::{CaptureEngine, CaptureRequest};
         use crate::jobs::queue::{DurableJobQueue, Queue};
         use crate::models::ObjectContent;
 
@@ -844,9 +852,7 @@ mod tests {
 
         match &object.content {
             ObjectContent::Binary {
-                mime_type,
-                data,
-                ..
+                mime_type, data, ..
             } => {
                 assert_eq!(mime_type, "image/png");
                 assert_eq!(data, &image_bytes, "binary bytes must survive restart");
@@ -868,17 +874,20 @@ mod tests {
         let result = executor
             .execute(&job, ProgressReporter::noop(), CancellationToken::new())
             .await;
-        assert!(result.is_err(), "legacy job without content_payload must fail");
+        assert!(
+            result.is_err(),
+            "legacy job without content_payload must fail"
+        );
     }
 
     /// Test: PDF captures persist their bytes and the PDF text processor
     /// can reconstruct them through the full job lifecycle.
     #[tokio::test]
     async fn test_pdf_bytes_survive_pipeline() {
-        use crate::capture::{CaptureEngine, CaptureRequest};
         use crate::capture::handler::CaptureData;
-        use crate::jobs::queue::{DurableJobQueue, Queue};
+        use crate::capture::{CaptureEngine, CaptureRequest};
         use crate::jobs::cancellation::CancellationToken;
+        use crate::jobs::queue::{DurableJobQueue, Queue};
         use crate::jobs::workers::progress::ProgressReporter;
         use crate::processing::pipeline::ProcessingPipeline;
         use crate::processing::processors::PdfTextProcessor;
@@ -914,7 +923,11 @@ mod tests {
         let result = executor
             .execute(&job, ProgressReporter::noop(), CancellationToken::new())
             .await;
-        assert!(result.is_ok(), "execution should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "execution should succeed: {:?}",
+            result.err()
+        );
 
         // Verify the PDF processor received the real bytes
         let received = recorded.lock().unwrap().take().unwrap();
@@ -923,8 +936,14 @@ mod tests {
                 mime_type, data, ..
             } => {
                 assert_eq!(mime_type, "application/pdf");
-                assert!(!data.is_empty(), "PDF processor should receive non-empty bytes");
-                assert_eq!(data, &pdf_bytes, "PDF processor should receive exact captured bytes");
+                assert!(
+                    !data.is_empty(),
+                    "PDF processor should receive non-empty bytes"
+                );
+                assert_eq!(
+                    data, &pdf_bytes,
+                    "PDF processor should receive exact captured bytes"
+                );
             }
             _ => panic!("expected Binary content for PDF, got {:?}", received),
         }
@@ -939,10 +958,10 @@ mod tests {
     /// receive the exact original bytes.
     #[tokio::test]
     async fn test_audio_bytes_survive_pipeline() {
-        use crate::capture::{CaptureEngine, CaptureRequest};
         use crate::capture::handler::CaptureData;
-        use crate::jobs::queue::{DurableJobQueue, Queue};
+        use crate::capture::{CaptureEngine, CaptureRequest};
         use crate::jobs::cancellation::CancellationToken;
+        use crate::jobs::queue::{DurableJobQueue, Queue};
         use crate::jobs::workers::progress::ProgressReporter;
         use crate::models::{ObjectContent, ObjectType};
         use crate::processing::pipeline::ProcessingPipeline;
@@ -957,7 +976,9 @@ mod tests {
         // object_type to "audio_recording" so WhisperProcessor picks it up.
         engine.register(Arc::new(crate::capture::handler::FileDropHandler));
 
-        let audio_bytes = vec![0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45];
+        let audio_bytes = vec![
+            0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45,
+        ];
         let request = CaptureRequest::new(CaptureData::Binary {
             mime_type: "audio/wav".to_string(),
             data: audio_bytes.clone(),
@@ -995,16 +1016,21 @@ mod tests {
             .await;
 
         // Verify the Whisper processor received the real audio bytes
-        let received = recorded.lock().unwrap().take().expect(
-            "recording processor should have captured the object content",
-        );
+        let received = recorded
+            .lock()
+            .unwrap()
+            .take()
+            .expect("recording processor should have captured the object content");
         match &received {
             ObjectContent::Binary {
                 mime_type, data, ..
             } => {
                 assert_eq!(mime_type, "audio/wav");
                 assert!(!data.is_empty(), "Whisper should receive non-empty bytes");
-                assert_eq!(data, &audio_bytes, "Whisper should receive exact captured bytes");
+                assert_eq!(
+                    data, &audio_bytes,
+                    "Whisper should receive exact captured bytes"
+                );
             }
             _ => panic!("expected Binary content for audio, got {:?}", received),
         }
@@ -1018,8 +1044,8 @@ mod tests {
     /// downgraded to plain text.
     #[tokio::test]
     async fn test_markdown_content_preserved() {
-        use crate::capture::{CaptureEngine, CaptureRequest};
         use crate::capture::handler::CaptureData;
+        use crate::capture::{CaptureEngine, CaptureRequest};
         use crate::jobs::queue::{DurableJobQueue, Queue};
 
         let dir = tempfile::tempdir().unwrap();
@@ -1034,7 +1060,10 @@ mod tests {
         engine.ingest(request).await.unwrap();
 
         let job = queue.dequeue().unwrap().unwrap();
-        let payload = job.content_payload.as_ref().expect("job must carry content");
+        let payload = job
+            .content_payload
+            .as_ref()
+            .expect("job must carry content");
 
         // Verify the content type is Markdown, not PlainText
         match payload {
@@ -1073,7 +1102,8 @@ mod tests {
         let err = result.unwrap_err();
         assert!(
             err.to_string().contains("Failed to load binary blob"),
-            "error should mention blob failure, got: {}", err
+            "error should mention blob failure, got: {}",
+            err
         );
     }
 }

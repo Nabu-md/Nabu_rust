@@ -92,8 +92,8 @@ pub mod manager;
 pub mod pipeline;
 pub mod session;
 
+pub use crate::event_bus::StreamId;
 pub use errors::{StreamManagerError, StreamResult};
 pub use manager::StreamManager;
 pub use pipeline::StreamingPipeline;
 pub use session::{StreamSessionHandle, StreamState, StreamingSession};
-pub use crate::event_bus::StreamId;

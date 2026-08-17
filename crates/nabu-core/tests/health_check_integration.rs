@@ -23,15 +23,13 @@ use nabu_core::graph::VaultGraph;
 use nabu_core::indexer::Indexer;
 use nabu_core::jobs::{DurableJobQueue, ExecutorRegistry, WorkerPool};
 use nabu_core::pipeline_migration::PipelineExecutor;
+use nabu_core::plugin::capability::CapabilityRegistry;
 use nabu_core::processing::ProcessingPipeline;
 use nabu_core::registry::context::{ApplicationContext, ApplicationContextBuilder};
-use nabu_core::registry::health::{
-    HealthStatus, LifecycleStageInfo, ServiceHealth,
-};
-use nabu_core::registry::lifecycle::{LifecycleStage};
-use nabu_core::storage::StorageManager;
-use nabu_core::plugin::capability::CapabilityRegistry;
+use nabu_core::registry::health::{HealthStatus, LifecycleStageInfo, ServiceHealth};
+use nabu_core::registry::lifecycle::LifecycleStage;
 use nabu_core::registry::ServiceRegistry;
+use nabu_core::storage::StorageManager;
 use tempfile::tempdir;
 
 // ---------------------------------------------------------------------------
@@ -62,13 +60,19 @@ fn build_test_context(vault_path: std::path::PathBuf) -> ApplicationContext {
 
     // PipelineExecutor
     let pipeline = Arc::new(ProcessingPipeline::new());
-    ctx.register("pipeline_executor", Arc::new(PipelineExecutor::new(pipeline)));
+    ctx.register(
+        "pipeline_executor",
+        Arc::new(PipelineExecutor::new(pipeline)),
+    );
 
     // StorageManager (requires a vault path)
     ctx.register("storage_manager", Arc::new(StorageManager::new(vault_path)));
 
     // VaultGraph (in-memory, no persistence)
-    ctx.register("vault_graph", Arc::new(std::sync::RwLock::new(VaultGraph::new())));
+    ctx.register(
+        "vault_graph",
+        Arc::new(std::sync::RwLock::new(VaultGraph::new())),
+    );
 
     // Indexer (in-memory)
     ctx.register("indexer", Arc::new(StdMutex::new(Indexer::new())));
@@ -265,9 +269,11 @@ async fn health_check_service_stages_match_actual() {
     let health = ctx.health_check();
     for entry in &health.services {
         assert_eq!(
-            entry.stage, LifecycleStageInfo::Created,
+            entry.stage,
+            LifecycleStageInfo::Created,
             "service '{}' should be at Created, got {:?}",
-            entry.name, entry.stage
+            entry.name,
+            entry.stage
         );
     }
 
@@ -276,9 +282,11 @@ async fn health_check_service_stages_match_actual() {
     let health = ctx.health_check();
     for entry in &health.services {
         assert!(
-            entry.stage == LifecycleStageInfo::Initialized || entry.stage == LifecycleStageInfo::Running,
+            entry.stage == LifecycleStageInfo::Initialized
+                || entry.stage == LifecycleStageInfo::Running,
             "service '{}' should be at least Initialized after initialize(), got {:?}",
-            entry.name, entry.stage
+            entry.name,
+            entry.stage
         );
     }
 
@@ -287,9 +295,11 @@ async fn health_check_service_stages_match_actual() {
     let health = ctx.health_check();
     for entry in &health.services {
         assert_eq!(
-            entry.stage, LifecycleStageInfo::Running,
+            entry.stage,
+            LifecycleStageInfo::Running,
             "service '{}' should be at Running after start(), got {:?}",
-            entry.name, entry.stage
+            entry.name,
+            entry.stage
         );
     }
 
@@ -298,9 +308,11 @@ async fn health_check_service_stages_match_actual() {
     let health = ctx.health_check();
     for entry in &health.services {
         assert_eq!(
-            entry.stage, LifecycleStageInfo::Shutdown,
+            entry.stage,
+            LifecycleStageInfo::Shutdown,
             "service '{}' should be at Shutdown after shutdown(), got {:?}",
-            entry.name, entry.stage
+            entry.name,
+            entry.stage
         );
     }
 }
@@ -394,7 +406,10 @@ async fn service_health_serializes_for_ipc() {
     assert_eq!(deserialized.lifecycle_stage, health.lifecycle_stage);
     assert_eq!(deserialized.registered_services, health.registered_services);
     assert_eq!(deserialized.services.len(), health.services.len());
-    assert_eq!(deserialized.running_service_count, health.running_service_count);
+    assert_eq!(
+        deserialized.running_service_count,
+        health.running_service_count
+    );
     assert_eq!(deserialized.capability_count, health.capability_count);
 }
 
@@ -478,7 +493,11 @@ async fn health_check_service_entries_have_valid_data() {
         // Every entry should have a non-empty name
         assert!(!entry.name.is_empty());
         // Every entry should be healthy when running
-        assert!(entry.healthy, "service '{}' should be healthy when running", entry.name);
+        assert!(
+            entry.healthy,
+            "service '{}' should be healthy when running",
+            entry.name
+        );
         assert_eq!(entry.stage, LifecycleStageInfo::Running);
     }
 }

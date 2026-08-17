@@ -251,9 +251,7 @@ impl SyncConfig {
         }
 
         if self.schedule_mode == SyncScheduleMode::Interval {
-            if self.sync_interval_seconds.is_none()
-                || self.sync_interval_seconds == Some(0)
-            {
+            if self.sync_interval_seconds.is_none() || self.sync_interval_seconds == Some(0) {
                 return Err(SyncError::invalid_progress(
                     "sync_interval_seconds must be set and > 0 when schedule_mode is Interval",
                 ));
@@ -581,8 +579,8 @@ mod sync_model {
 
     #[test]
     fn sync_model_folder_is_healthy() {
-        let healthy = SyncFolder::new("/vault", "Vault", "syncthing")
-            .with_status(SyncStatus::UpToDate);
+        let healthy =
+            SyncFolder::new("/vault", "Vault", "syncthing").with_status(SyncStatus::UpToDate);
         assert!(healthy.is_healthy());
 
         let unhealthy = SyncFolder::new("/vault", "Vault", "syncthing")
@@ -593,12 +591,11 @@ mod sync_model {
 
     #[test]
     fn sync_model_folder_is_syncing() {
-        let syncing = SyncFolder::new("/vault", "Vault", "syncthing")
-            .with_status(SyncStatus::Syncing);
+        let syncing =
+            SyncFolder::new("/vault", "Vault", "syncthing").with_status(SyncStatus::Syncing);
         assert!(syncing.is_syncing());
 
-        let idle = SyncFolder::new("/vault", "Vault", "syncthing")
-            .with_status(SyncStatus::Idle);
+        let idle = SyncFolder::new("/vault", "Vault", "syncthing").with_status(SyncStatus::Idle);
         assert!(!idle.is_syncing());
     }
 

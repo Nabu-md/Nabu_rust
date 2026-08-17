@@ -44,8 +44,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
-use std::sync::mpsc as std_mpsc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc as std_mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
@@ -53,8 +53,8 @@ use std::time::Instant;
 use tokio::sync::mpsc as tk_mpsc;
 use tracing::{debug, info, warn};
 
+use crate::watcher::{Result, VaultEvent, VaultWatcherConfig, WatcherChangeKind, WatcherError};
 use notify::Watcher;
-use crate::watcher::{VaultEvent, VaultWatcherConfig, WatcherChangeKind, WatcherError, Result};
 
 /// A single normalized signal for one absolute path.
 ///
@@ -206,12 +206,12 @@ impl VaultWatcher {
         // the `notify` backend reports. On macOS `/var` is a symlink to
         // `/private/var` and FSEvents yields canonical `/private/var/...`
         // paths; without this, vault-relative stripping silently fails.
-        let canonical = self
-            .vault_path
-            .canonicalize()
-            .map_err(|_| WatcherError::VaultNotFound {
-                path: self.vault_path.clone(),
-            })?;
+        let canonical =
+            self.vault_path
+                .canonicalize()
+                .map_err(|_| WatcherError::VaultNotFound {
+                    path: self.vault_path.clone(),
+                })?;
         self.vault_path = canonical;
 
         // Seed the "known-existing" file set with a one-time recursive scan of
@@ -240,11 +240,23 @@ impl VaultWatcher {
 
         let handle = thread::Builder::new()
             .name("nabu-vault-watcher".into())
-            .spawn(move || processor_loop(vault, config, raw_rx, out_tx, shutdown, self_ops, known_files))
-            .map_err(|e| WatcherError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )))?;
+            .spawn(move || {
+                processor_loop(
+                    vault,
+                    config,
+                    raw_rx,
+                    out_tx,
+                    shutdown,
+                    self_ops,
+                    known_files,
+                )
+            })
+            .map_err(|e| {
+                WatcherError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    e.to_string(),
+                ))
+            })?;
 
         self.watcher = Some(watcher);
         self.thread = Some(handle);
@@ -342,7 +354,8 @@ fn resolve_abs(path: &Path, vault: &Path) -> PathBuf {
     } else {
         vault.join(path)
     };
-    abs.canonicalize().unwrap_or_else(|_| normalize_abs(&abs, vault))
+    abs.canonicalize()
+        .unwrap_or_else(|_| normalize_abs(&abs, vault))
 }
 
 /// Convert an absolute path to a vault-relative string (`Inbox/note.md`),
@@ -421,10 +434,7 @@ fn scan_known_files(vault: &Path) -> HashSet<PathBuf> {
 /// Only the four logical change categories are emitted; pure metadata, access,
 /// and "imprecise" (`Any`/`Other`) events are dropped as platform noise.
 /// `.nabu/`-internal paths are filtered out entirely.
-fn normalize_event(
-    vault: &Path,
-    res: notify::Result<notify::Event>,
-) -> Vec<(PathBuf, RawChange)> {
+fn normalize_event(vault: &Path, res: notify::Result<notify::Event>) -> Vec<(PathBuf, RawChange)> {
     let ev = match res {
         Ok(e) => e,
         Err(e) => {
@@ -582,7 +592,10 @@ fn emit(
 
     for pe in emits {
         // Suppress if either side of the change was a registered self-op.
-        let suppressed = pe.old_abs.as_deref().map_or(false, |o| registry.consume(o, now))
+        let suppressed = pe
+            .old_abs
+            .as_deref()
+            .map_or(false, |o| registry.consume(o, now))
             || registry.consume(&pe.abs, now);
         if suppressed {
             debug!(
@@ -725,7 +738,10 @@ mod tests {
     #[test]
     fn normalize_abs_makes_paths_absolute_and_lexically_resolves() {
         let vault = Path::new("/tmp/vault");
-        assert_eq!(normalize_abs(&PathBuf::from("Inbox/a.md"), vault), PathBuf::from("/tmp/vault/Inbox/a.md"));
+        assert_eq!(
+            normalize_abs(&PathBuf::from("Inbox/a.md"), vault),
+            PathBuf::from("/tmp/vault/Inbox/a.md")
+        );
         // relative with ./ and .. collapses without fs access
         let p = normalize_abs(&PathBuf::from("Inbox/./sub/../a.md"), vault);
         assert_eq!(p, PathBuf::from("/tmp/vault/Inbox/a.md"));
@@ -734,7 +750,10 @@ mod tests {
     #[test]
     fn to_vault_rel_strips_vault_prefix() {
         let vault = Path::new("/tmp/vault");
-        assert_eq!(to_vault_rel(&PathBuf::from("/tmp/vault/Inbox/a.md"), vault), Some("Inbox/a.md".to_string()));
+        assert_eq!(
+            to_vault_rel(&PathBuf::from("/tmp/vault/Inbox/a.md"), vault),
+            Some("Inbox/a.md".to_string())
+        );
         assert_eq!(to_vault_rel(&PathBuf::from("/tmp/vault"), vault), None);
         assert_eq!(to_vault_rel(&PathBuf::from("/elsewhere/a.md"), vault), None);
     }
@@ -742,10 +761,22 @@ mod tests {
     #[test]
     fn is_nabu_internal_filters_dotnabu_subtree() {
         let vault = Path::new("/tmp/vault");
-        assert!(is_nabu_internal(&PathBuf::from("/tmp/vault/.nabu/x.json"), vault));
-        assert!(is_nabu_internal(&PathBuf::from("/tmp/vault/.nabu/sub/y.json"), vault));
-        assert!(!is_nabu_internal(&PathBuf::from("/tmp/vault/Inbox/a.md"), vault));
-        assert!(!is_nabu_internal(&PathBuf::from("/tmp/vault/.nabu_other/a.md"), vault));
+        assert!(is_nabu_internal(
+            &PathBuf::from("/tmp/vault/.nabu/x.json"),
+            vault
+        ));
+        assert!(is_nabu_internal(
+            &PathBuf::from("/tmp/vault/.nabu/sub/y.json"),
+            vault
+        ));
+        assert!(!is_nabu_internal(
+            &PathBuf::from("/tmp/vault/Inbox/a.md"),
+            vault
+        ));
+        assert!(!is_nabu_internal(
+            &PathBuf::from("/tmp/vault/.nabu_other/a.md"),
+            vault
+        ));
     }
 
     fn sig(path: &str, changes: &[RawChange]) -> (PathBuf, Vec<RawChange>) {
@@ -758,7 +789,11 @@ mod tests {
         // modify signals for one path collapse to a single Modified event.
         let signals: HashMap<_, _> = [sig(
             "/tmp/vault/note.md",
-            &[RawChange::Modified, RawChange::Modified, RawChange::Modified],
+            &[
+                RawChange::Modified,
+                RawChange::Modified,
+                RawChange::Modified,
+            ],
         )]
         .into_iter()
         .collect();
@@ -783,8 +818,9 @@ mod tests {
 
     #[test]
     fn coalesce_deleted_when_path_gone_and_no_name_event() {
-        let signals: HashMap<_, _> =
-            [sig("/tmp/vault/gone.md", &[RawChange::Deleted])].into_iter().collect();
+        let signals: HashMap<_, _> = [sig("/tmp/vault/gone.md", &[RawChange::Deleted])]
+            .into_iter()
+            .collect();
         let emit = coalesce(signals, exists_always_false);
         assert_eq!(emit.len(), 1);
         assert_eq!(emit[0].kind, WatcherChangeKind::Deleted);
@@ -810,8 +846,9 @@ mod tests {
 
     #[test]
     fn coalesce_unpaired_rename_source_emits_deleted() {
-        let signals: HashMap<_, _> =
-            [sig("/tmp/vault/A/gone.md", &[RawChange::Name])].into_iter().collect();
+        let signals: HashMap<_, _> = [sig("/tmp/vault/A/gone.md", &[RawChange::Name])]
+            .into_iter()
+            .collect();
         let emit = coalesce(signals, exists_always_false);
         assert_eq!(emit.len(), 1);
         assert_eq!(emit[0].kind, WatcherChangeKind::Deleted);
@@ -819,8 +856,9 @@ mod tests {
 
     #[test]
     fn coalesce_unpaired_rename_dest_emits_created() {
-        let signals: HashMap<_, _> =
-            [sig("/tmp/vault/A/arrived.md", &[RawChange::Name])].into_iter().collect();
+        let signals: HashMap<_, _> = [sig("/tmp/vault/A/arrived.md", &[RawChange::Name])]
+            .into_iter()
+            .collect();
         let emit = coalesce(signals, exists_always_true);
         assert_eq!(emit.len(), 1);
         assert_eq!(emit[0].kind, WatcherChangeKind::Created);
@@ -844,7 +882,11 @@ mod tests {
     fn self_event_registry_consume_matches_exact_path() {
         let mut reg = SelfEventRegistry::new();
         let now = Instant::now();
-        reg.register(PathBuf::from("/v/a.md"), now, std::time::Duration::from_secs(10));
+        reg.register(
+            PathBuf::from("/v/a.md"),
+            now,
+            std::time::Duration::from_secs(10),
+        );
         assert!(reg.consume(&PathBuf::from("/v/a.md"), now));
         assert!(!reg.consume(&PathBuf::from("/v/a.md"), now)); // consumed
         assert!(!reg.consume(&PathBuf::from("/v/other.md"), now)); // different path
@@ -854,8 +896,16 @@ mod tests {
     fn self_event_registry_retire_expired() {
         let mut reg = SelfEventRegistry::new();
         let now = Instant::now();
-        reg.register(PathBuf::from("/v/a.md"), now, std::time::Duration::from_nanos(1));
-        reg.register(PathBuf::from("/v/b.md"), now, std::time::Duration::from_secs(60));
+        reg.register(
+            PathBuf::from("/v/a.md"),
+            now,
+            std::time::Duration::from_nanos(1),
+        );
+        reg.register(
+            PathBuf::from("/v/b.md"),
+            now,
+            std::time::Duration::from_secs(60),
+        );
         std::thread::sleep(std::time::Duration::from_millis(5));
         let later = Instant::now();
         reg.retire_expired(later);
@@ -887,7 +937,10 @@ mod tests {
         emit(emits, vault, &self_ops, &out_tx);
         // Nothing should have been emitted.
         assert!(out_rx.try_recv().is_err());
-        assert!(self_ops.lock().unwrap().is_empty(), "self-op consumed on suppress");
+        assert!(
+            self_ops.lock().unwrap().is_empty(),
+            "self-op consumed on suppress"
+        );
     }
 
     #[test]
@@ -1053,7 +1106,9 @@ mod fs_tests {
         let evs = collect(&mut rx, WINDOW).await;
         w.stop().unwrap();
         let renamed = evs.iter().find(|e| {
-            e.kind == WatcherChangeKind::Renamed && e.path == "note2.md" && e.old_path.as_deref() == Some("note.md")
+            e.kind == WatcherChangeKind::Renamed
+                && e.path == "note2.md"
+                && e.old_path.as_deref() == Some("note.md")
         });
         assert!(
             renamed.is_some(),
@@ -1115,7 +1170,12 @@ mod fs_tests {
             .iter()
             .filter(|e| e.kind == WatcherChangeKind::Modified && e.path == "note.md")
             .collect();
-        assert_eq!(mods.len(), 1, "expected 1 event for duplicate writes, got: {:?}", evs);
+        assert_eq!(
+            mods.len(),
+            1,
+            "expected 1 event for duplicate writes, got: {:?}",
+            evs
+        );
     }
 
     /// Test 7 — Self-event suppression.

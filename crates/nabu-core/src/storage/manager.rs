@@ -1,8 +1,10 @@
 use crate::event_bus::kinds::{INDEX_UPDATED, ITEM_STORED};
-use crate::event_bus::{EventBus, IndexOperation, IndexUpdatedEvent, ItemStoredEvent, PipelineEvent};
+use crate::event_bus::{
+    EventBus, IndexOperation, IndexUpdatedEvent, ItemStoredEvent, PipelineEvent,
+};
 use crate::models::{
-    CustomPropertyValue, KnowledgeObject, ObjectContent, ObjectMetadata, ObjectRelation, ObjectType,
-    ProcessingState,
+    CustomPropertyValue, KnowledgeObject, ObjectContent, ObjectMetadata, ObjectRelation,
+    ObjectType, ProcessingState,
 };
 use crate::registry::lifecycle::{Lifecycle, LifecycleManager, LifecycleStage};
 use crate::registry::metrics::{CounterMetric, GaugeMetric, MetricsAggregator, ServiceMetrics};
@@ -114,8 +116,7 @@ impl StorageManager {
         // This validates that the vault path is accessible and the sidecar
         // index is consistent.
         let _count = self.reload_from_disk()?;
-        self.lifecycle
-            .transition_to(LifecycleStage::Initialized)?;
+        self.lifecycle.transition_to(LifecycleStage::Initialized)?;
         tracing::info!(
             subsystem = "storage",
             component = "manager",
@@ -134,13 +135,10 @@ impl StorageManager {
     /// and publishes `ItemStored` events on successful persistence.
     pub fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         if self.lifecycle.is_shutdown() {
-            return Err(
-                "StorageManager has been shut down and cannot be restarted".into(),
-            );
+            return Err("StorageManager has been shut down and cannot be restarted".into());
         }
         if self.lifecycle.stage() == LifecycleStage::Created {
-            self.lifecycle
-                .transition_to(LifecycleStage::Initialized)?;
+            self.lifecycle.transition_to(LifecycleStage::Initialized)?;
         }
         self.lifecycle.transition_to(LifecycleStage::Running)?;
         tracing::info!(
@@ -176,8 +174,7 @@ impl StorageManager {
             operation = "shutdown",
             "StorageManager shutdown complete"
         );
-        self.lifecycle
-            .transition_to(LifecycleStage::Shutdown)?;
+        self.lifecycle.transition_to(LifecycleStage::Shutdown)?;
         Ok(())
     }
 
@@ -242,14 +239,19 @@ impl StorageManager {
     /// ensuring that round-tripping through the JSON sidecar preserves the
     /// content file location even when the object itself did not carry an
     /// explicit `vault_path` in its metadata.
-    fn serialize_sidecar(object: &KnowledgeObject, resolved_vault_path: &str) -> Result<String, String> {
+    fn serialize_sidecar(
+        object: &KnowledgeObject,
+        resolved_vault_path: &str,
+    ) -> Result<String, String> {
         // For binary objects the MIME type and filename live on the content
         // variant; surface them through the sidecar's existing `mime_type` /
         // `original_filename` fields so the object can be rebuilt losslessly.
         let (content_mime, content_filename) = match &object.content {
-            ObjectContent::Binary { mime_type, filename, .. } => {
-                (Some(mime_type.clone()), filename.clone())
-            }
+            ObjectContent::Binary {
+                mime_type,
+                filename,
+                ..
+            } => (Some(mime_type.clone()), filename.clone()),
             _ => (None, None),
         };
 
@@ -266,12 +268,19 @@ impl StorageManager {
             language: object.metadata.language.clone(),
             file_size: object.metadata.file_size,
             mime_type: object.metadata.mime_type.clone().or(content_mime),
-            original_filename: object.metadata.original_filename.clone().or(content_filename),
+            original_filename: object
+                .metadata
+                .original_filename
+                .clone()
+                .or(content_filename),
             vault_path: Some(resolved_vault_path.to_string()),
             created_at: object.created_at,
             updated_at: object.updated_at,
             content_ext: content_extension_for(&object.content).to_string(),
-            word_count: object.metadata.word_count.or_else(|| Some(object.count_words())),
+            word_count: object
+                .metadata
+                .word_count
+                .or_else(|| Some(object.count_words())),
             custom_properties: object.custom_properties.clone(),
             relations: object.relations.clone(),
             content_hash: object.content_hash.clone(),
@@ -507,9 +516,7 @@ impl StorageManager {
         // the on-disk sidecar for objects not currently resident in memory.
         let content_rel = {
             let store = self.store.read().map_err(|e| e.to_string())?;
-            store
-                .get(&id)
-                .and_then(|o| o.metadata.vault_path.clone())
+            store.get(&id).and_then(|o| o.metadata.vault_path.clone())
         }
         .or_else(|| {
             let sidecar_str = std::fs::read_to_string(self.sidecar_path(id)).ok()?;
@@ -562,7 +569,9 @@ impl StorageManager {
     /// exists and the object is loadable at the new path, even after a
     /// StorageManager restart.
     pub fn rename(&self, id: Uuid, new_name: &str) -> Result<String, String> {
-        let object = self.load(id).ok_or_else(|| format!("object {} not found", id))?;
+        let object = self
+            .load(id)
+            .ok_or_else(|| format!("object {} not found", id))?;
         let old_rel = object
             .metadata
             .vault_path
@@ -572,7 +581,11 @@ impl StorageManager {
         let old_path = std::path::Path::new(&old_rel);
         let dir = old_path.parent().and_then(|p| {
             let s = p.to_string_lossy();
-            if s.is_empty() { None } else { Some(s.to_string()) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
         });
         let ext = old_path
             .extension()
@@ -598,7 +611,9 @@ impl StorageManager {
     /// different directory) while preserving the object's identity, sidecar,
     /// and metadata.  An `ITEM_STORED` event is published for the new location.
     pub fn move_object(&self, id: Uuid, new_vault_path: &str) -> Result<String, String> {
-        let object = self.load(id).ok_or_else(|| format!("object {} not found", id))?;
+        let object = self
+            .load(id)
+            .ok_or_else(|| format!("object {} not found", id))?;
         if object.metadata.vault_path.as_deref() == Some(new_vault_path) {
             return Ok(new_vault_path.to_string());
         }
@@ -744,22 +759,21 @@ impl StorageManager {
     /// graph updates, and event publication all flow through the platform.
     ///
     /// Returns the vault path where the object was saved.
-    pub fn save_note_content(
-        &self,
-        vault_rel_path: &str,
-        content: &str,
-    ) -> Result<String, String> {
+    pub fn save_note_content(&self, vault_rel_path: &str, content: &str) -> Result<String, String> {
         // Try to find an existing object at this path to preserve its UUID.
         let object = if let Some(mut existing) = self.find_by_path(vault_rel_path) {
             existing.content = ObjectContent::Markdown(content.to_string());
             existing.updated_at = chrono::Utc::now();
             existing
         } else {
-            KnowledgeObject::new(ObjectType::Note, ObjectContent::Markdown(content.to_string()))
-                .with_metadata(ObjectMetadata {
-                    vault_path: Some(vault_rel_path.to_string()),
-                    ..Default::default()
-                })
+            KnowledgeObject::new(
+                ObjectType::Note,
+                ObjectContent::Markdown(content.to_string()),
+            )
+            .with_metadata(ObjectMetadata {
+                vault_path: Some(vault_rel_path.to_string()),
+                ..Default::default()
+            })
         };
 
         self.save(&object)
@@ -1088,7 +1102,11 @@ mod tests {
             assert!(!dir.path().join("Inbox/rename-me.md").exists());
             assert!(dir.path().join("Inbox/renamed.md").exists());
             // Sidecar is UUID-keyed and still present.
-            assert!(dir.path().join(".nabu").join(format!("{}.json", obj.id)).exists());
+            assert!(dir
+                .path()
+                .join(".nabu")
+                .join(format!("{}.json", obj.id))
+                .exists());
         }
 
         // Restart: a fresh StorageManager must reload at the new path.
@@ -1132,7 +1150,11 @@ mod tests {
             assert!(!dir.path().join("Inbox/move-me.md").exists());
             assert!(dir.path().join("Archive/move-me.md").exists());
             // Sidecar follows the object (UUID-keyed, unchanged path).
-            assert!(dir.path().join(".nabu").join(format!("{}.json", obj.id)).exists());
+            assert!(dir
+                .path()
+                .join(".nabu")
+                .join(format!("{}.json", obj.id))
+                .exists());
         }
 
         {
@@ -1265,10 +1287,7 @@ mod tests {
         // RelationType do not implement PartialEq in the model layer).
         let orig_json = serde_json::to_string(&obj.relations).unwrap();
         let loaded_json = serde_json::to_string(&loaded.relations).unwrap();
-        assert_eq!(
-            loaded_json, orig_json,
-            "relations must survive restart"
-        );
+        assert_eq!(loaded_json, orig_json, "relations must survive restart");
         assert_eq!(loaded.relations.len(), 2);
         assert_eq!(loaded.relations[0].target_id, target_a);
     }
@@ -1352,10 +1371,7 @@ mod tests {
         let content_path = dir
             .path()
             .join(format!("Inbox/{}.md", slugify("Delete Me")));
-        let sidecar_path = dir
-            .path()
-            .join(".nabu")
-            .join(format!("{}.json", obj.id));
+        let sidecar_path = dir.path().join(".nabu").join(format!("{}.json", obj.id));
         assert!(content_path.exists());
         assert!(sidecar_path.exists());
         assert!(mgr.exists(obj.id));

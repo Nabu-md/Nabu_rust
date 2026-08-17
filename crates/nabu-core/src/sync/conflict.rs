@@ -87,7 +87,10 @@ impl ConflictResolution {
     /// Returns `true` if this strategy requires the provider to prompt the
     /// user before resolving the conflict.
     pub fn requires_user_input(&self) -> bool {
-        matches!(self, ConflictResolution::AskUser | ConflictResolution::Manual)
+        matches!(
+            self,
+            ConflictResolution::AskUser | ConflictResolution::Manual
+        )
     }
 }
 
@@ -199,10 +202,7 @@ mod sync_model {
 
     #[test]
     fn sync_model_conflict_resolution_default_is_ask_user() {
-        assert_eq!(
-            ConflictResolution::default(),
-            ConflictResolution::AskUser
-        );
+        assert_eq!(ConflictResolution::default(), ConflictResolution::AskUser);
     }
 
     #[test]

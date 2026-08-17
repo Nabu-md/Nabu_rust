@@ -62,9 +62,21 @@ mod imp {
         args.push("-t".to_string());
         args.push("png".to_string());
 
-        // Capture raw image bytes to stdout (-o -)
-        args.push("-o".to_string());
-        args.push("-".to_string());
+        // macOS `screencapture` cannot write PNG bytes to stdout: a trailing "-"
+        // is interpreted as a literal output *filename*, silently producing a
+        // stray file named "-" in the caller's working directory (this
+        // previously created the repeatedly-committed `crates/nabu-core/-`
+        // artifact). Capture to a private temp file and read the bytes back.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| NativeError::CallFailed("system clock unavailable".to_string()))?
+            .as_nanos();
+        let tmp = std::env::temp_dir().join(format!(
+            "nabu-screencapture-{}-{}.png",
+            std::process::id(),
+            nanos
+        ));
+        args.push(tmp.to_string_lossy().into_owned());
 
         let output = Command::new("screencapture")
             .args(&args)
@@ -73,13 +85,17 @@ mod imp {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            let _ = std::fs::remove_file(&tmp);
             return Err(NativeError::CallFailed(format!(
                 "screencapture failed: {}",
                 stderr.trim()
             )));
         }
 
-        let png = output.stdout;
+        let png = std::fs::read(&tmp)
+            .map_err(|e| NativeError::CallFailed(format!("reading capture output: {}", e)))?;
+        let _ = std::fs::remove_file(&tmp);
+
         if png.is_empty() {
             return Err(NativeError::CallFailed(
                 "screencapture returned empty output".to_string(),

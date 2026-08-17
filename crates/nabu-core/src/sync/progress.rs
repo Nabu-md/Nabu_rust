@@ -317,8 +317,7 @@ mod sync_model {
 
     #[test]
     fn sync_model_progress_computed_percentage_derived_from_items() {
-        let p = SyncProgress::new("test")
-            .with_items(3, Some(10));
+        let p = SyncProgress::new("test").with_items(3, Some(10));
         assert_eq!(p.computed_percentage(), Some(30.0));
     }
 

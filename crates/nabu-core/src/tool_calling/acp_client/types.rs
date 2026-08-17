@@ -30,8 +30,8 @@
 //! fields will deserialize without error. Optional fields use `#[serde(default)]`.
 
 use crate::acp::types::{EnvVariable, SessionId};
-use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Type aliases
@@ -108,7 +108,10 @@ impl AcpClientCapabilities {
         match method {
             "fs/read_text_file" => self.fs_read,
             "fs/write_text_file" => self.fs_write,
-            "terminal/create" | "terminal/kill" | "terminal/output" | "terminal/wait_for_exit"
+            "terminal/create"
+            | "terminal/kill"
+            | "terminal/output"
+            | "terminal/wait_for_exit"
             | "terminal/release" => self.terminal,
             "elicitation/create" => self.elicitation,
             "session/request_permission" => true,
@@ -413,9 +416,7 @@ pub struct ElicitationResponse {
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum ElicitationOutcome {
     /// The user provided a response.
-    Provided {
-        response: serde_json::Value,
-    },
+    Provided { response: serde_json::Value },
     /// The user cancelled the elicitation.
     Cancelled,
 }
@@ -728,7 +729,10 @@ mod tests {
         };
         let json = serde_json::to_string(&resp).unwrap();
         let back: RequestPermissionResponse = serde_json::from_str(&json).unwrap();
-        assert!(matches!(back.outcome, RequestPermissionOutcome::Cancelled { .. }));
+        assert!(matches!(
+            back.outcome,
+            RequestPermissionOutcome::Cancelled { .. }
+        ));
     }
 
     #[test]
