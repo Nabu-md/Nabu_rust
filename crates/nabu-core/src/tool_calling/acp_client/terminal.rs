@@ -178,7 +178,10 @@ impl TerminalTool {
             ));
         }
 
-        let canonical = normalize_path(&self.vault_root.join(path.strip_prefix("/").unwrap_or(path)));
+        // Normalize the absolute path directly — do not strip the leading "/"
+        // and join with vault_root, which would incorrectly move external
+        // paths (e.g. /etc) inside the vault.
+        let canonical = normalize_path(path);
         let vault_canonical = normalize_path(&self.vault_root);
 
         if !canonical.starts_with(&vault_canonical) {
@@ -534,6 +537,16 @@ impl Tool for TerminalTool {
             }
         };
 
+        let error_result = |err: ToolError| {
+            ToolResult::error(
+                err,
+                Some(crate::tool_calling::ToolExecutionMeta::from_duration(
+                    ToolId::new(tool_id),
+                    std::time::Duration::from_millis(1),
+                )),
+            )
+        };
+
         match operation {
             "create" => {
                 let req: CreateTerminalRequest =
@@ -542,16 +555,21 @@ impl Tool for TerminalTool {
                     })?;
 
                 if let Some(ref cwd) = req.cwd {
-                    self.validate_cwd(cwd)?;
+                    if let Err(e) = self.validate_cwd(cwd) {
+                        return Ok(error_result(e));
+                    }
                 }
 
-                let terminal_id = self.spawn_terminal(
+                let terminal_id = match self.spawn_terminal(
                     &req.command,
                     &req.args,
                     req.cwd.as_deref(),
                     &req.env,
                     req.output_byte_limit,
-                ).await?;
+                ).await {
+                    Ok(id) => id,
+                    Err(e) => return Ok(error_result(e)),
+                };
 
                 Ok(ToolResult::success(
                     Some(json!({ "terminal_id": terminal_id })),
@@ -567,17 +585,20 @@ impl Tool for TerminalTool {
                         ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
                     })?;
 
-                self.kill_terminal(&req.terminal_id).await?;
+                match self.kill_terminal(&req.terminal_id).await {
+                    Ok(status) => {
+                        tracing::debug!(terminal_id = %req.terminal_id, "Terminal killed");
 
-                tracing::debug!(terminal_id = %req.terminal_id, "Terminal killed");
-
-                Ok(ToolResult::success(
-                    Some(json!({})),
-                    Some(crate::tool_calling::ToolExecutionMeta::from_duration(
-                        ToolId::new(tool_id),
-                        std::time::Duration::from_millis(1),
-                    )),
-                ))
+                        Ok(ToolResult::success(
+                            Some(json!({})),
+                            Some(crate::tool_calling::ToolExecutionMeta::from_duration(
+                                ToolId::new(tool_id),
+                                std::time::Duration::from_millis(1),
+                            )),
+                        ))
+                    }
+                    Err(e) => Ok(error_result(e)),
+                }
             }
             "output" => {
                 let req: TerminalOutputRequest =
@@ -586,18 +607,21 @@ impl Tool for TerminalTool {
                     })?;
 
                 let guard = self.terminals.lock().await;
-                let session = guard.get(&req.terminal_id).ok_or_else(|| {
-                    ToolError::new(
-                        error_code::TERMINAL_NOT_FOUND,
-                        format!("terminal not found: {}", req.terminal_id),
-                    )
-                })?;
+                let session = match guard.get(&req.terminal_id) {
+                    Some(s) => s,
+                    None => {
+                        return Ok(error_result(ToolError::new(
+                            error_code::TERMINAL_NOT_FOUND,
+                            format!("terminal not found: {}", req.terminal_id),
+                        )));
+                    }
+                };
 
                 if session.released {
-                    return Err(ToolError::new(
+                    return Ok(error_result(ToolError::new(
                         error_code::TERMINAL_ALREADY_RELEASED,
                         format!("terminal already released: {}", req.terminal_id),
-                    ));
+                    )));
                 }
 
                 let truncated = session
@@ -627,23 +651,26 @@ impl Tool for TerminalTool {
                         ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
                     })?;
 
-                let status = self.wait_for_exit_inner(&req.terminal_id).await?;
+                match self.wait_for_exit_inner(&req.terminal_id).await {
+                    Ok(status) => {
+                        let resp = WaitForTerminalExitResponse {
+                            exit_code: status.exit_code,
+                            signal: status.signal,
+                            _meta: None,
+                        };
 
-                let resp = WaitForTerminalExitResponse {
-                    exit_code: status.exit_code,
-                    signal: status.signal,
-                    _meta: None,
-                };
-
-                Ok(ToolResult::success(
-                    Some(serde_json::to_value(resp).map_err(|e| {
-                        ToolError::new("SERIALIZATION_ERROR", format!("failed to serialize: {}", e))
-                    })?),
-                    Some(crate::tool_calling::ToolExecutionMeta::from_duration(
-                        ToolId::new(tool_id),
-                        std::time::Duration::from_millis(1),
-                    )),
-                ))
+                        Ok(ToolResult::success(
+                            Some(serde_json::to_value(resp).map_err(|e| {
+                                ToolError::new("SERIALIZATION_ERROR", format!("failed to serialize: {}", e))
+                            })?),
+                            Some(crate::tool_calling::ToolExecutionMeta::from_duration(
+                                ToolId::new(tool_id),
+                                std::time::Duration::from_millis(1),
+                            )),
+                        ))
+                    }
+                    Err(e) => Ok(error_result(e)),
+                }
             }
             "release" => {
                 let req: ReleaseTerminalRequest =

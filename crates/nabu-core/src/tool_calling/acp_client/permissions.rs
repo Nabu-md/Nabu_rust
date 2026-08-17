@@ -88,6 +88,18 @@ impl Tool for PermissionTool {
     async fn call(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
         let args = call.arguments.unwrap_or(json!(null));
 
+        let tool_id = TOOL_ID;
+
+        let error_result = |err: ToolError| {
+            ToolResult::error(
+                err,
+                Some(crate::tool_calling::ToolExecutionMeta::from_duration(
+                    crate::tool_calling::ToolId::new(tool_id),
+                    std::time::Duration::from_millis(1),
+                )),
+            )
+        };
+
         let options: Vec<PermissionOption> = args
             .get("options")
             .cloned()
@@ -123,16 +135,16 @@ impl Tool for PermissionTool {
                         ToolError::new("SERIALIZATION_ERROR", format!("failed to serialize: {}", e))
                     })?),
                     Some(crate::tool_calling::ToolExecutionMeta::from_duration(
-                        ToolId::new(TOOL_ID),
+                        crate::tool_calling::ToolId::new(tool_id),
                         std::time::Duration::from_millis(1),
                     )),
                 ))
             }
             RequestPermissionOutcome::Cancelled { .. } => {
-                Err(ToolError::new(
+                Ok(error_result(ToolError::new(
                     error_code::PERMISSION_CANCELLED,
                     "user cancelled the permission request",
-                ))
+                )))
             }
         }
     }
