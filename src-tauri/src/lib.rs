@@ -629,11 +629,16 @@ pub fn run() {
             if let Some(main_window) = app.get_webview_window("main") {
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(8)).await;
-                    if !main_window.is_visible().unwrap_or(false) {
-                        let _ = main_window.show();
-                        let _ = main_window.set_focus();
+                    let vis = main_window.is_visible().unwrap_or(false);
+                    eprintln!("[DBG] safety-net: main window found, is_visible={vis}");
+                    if !vis {
+                        let r_show = main_window.show();
+                        let r_focus = main_window.set_focus();
+                        eprintln!("[DBG] safety-net show result: show={r_show:?} focus={r_focus:?}");
                     }
                 });
+            } else {
+                eprintln!("[DBG] safety-net: get_webview_window(\"main\") returned None");
             }
 
             Ok(())
@@ -643,11 +648,17 @@ pub fn run() {
         // has finished loading — otherwise macOS paints an opaque white
         // webview before any HTML renders, causing a white startup flash.
         .on_page_load(|window, payload| {
+            eprintln!(
+                "[DBG] on_page_load: label={:?} event={:?}",
+                window.label(),
+                payload.event()
+            );
             if window.label() == "main"
                 && payload.event() == tauri::webview::PageLoadEvent::Finished
             {
-                let _ = window.show();
-                let _ = window.set_focus();
+                let r_show = window.show();
+                let r_focus = window.set_focus();
+                eprintln!("[DBG] on_page_load show result: show={r_show:?} focus={r_focus:?}");
             }
         })
         .build(tauri::generate_context!())
