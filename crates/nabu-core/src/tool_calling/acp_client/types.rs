@@ -137,6 +137,7 @@ pub struct ReadTextFileRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u64>,
     /// The session ID for this request.
+    #[serde(default)]
     pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
@@ -164,6 +165,7 @@ pub struct WriteTextFileRequest {
     /// Absolute path to the file to write.
     pub path: String,
     /// The session ID for this request.
+    #[serde(default)]
     pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
@@ -215,6 +217,7 @@ pub struct CreateTerminalRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_byte_limit: Option<u64>,
     /// The session ID for this request.
+    #[serde(default)]
     pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
@@ -235,8 +238,10 @@ pub struct CreateTerminalResponse {
 #[serde(rename_all = "camelCase")]
 pub struct KillTerminalRequest {
     /// The session ID for this request.
+    #[serde(default)]
     pub session_id: SessionId,
     /// The ID of the terminal to kill.
+    #[serde(alias = "terminal_id")]
     pub terminal_id: TerminalId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
@@ -255,8 +260,10 @@ pub struct KillTerminalResponse {
 #[serde(rename_all = "camelCase")]
 pub struct TerminalOutputRequest {
     /// The session ID for this request.
+    #[serde(default)]
     pub session_id: SessionId,
     /// The ID of the terminal to query.
+    #[serde(alias = "terminal_id")]
     pub terminal_id: TerminalId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
@@ -282,8 +289,10 @@ pub struct TerminalOutputResponse {
 #[serde(rename_all = "camelCase")]
 pub struct WaitForTerminalExitRequest {
     /// The session ID for this request.
+    #[serde(default)]
     pub session_id: SessionId,
     /// The ID of the terminal to wait for.
+    #[serde(alias = "terminal_id")]
     pub terminal_id: TerminalId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
@@ -308,8 +317,10 @@ pub struct WaitForTerminalExitResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseTerminalRequest {
     /// The session ID for this request.
+    #[serde(default)]
     pub session_id: SessionId,
     /// The ID of the terminal to release.
+    #[serde(alias = "terminal_id")]
     pub terminal_id: TerminalId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
@@ -345,7 +356,7 @@ pub struct ElicitationPropertySchema {
 }
 
 /// Type-safe elicitation schema for requesting structured user input.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ElicitationSchema {
     /// Optional description of what this schema represents.
@@ -365,6 +376,19 @@ pub struct ElicitationSchema {
     pub r#type: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub _meta: Option<serde_json::Value>,
+}
+
+impl Default for ElicitationSchema {
+    fn default() -> Self {
+        Self {
+            description: None,
+            properties: std::collections::HashMap::new(),
+            required: None,
+            title: None,
+            r#type: default_object_type(),
+            _meta: None,
+        }
+    }
 }
 
 fn default_object_type() -> String {

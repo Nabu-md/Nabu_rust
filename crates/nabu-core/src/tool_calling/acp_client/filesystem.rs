@@ -75,15 +75,13 @@ impl FileSystemTool {
             ));
         }
 
-        let canonical = self.vault_root.join(path.strip_prefix("/").unwrap_or(path));
-
-        // Normalize the path to resolve any `..` or `.` components.
-        // We use lexically_normal-style normalization without actually
-        // hitting the filesystem (which may not exist yet for write ops).
-        let normalized = normalize_path(&canonical);
+        // Normalize the absolute path directly — do not strip the leading "/"
+        // and join with vault_root, which would incorrectly move external
+        // paths (e.g. /etc/passwd) inside the vault.
+        let normalized = normalize_path(path);
+        let vault_canonical = normalize_path(&self.vault_root);
 
         // Ensure the normalized path is still within the vault root.
-        let vault_canonical = normalize_path(&self.vault_root);
         if !normalized.starts_with(&vault_canonical) {
             return Err(ToolError::new(
                 error_code::FS_PATH_OUTSIDE_VAULT,
@@ -188,6 +186,16 @@ impl Tool for FileSystemTool {
             }
         };
 
+        let error_result = |err: ToolError| {
+            ToolResult::error(
+                err,
+                Some(crate::tool_calling::ToolExecutionMeta::from_duration(
+                    crate::tool_calling::ToolId::new(tool_id),
+                    std::time::Duration::from_millis(1),
+                )),
+            )
+        };
+
         match operation {
             "read_text_file" => {
                 let req: ReadTextFileRequest =
@@ -195,22 +203,28 @@ impl Tool for FileSystemTool {
                         ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
                     })?;
 
-                let vault_rel = self.validate_vault_path(&req.path)?;
+                let vault_rel = match self.validate_vault_path(&req.path) {
+                    Ok(v) => v,
+                    Err(e) => return Ok(error_result(e)),
+                };
                 let abs_path = self.vault_root.join(&vault_rel);
 
                 if !abs_path.exists() {
-                    return Err(ToolError::new(
+                    return Ok(error_result(ToolError::new(
                         error_code::FS_FILE_NOT_FOUND,
                         format!("file not found: {}", req.path),
-                    ));
+                    )));
                 }
 
-                let content = std::fs::read_to_string(&abs_path).map_err(|e| {
-                    ToolError::new(
-                        error_code::FS_READ_FAILED,
-                        format!("failed to read file '{}': {}", req.path, e),
-                    )
-                })?;
+                let content = match std::fs::read_to_string(&abs_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return Ok(error_result(ToolError::new(
+                            error_code::FS_READ_FAILED,
+                            format!("failed to read file '{}': {}", req.path, e),
+                        )))
+                    }
+                };
 
                 // Apply optional line/limit for reading.
                 let content = apply_line_limit(&content, req.line, req.limit);
@@ -231,17 +245,20 @@ impl Tool for FileSystemTool {
                         ToolError::new("INVALID_PARAMS", format!("invalid params: {}", e))
                     })?;
 
-                let vault_rel = self.validate_vault_path(&req.path)?;
+                let vault_rel = match self.validate_vault_path(&req.path) {
+                    Ok(v) => v,
+                    Err(e) => return Ok(error_result(e)),
+                };
 
                 // Use StorageManager.save_note_content for persistence.
                 // The vault-relative path is passed directly.
                 let vault_rel_str = vault_rel.to_string_lossy().to_string();
-                let _saved_path = self
+                if let Err(e) = self
                     .storage
                     .save_note_content(&vault_rel_str, &req.content)
-                    .map_err(|e| {
-                        ToolError::new(error_code::FS_WRITE_FAILED, e)
-                    })?;
+                {
+                    return Ok(error_result(ToolError::new(error_code::FS_WRITE_FAILED, e)));
+                }
 
                 Ok(ToolResult::success(
                     Some(json!({})),

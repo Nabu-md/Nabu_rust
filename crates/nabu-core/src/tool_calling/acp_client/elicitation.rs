@@ -88,11 +88,31 @@ impl Tool for ElicitationTool {
     async fn call(&self, call: ToolCall) -> Result<ToolResult, ToolError> {
         let args = call.arguments.unwrap_or(json!(null));
 
+        let tool_id = TOOL_ID;
+
+        let error_result = |err: ToolError| {
+            ToolResult::error(
+                err,
+                Some(crate::tool_calling::ToolExecutionMeta::from_duration(
+                    crate::tool_calling::ToolId::new(tool_id),
+                    std::time::Duration::from_millis(1),
+                )),
+            )
+        };
+
         // Extract the elicitation message.
-        let message = args
+        let message = match args
             .get("message")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::new("INVALID_PARAMS", "missing 'message' parameter"))?;
+        {
+            Some(m) => m,
+            None => {
+                return Ok(error_result(ToolError::new(
+                    "INVALID_PARAMS",
+                    "missing 'message' parameter",
+                )))
+            }
+        };
 
         // Determine the mode (form or url).
         let mode = args
@@ -124,24 +144,29 @@ impl Tool for ElicitationTool {
                         Ok(ToolResult::success(
                             Some(json!({ "response": response })),
                             Some(crate::tool_calling::ToolExecutionMeta::from_duration(
-                                ToolId::new(TOOL_ID),
+                                crate::tool_calling::ToolId::new(tool_id),
                                 std::time::Duration::from_millis(1),
                             )),
                         ))
                     }
                     ElicitationOutcome::Cancelled => {
-                        Err(ToolError::new(
+                        Ok(error_result(ToolError::new(
                             error_code::ELICITATION_CANCELLED,
                             "user cancelled the elicitation",
-                        ))
+                        )))
                     }
                 }
             }
             "url" => {
-                let url = args
-                    .get("url")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::new("INVALID_PARAMS", "missing 'url' parameter for url elicitation"))?;
+                let url = match args.get("url").and_then(|v| v.as_str()) {
+                    Some(u) => u,
+                    None => {
+                        return Ok(error_result(ToolError::new(
+                            "INVALID_PARAMS",
+                            "missing 'url' parameter for url elicitation",
+                        )))
+                    }
+                };
 
                 // For URL elicitations, the client opens the URL and the
                 // agent receives the result externally. In this core
@@ -150,17 +175,17 @@ impl Tool for ElicitationTool {
                 // A production handler should open the URL in the system
                 // browser and coordinate the response back.
                 let _ = url;
-                Err(ToolError::new(
+                Ok(error_result(ToolError::new(
                     error_code::ELICITATION_FAILED,
                     "URL elicitations are handled externally; no response channel available",
-                ))
+                )))
             }
             other => {
                 // Forward-compat: unknown modes are passed through to the handler.
-                Err(ToolError::new(
+                Ok(error_result(ToolError::new(
                     "INVALID_PARAMS",
                     format!("unknown elicitation mode: '{}'", other),
-                ))
+                )))
             }
         }
     }
