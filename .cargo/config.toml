@@ -17,5 +17,11 @@
 # deterministically on every invocation (fresh clones and CI included).
 #
 # Only affects Apple targets; harmless elsewhere.
+#
+# `CMAKE_OSX_DEPLOYMENT_TARGET` is the reliable knob: whisper-rs-sys's
+# build.rs forwards every `CMAKE_`-prefixed env var to CMake as an explicit
+# `-D`, so this deterministically overrides ggml's hardcoded 10.13 default
+# even though Cargo does not fingerprint the variable.
 [env]
 MACOSX_DEPLOYMENT_TARGET = "11.0"
+CMAKE_OSX_DEPLOYMENT_TARGET = "11.0"

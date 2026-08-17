@@ -12,6 +12,7 @@ pub mod error;
 pub mod pdfkit;
 pub mod screenshot;
 pub mod vision;
+#[cfg(all(feature = "whisper", target_os = "macos"))]
 pub mod whisper;
 
 pub use error::NativeError;

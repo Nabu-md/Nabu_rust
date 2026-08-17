@@ -606,7 +606,17 @@ pub fn run() {
             // Build the application context with all lifecycle services
             // initialized and started. The event bridge is registered inside
             // build_application_context before services begin publishing.
-            let ctx = build_application_context(vault_path, app.handle().clone())?;
+            //
+            // Service startup (e.g. `WorkerPool::start`) spawns Tokio tasks and
+            // therefore requires a live Tokio runtime context. The Tauri setup
+            // closure runs synchronously on the main thread outside any runtime,
+            // so we enter the Tauri async runtime here via `block_on` — otherwise
+            // `tokio::spawn` aborts with "there is no reactor running" and the
+            // app crashes during `did_finish_launching`.
+            let app_handle = app.handle().clone();
+            let ctx = tauri::async_runtime::block_on(async move {
+                build_application_context(vault_path, app_handle)
+            })?;
 
             // Make the context available to commands via Tauri managed state.
             app.manage(ctx);

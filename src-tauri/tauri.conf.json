@@ -25,6 +25,7 @@
         "height": 800,
         "resizable": true,
         "visible": false,
+        "transparent": true,
         "backgroundColor": "#00000000"
       }
     ]
