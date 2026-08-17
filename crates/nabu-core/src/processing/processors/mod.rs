@@ -13,6 +13,7 @@ mod pdf_metadata_processor;
 mod pdf_text_processor;
 mod semantic_enricher;
 mod timeline_extractor;
+#[cfg(all(feature = "whisper", target_os = "macos"))]
 mod whisper_processor;
 
 pub use ai_summariser::*;
@@ -30,4 +31,5 @@ pub use pdf_metadata_processor::*;
 pub use pdf_text_processor::*;
 pub use semantic_enricher::*;
 pub use timeline_extractor::*;
+#[cfg(all(feature = "whisper", target_os = "macos"))]
 pub use whisper_processor::*;

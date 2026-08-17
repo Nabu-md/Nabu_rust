@@ -326,6 +326,7 @@ pub fn build_standard_pipeline(
         // Phase 3b: Text analysis (diagnostics)
         Arc::new(super::processors::HarperProcessor),
         // Phase 4: AI-powered processing
+        #[cfg(all(feature = "whisper", target_os = "macos"))]
         Arc::new(super::processors::WhisperProcessor),
         Arc::new(super::processors::EmbeddingGenerator),
         Arc::new(super::processors::SemanticEnricher),

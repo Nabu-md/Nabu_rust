@@ -956,6 +956,7 @@ mod tests {
     /// mechanism.  The executor deserialises the job after a simulated
     /// restart and the Whisper processor (and a recording processor)
     /// receive the exact original bytes.
+    #[cfg(all(feature = "whisper", target_os = "macos"))]
     #[tokio::test]
     async fn test_audio_bytes_survive_pipeline() {
         use crate::capture::handler::CaptureData;

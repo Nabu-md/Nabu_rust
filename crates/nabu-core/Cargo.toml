@@ -4,6 +4,16 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# Local Whisper (whisper.cpp) transcription is an opt-in capability: it
+# compiles the vendored whisper.cpp C++ engine, which is heavy and can trip
+# over platform toolchain issues (e.g. the macOS <filesystem> deployment
+# target). Off by default so `nabu-core` builds cleanly everywhere; enable it
+# to get real audio transcription. The WhisperProcessor / WhisperTranscriber
+# degrade gracefully (error, no fabricated text) when disabled.
+default = []
+whisper = ["dep:whisper-rs"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -48,7 +58,7 @@ objc2 = { version = "0.6.4", features = ["exception"] }
 objc2-foundation = { version = "0.3.2", features = ["NSArray", "NSData", "NSDictionary", "NSError", "NSGeometry", "NSObject", "NSString", "objc2-core-foundation"] }
 objc2-vision = { version = "0.3.2", features = ["VNDefines", "VNObservation", "VNRecognizeTextRequest", "VNRequest", "VNRequestHandler", "VNTypes"] }
 objc2-app-kit = { version = "0.3.2", features = ["NSBitmapImageRep", "NSImage", "NSImageRep"] }
-whisper-rs = "0.14.4"
+whisper-rs = { version = "0.14.4", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -11,6 +11,7 @@
 
 use super::audio::CapturedAudio;
 use super::error::DictationError;
+#[cfg(all(feature = "whisper", target_os = "macos"))]
 use crate::native::whisper as native_whisper;
 use std::path::{Path, PathBuf};
 
@@ -79,14 +80,21 @@ impl Default for WhisperTranscriber {
 }
 
 impl Transcriber for WhisperTranscriber {
+    #[cfg(all(feature = "whisper", target_os = "macos"))]
     fn model_available(&self) -> bool {
         self.model_path.exists()
+    }
+
+    #[cfg(not(all(feature = "whisper", target_os = "macos")))]
+    fn model_available(&self) -> bool {
+        false
     }
 
     fn model_path(&self) -> Option<std::path::PathBuf> {
         Some(self.model_path.clone())
     }
 
+    #[cfg(all(feature = "whisper", target_os = "macos"))]
     fn transcribe(&self, audio: &CapturedAudio) -> Result<String, DictationError> {
         if !self.model_path.exists() {
             return Err(DictationError::ModelNotFound(
@@ -118,5 +126,12 @@ impl Transcriber for WhisperTranscriber {
                 Err(DictationError::TranscriptionFailed(msg))
             }
         }
+    }
+
+    #[cfg(not(all(feature = "whisper", target_os = "macos")))]
+    fn transcribe(&self, _audio: &CapturedAudio) -> Result<String, DictationError> {
+        Err(DictationError::TranscriptionFailed(
+            "whisper engine not compiled into this build (enable the `whisper` feature)".into(),
+        ))
     }
 }
