@@ -586,6 +586,9 @@ fn extract_activity(ev: &FrontendEvent, _max: usize) -> Option<ActivityItem> {
 
         // ── Processing progress — too noisy for the activity timeline ──
         PipelineEvent::ItemProcessingProgress(_) => return None,
+
+        // ── ACP permission requests — not surfaced as activity ──
+        PipelineEvent::AcpPermissionRequested(_) => return None,
     };
 
     Some(item)
