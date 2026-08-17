@@ -239,6 +239,8 @@ impl NotificationConfig {
                 dedup_key: None,
             }),
             FrontendEventKind::SessionCleanedUp => None,
+            // Permission requests are handled inline by the ChatView.
+            FrontendEventKind::AcpPermissionRequested => None,
         }
     }
 }
@@ -481,7 +483,8 @@ fn event_message(payload: &PipelineEvent) -> Option<String> {
         | PipelineEvent::Diagnostic(_)
         | PipelineEvent::Conversation(_)
         | PipelineEvent::Stream(_)
-        | PipelineEvent::Session(_) => {
+        | PipelineEvent::Session(_)
+        | PipelineEvent::AcpPermissionRequested(_) => {
             // These event kinds are not in the FrontendEventKind set yet,
             // so they won't reach this function in the current phase.
             Some(payload.kind().to_string())
