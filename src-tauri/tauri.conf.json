@@ -13,7 +13,7 @@
       "cwd": ".."
     },
     "devUrl": "http://localhost:8080",
-    "frontendDist": "../dist"
+    "frontendDist": "test-dist"
   },
   "app": {
     "withGlobalTauri": true,
@@ -24,9 +24,9 @@
         "width": 1280,
         "height": 800,
         "resizable": true,
-        "visible": false,
-        "transparent": true,
-        "backgroundColor": "#00000000"
+        "visible": true,
+        "transparent": false,
+        "backgroundColor": "#0b1220"
       }
     ]
   },
