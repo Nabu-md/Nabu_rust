@@ -70,6 +70,10 @@ struct ActiveSession {
     /// The ACP client — stored here so subsequent prompt/cancel calls can
     /// reuse it.  All post-`initialize` methods take `&self`.
     client: AcpClientType,
+    /// The child process handle — must be stored to prevent the process from
+    /// being killed when `connect()` returns (kill_on_drop would otherwise
+    /// terminate it immediately).  Explicitly killed in `disconnect()`.
+    child: tokio::process::Child,
 }
 
 /// Error returned by `AcpSessionManager` operations.
@@ -135,6 +139,8 @@ impl AcpSessionManager {
             .take()
             .ok_or_else(|| AcpSessionError::SpawnFailed("agent process has no stdout".into()))?;
         let _stderr = child.stderr.take();
+        // Store the child handle so kill_on_drop doesn't terminate the
+        // process when connect() returns. See ActiveSession::child field.
 
         let transport = StdioTransport::new(tokio::io::BufReader::new(stdout), stdin);
         let handler: Arc<dyn crate::acp::handler::AcpClientHandler> =
@@ -234,7 +240,7 @@ impl AcpSessionManager {
 
         {
             let mut sessions = self.sessions.write().await;
-            sessions.insert(
+             sessions.insert(
                 thread_id,
                 ActiveSession {
                     session_id: session_id.clone(),
@@ -243,6 +249,7 @@ impl AcpSessionManager {
                     accumulated_content: accumulated,
                     agent_name: config.agent_name.clone(),
                     client,
+                    child,
                 },
             );
         }
@@ -322,6 +329,11 @@ impl AcpSessionManager {
 
         let _ = session.client.close_session(&session_id).await;
         let _ = session.client.shutdown().await;
+
+        // Kill the child process and wait for it to exit so we don't
+        // leave zombie processes around.
+        let _ = session.child.kill().await;
+        let _ = session.child.wait().await;
 
         Ok(())
     }

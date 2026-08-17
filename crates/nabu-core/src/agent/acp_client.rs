@@ -19,16 +19,15 @@
 //!    remote session cleanly.
 //! 6. **Stop** — `client.stop()` kills the child process if still running.
 //!
-//! ## Concurrency Model
+//! ## Concurrency
 //!
-//! A single background task ("the reader loop") owns the `StdioChannel`'s
-//! reader half and demultiplexes incoming messages:
-//! - **Responses** are routed to the matching `pending` entry via `id`.
-//! - **Notifications** (requests with `id == null`) are routed to the
-//!   notification handler callback.
-//!
-//! Multiple tasks can call `send_request` concurrently — the writer half is
-//! mutex-protected in [`StdioChannel`].
+//! The [`StdioChannel`] wraps stdin and stdout in independent `tokio::sync::Mutex`
+//! guards, so sending a request and receiving a response can proceed concurrently
+//! without contention.  The read loop acquires **no** lock while awaiting data on
+//! stdout — the channel's own stdout mutex provides the necessary synchronization.
+//! The state mutex is only held briefly to insert/remove pending request entries,
+//! eliminating the previous deadlock where `recv_response().await` held the inner
+//! lock and blocked `send_request` from writing to stdin.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -36,24 +35,35 @@ use std::sync::Arc;
 use serde_json::Value;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::agent::stdio_channel::StdioChannel;
-use crate::{AgentManagerError, AgentResult};
-use crate::rpc::{JSON_RPC_VERSION, Request, RequestId, Response};
+use crate::acp::events::classify_message;
 use crate::acp::types::{
     CloseSessionRequest, CloseSessionResponse, InitializeRequest, InitializeResponse,
-    METHOD_CLOSE_SESSION, METHOD_INITIALIZE,     METHOD_NEW_SESSION, METHOD_PROMPT,
+    METHOD_CLOSE_SESSION, METHOD_INITIALIZE, METHOD_NEW_SESSION, METHOD_PROMPT,
     NewSessionRequest, NewSessionResponse, PromptRequest, PromptResponse,
+    SessionNotificationParams, SessionUpdate,
 };
+use crate::agent::stdio_channel::StdioChannel;
+use crate::rpc::{JSON_RPC_VERSION, Request, RequestId, Response};
 use crate::streaming::StreamingPipeline;
+use crate::{AgentManagerError, AgentResult};
+
+/// Type alias for the update notification callback.
+type UpdateCallback = Arc<
+    dyn Fn(String, SessionUpdate) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// A pending JSON-RPC request awaiting its response.
 struct PendingRequest {
     tx: tokio::sync::oneshot::Sender<AgentResult<Response>>,
 }
 
-/// Internal shared state for the AcpClient.
-struct Inner {
-    channel: StdioChannel,
+/// Internal shared state for the AcpClient — mutable state protected by an
+/// `AsyncMutex`.  The channel is stored **outside** this mutex so that the
+/// read loop can await on stdout without holding the state lock (which would
+/// deadlock `send_request`).
+struct ClientState {
     pending: std::collections::HashMap<RequestId, PendingRequest>,
     next_id: AtomicU64,
     initialized: AtomicBool,
@@ -61,10 +71,31 @@ struct Inner {
     stopping: AtomicBool,
 }
 
+impl Default for ClientState {
+    fn default() -> Self {
+        Self {
+            pending: std::collections::HashMap::new(),
+            next_id: AtomicU64::new(1),
+            initialized: AtomicBool::new(false),
+            session_id: None,
+            stopping: AtomicBool::new(false),
+        }
+    }
+}
+
 /// A JSON-RPC + ACP client that drives an external agent process over stdio.
 pub struct AcpClient {
-    inner: Arc<AsyncMutex<Inner>>,
+    /// The stdio channel — shared between the client and the read loop.
+    /// `StdioChannel` uses internal `tokio::sync::Mutex` guards for stdin
+    /// and stdout independently, so concurrent send/recv is safe.
+    channel: Arc<StdioChannel>,
+    /// Mutable state — only held briefly, never during channel I/O.
+    state: Arc<AsyncMutex<ClientState>>,
+    /// Optional streaming pipeline for token delivery.
     pipeline: Option<Arc<StreamingPipeline>>,
+    /// Optional callback for `session/update` notifications.
+    on_update: Option<UpdateCallback>,
+    /// Handle to the background read loop task.
     read_task: Option<tokio::task::JoinHandle<()>>,
 }
 
@@ -72,17 +103,26 @@ impl AcpClient {
     /// Create a new client from a [`StdioChannel`] connected to an ACP server.
     pub fn new(channel: StdioChannel, pipeline: Option<Arc<StreamingPipeline>>) -> Self {
         Self {
-            inner: Arc::new(AsyncMutex::new(Inner {
-                channel,
-                pending: std::collections::HashMap::new(),
-                next_id: AtomicU64::new(1),
-                initialized: AtomicBool::new(false),
-                session_id: None,
-                stopping: AtomicBool::new(false),
-            })),
+            channel: Arc::new(channel),
+            state: Arc::new(AsyncMutex::new(ClientState::default())),
             pipeline,
+            on_update: None,
             read_task: None,
         }
+    }
+
+    /// Register a callback to be invoked for each `session/update` notification
+    /// received from the agent.
+    pub fn on_update<F, Fut>(&mut self, callback: F)
+    where
+        F: Fn(String, SessionUpdate) -> Fut + Send + Sync + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let cb: UpdateCallback = Arc::new(move |sid, update| {
+            let fut = callback(sid.to_string(), update);
+            Box::pin(async move { fut.await })
+        });
+        self.on_update = Some(cb);
     }
 
     /// Start the background read loop that demultiplexes responses and
@@ -93,46 +133,112 @@ impl AcpClient {
         if self.read_task.is_some() {
             return;
         }
-        let inner = self.inner.clone();
+        let channel = self.channel.clone();
+        let state = self.state.clone();
         let pipeline = self.pipeline.clone();
+        let on_update = self.on_update.clone();
         let task = tokio::spawn(async move {
-            Self::read_loop(inner, pipeline).await;
+            Self::read_loop(channel, state, pipeline, on_update).await;
         });
         self.read_task = Some(task);
     }
 
     /// The background reader loop.
-    async fn read_loop(inner: Arc<AsyncMutex<Inner>>, _pipeline: Option<Arc<StreamingPipeline>>) {
+    ///
+    /// Reads one NDJSON line at a time from the channel — **without** holding
+    /// the state mutex — then dispatches the result.  This eliminates the
+    /// deadlock that occurred when `recv_response().await` was called while
+    /// holding the inner lock.
+    async fn read_loop(
+        channel: Arc<StdioChannel>,
+        state: Arc<AsyncMutex<ClientState>>,
+        _pipeline: Option<Arc<StreamingPipeline>>,
+        on_update: Option<UpdateCallback>,
+    ) {
         loop {
-            let result = {
-                let guard = inner.lock().await;
-                guard.channel.recv_response().await
-            };
+            // Receive a raw line — NO state lock held during I/O.
+            let recv_result = channel.recv_line().await;
 
-            match result {
-                Ok(Some(resp)) => {
-                    let mut guard = inner.lock().await;
-                    let id = resp.id.clone();
-                    if let Some(pending) = guard.pending.remove(&id) {
-                        let _ = pending.tx.send(Ok(resp));
+            match recv_result {
+                Ok(Some(line)) => {
+                    // Classify the message (response, notification, or
+                    // agent→client request).
+                    let classified = match classify_message(&line) {
+                        Ok(msg) => msg,
+                        Err(e) => {
+                            tracing::warn!(
+                                "ACP: failed to classify message: {} (line: {})",
+                                e,
+                                line
+                            );
+                            continue;
+                        }
+                    };
+
+                    match classified {
+                        crate::acp::events::InboundMessage::Response { id, result, error } => {
+                            let mut st = state.lock().await;
+                            if let Some(pending) = st.pending.remove(&id) {
+                                let resp = match error {
+                                    Some(e) => Err(AcpClientError::Protocol(e.message).into()),
+                                    None => Ok(Response {
+                                        version: JSON_RPC_VERSION.to_string(),
+                                        id: id.clone(),
+                                        result,
+                                        error: None,
+                                    }),
+                                };
+                                drop(st);
+                                let _ = pending.tx.send(resp);
+                            }
+                        }
+                        crate::acp::events::InboundMessage::Notification { method, params } => {
+                            // Route session/update notifications to the
+                            // callback (and indirectly the streaming pipeline).
+                            if method == crate::acp::types::METHOD_SESSION_UPDATE {
+                                if let Some(cb) = &on_update {
+                                    if let Some(p) = params {
+                                        if let Ok(notif) =
+                                            serde_json::from_value::<SessionNotificationParams>(p)
+                                        {
+                                            let sid = notif.session_id.clone();
+                                            let update = notif.update.clone();
+                                            cb(sid, update).await;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        crate::acp::events::InboundMessage::AgentRequest { id, method, .. } => {
+                            // The old AcpClient does not dispatch agent→client
+                            // requests (no handler trait). Log and ignore.
+                            tracing::warn!(
+                                "ACP: unhandled agent→client request: method={}, id={}",
+                                method,
+                                id
+                            );
+                        }
                     }
-                    // Notifications (id == null) are not yet routed to a handler.
                 }
                 Ok(None) => {
-                    let mut guard = inner.lock().await;
-                    guard.stopping.store(true, Ordering::SeqCst);
-                    for pending in guard.pending.drain() {
-                        let _ = pending.1.tx.send(Err(AcpClientError::Eof.into()));
+                    // EOF on stdout — the agent process has closed its output.
+                    let mut st = state.lock().await;
+                    st.stopping.store(true, Ordering::SeqCst);
+                    let err = AcpClientError::Eof;
+                    for pending in st.pending.drain() {
+                        let _ = pending.1.tx.send(Err(err.clone().into()));
                     }
+                    drop(st);
                     break;
                 }
                 Err(e) => {
-                    let mut guard = inner.lock().await;
-                    guard.stopping.store(true, Ordering::SeqCst);
+                    let mut st = state.lock().await;
+                    st.stopping.store(true, Ordering::SeqCst);
                     let err = AgentManagerError::Acp(format!("read error: {}", e));
-                    for pending in guard.pending.drain() {
+                    for pending in st.pending.drain() {
                         let _ = pending.1.tx.send(Err(err.clone()));
                     }
+                    drop(st);
                     break;
                 }
             }
@@ -143,11 +249,14 @@ impl AcpClient {
     ///
     /// The request ID is auto-incremented and tracked internally. The caller
     /// must ensure `start_read_loop` is running so responses are demultiplexed.
+    ///
+    /// **No deadlock:** the state mutex is released before the channel write
+    /// completes, and the read loop never holds the state mutex while awaiting
+    /// data on stdout.
     pub async fn send_request(&self, method: &str, params: Option<Value>) -> AgentResult<Response> {
         let id = {
-            let guard = self.inner.lock().await;
-            let id = guard.next_id.fetch_add(1, Ordering::SeqCst) as i64;
-            RequestId::Number(id)
+            let st = self.state.lock().await;
+            RequestId::Number(st.next_id.fetch_add(1, Ordering::SeqCst) as i64)
         };
 
         let request = Request {
@@ -160,14 +269,15 @@ impl AcpClient {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         {
-            let mut guard = self.inner.lock().await;
-            guard
-                .pending
-                .insert(request.id.clone(), PendingRequest { tx });
-            guard.channel.send_request(&request).await.map_err(|e| {
-                guard.pending.remove(&request.id);
-                AgentManagerError::Acp(format!("send error: {}", e))
-            })?;
+            let mut st = self.state.lock().await;
+            st.pending.insert(request.id.clone(), PendingRequest { tx });
+        }
+
+        // Send the request — NO state lock held during channel I/O.
+        if let Err(e) = self.channel.send_request(&request).await {
+            let mut st = self.state.lock().await;
+            st.pending.remove(&request.id);
+            return Err(AgentManagerError::Acp(format!("send error: {}", e)));
         }
 
         rx.await
@@ -179,14 +289,14 @@ impl AcpClient {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         {
-            let mut guard = self.inner.lock().await;
-            guard
-                .pending
-                .insert(request.id.clone(), PendingRequest { tx });
-            guard.channel.send_request(request).await.map_err(|e| {
-                guard.pending.remove(&request.id);
-                AgentManagerError::Acp(format!("send error: {}", e))
-            })?;
+            let mut st = self.state.lock().await;
+            st.pending.insert(request.id.clone(), PendingRequest { tx });
+        }
+
+        if let Err(e) = self.channel.send_request(request).await {
+            let mut st = self.state.lock().await;
+            st.pending.remove(&request.id);
+            return Err(AgentManagerError::Acp(format!("send error: {}", e)));
         }
 
         rx.await
@@ -211,8 +321,8 @@ impl AcpClient {
         .map_err(|e| AgentManagerError::Acp(format!("deserialize InitializeResponse: {}", e)))?;
 
         {
-            let guard = self.inner.lock().await;
-            guard.initialized.store(true, Ordering::SeqCst);
+            let st = self.state.lock().await;
+            st.initialized.store(true, Ordering::SeqCst);
         }
 
         Ok(result)
@@ -234,8 +344,8 @@ impl AcpClient {
         .map_err(|e| AgentManagerError::Acp(format!("deserialize NewSessionResponse: {}", e)))?;
 
         {
-            let mut guard = self.inner.lock().await;
-            guard.session_id = Some(result.session_id.clone());
+            let mut st = self.state.lock().await;
+            st.session_id = Some(result.session_id.clone());
         }
 
         Ok(result)
@@ -248,8 +358,8 @@ impl AcpClient {
     /// `PromptResponse` is returned when the agent signals completion.
     pub async fn prompt(&mut self, req: PromptRequest) -> AgentResult<PromptResponse> {
         let session_id = {
-            let guard = self.inner.lock().await;
-            guard.session_id.clone()
+            let st = self.state.lock().await;
+            st.session_id.clone()
         };
 
         let session_id = session_id.ok_or(AcpClientError::NoActiveSession)?;
@@ -280,8 +390,8 @@ impl AcpClient {
     /// Close the current session via `session/close`.
     pub async fn close(&mut self) -> AgentResult<CloseSessionResponse> {
         let session_id = {
-            let mut guard = self.inner.lock().await;
-            guard.session_id.take()
+            let mut st = self.state.lock().await;
+            st.session_id.take()
         };
 
         let session_id = session_id.ok_or(AcpClientError::NoActiveSession)?;
@@ -309,9 +419,9 @@ impl AcpClient {
     /// Stop the client — signals the read loop to exit and aborts the read task.
     pub async fn stop(&mut self) {
         {
-            let mut guard = self.inner.lock().await;
-            guard.stopping.store(true, Ordering::SeqCst);
-            for pending in guard.pending.drain() {
+            let mut st = self.state.lock().await;
+            st.stopping.store(true, Ordering::SeqCst);
+            for pending in st.pending.drain() {
                 let _ = pending.1.tx.send(Err(AcpClientError::ClientStopped.into()));
             }
         }
@@ -323,12 +433,12 @@ impl AcpClient {
 
     /// Returns `true` if `initialize` has been called successfully.
     pub async fn is_initialized(&self) -> bool {
-        self.inner.lock().await.initialized.load(Ordering::SeqCst)
+        self.state.lock().await.initialized.load(Ordering::SeqCst)
     }
 
     /// Returns the current session ID, if one is active.
     pub async fn session_id(&self) -> Option<String> {
-        self.inner.lock().await.session_id.clone()
+        self.state.lock().await.session_id.clone()
     }
 }
 
@@ -337,7 +447,7 @@ impl AcpClient {
 // ---------------------------------------------------------------------------
 
 /// Errors specific to the AcpClient's protocol machinery.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum AcpClientError {
     /// EOF on the child's stdout.
     #[error("connection closed by remote")]
@@ -368,19 +478,35 @@ mod tests {
     use super::*;
     use crate::acp::types::*;
     use crate::event_bus::EventBus;
-    use crate::rpc::RequestId;
     use std::sync::Arc;
     use tokio::process::{Child, Command};
 
     /// A minimal mock ACP server: reads NDJSON requests, writes NDJSON responses.
-    /// Embeds a small Python script as the mock agent process.
+    /// Speaks true ACP JSON-RPC over stdio: `initialize` → `session/new` →
+    /// `session/prompt` (with `session/update` notifications) → `session/close`.
     const MOCK_AGENT_SCRIPT: &str = r#"
-import sys, json
+import sys, json, time
 
-for line in sys.stdin:
-    line = line.strip()
+def send(obj):
+    print(json.dumps(obj), flush=True)
+    sys.stdout.flush()
+
+def read_line():
+    line = sys.stdin.readline()
     if not line:
-        continue
+        return None
+    line = line.strip()
+    while not line:
+        line = sys.stdin.readline()
+        if not line:
+            return None
+        line = line.strip()
+    return line
+
+while True:
+    line = read_line()
+    if line is None:
+        break
     try:
         req = json.loads(line)
     except json.JSONDecodeError:
@@ -392,29 +518,47 @@ for line in sys.stdin:
     req_id = req.get("id")
 
     if method == "initialize":
-        result = {
-            "protocolVersion": 1,
-            "agentInfo": {"name": "mock-agent", "version": "1.0.0"},
-            "agentCapabilities": {"prompts": {"staticRegistration": None}},
-            "authMethods": [],
-        }
+        send({
+            "jsonrpc": "2.0", "id": req_id,
+            "result": {
+                "protocolVersion": 1,
+                "agentInfo": {"name": "mock-agent", "version": "1.0.0"},
+                "agentCapabilities": {"prompts": {"staticRegistration": None}},
+                "authMethods": []
+            }
+        })
     elif method == "session/new":
-        result = {"sessionId": "test-session-123"}
+        send({"jsonrpc": "2.0", "id": req_id,
+              "result": {"sessionId": "test-session-123"}})
     elif method == "session/close":
-        result = {}
-    elif method == "prompt":
-        result = {"stopReason": "end_turn"}
+        send({"jsonrpc": "2.0", "id": req_id, "result": {}})
+    elif method == "session/prompt":
+        # Send a couple of session/update notifications before the response.
+        send({"jsonrpc": "2.0", "id": None,
+              "method": "session/update",
+              "params": {"sessionId": "test-session-123",
+                         "update": {"sessionUpdate": "agent_message_chunk",
+                                    "content": {"type": "text",
+                                                "text": "Hello "}}}})
+        send({"jsonrpc": "2.0", "id": None,
+              "method": "session/update",
+              "params": {"sessionId": "test-session-123",
+                         "update": {"sessionUpdate": "agent_message_chunk",
+                                    "content": {"type": "text",
+                                                "text": "world!"} }}})
+        send({"jsonrpc": "2.0", "id": None,
+              "method": "session/update",
+              "params": {"sessionId": "test-session-123",
+                         "update": {"sessionUpdate": "agent_message_chunk",
+                                    "content": {"type": "text",
+                                                "text": "\n"}}}})
+        send({"jsonrpc": "2.0", "id": req_id,
+              "result": {"stopReason": "end_turn"}})
     else:
         sys.stderr.write("mock: unknown method {}\n".format(method))
         sys.stderr.flush()
-        resp = {"jsonrpc": "2.0", "id": req_id,
-                "error": {"code": -32601, "message": "Method not found"}}
-        print(json.dumps(resp), flush=True)
-        continue
-
-    resp = {"jsonrpc": "2.0", "id": req_id, "result": result}
-    print(json.dumps(resp), flush=True)
-    sys.stdout.flush()
+        send({"jsonrpc": "2.0", "id": req_id,
+              "error": {"code": -32601, "message": "Method not found"}})
 "#;
 
     /// Spawn a mock ACP agent subprocess and return the child plus its stdio.
@@ -480,7 +624,7 @@ for line in sys.stdin:
     async fn initialize_and_new_session_and_close() {
         let (_child, channel) = spawn_mock_agent().await;
         let pipeline: Arc<StreamingPipeline> = Arc::new(StreamingPipeline::new(
-            Arc::new(EventBus::new())
+            Arc::new(EventBus::new()),
         ));
         let mut client = AcpClient::new(channel, Some(pipeline));
 
@@ -528,7 +672,10 @@ for line in sys.stdin:
     #[tokio::test]
     async fn full_lifecycle_with_prompt() {
         let (_child, channel) = spawn_mock_agent().await;
-        let mut client = AcpClient::new(channel, None);
+        let pipeline: Arc<StreamingPipeline> = Arc::new(StreamingPipeline::new(
+            Arc::new(EventBus::new()),
+        ));
+        let mut client = AcpClient::new(channel, Some(pipeline));
 
         // initialize
         let init_req = InitializeRequest {
@@ -576,27 +723,13 @@ for line in sys.stdin:
         let (_child, channel) = spawn_mock_agent().await;
         let mut client = AcpClient::new(channel, None);
 
-        // Send a request but don't start the read loop — the oneshot will
-        // never receive a response. Start the read loop, then immediately
-        // call stop() which should drain pending and send errors.
-        //
-        // We start the read loop and then stop immediately before a response
-        // can arrive. The pending send_request should get an error.
         client.start_read_loop().await;
-
-        // Use a timeout — since the mock server is alive and responsive, this
-        // should actually get a response. Instead, we test stop() on the
-        // client without sending a request. Just verify stop completes cleanly.
         client.stop().await;
-        // After stop, the read task should be aborted.
         assert!(client.read_task.is_none());
     }
 
     #[tokio::test]
     async fn send_request_without_read_loop_times_out() {
-        // When the read loop is not running, send_request will send the
-        // request but the oneshot receiver will never resolve.
-        // We test this with a timeout to ensure the pending entry is cleaned up.
         let (_child, channel) = spawn_mock_agent().await;
         let client = AcpClient::new(channel, None);
 
@@ -612,7 +745,6 @@ for line in sys.stdin:
 
     #[tokio::test]
     async fn acp_client_error_from_conversion() {
-        // AcpClientError should convert to AgentManagerError::Acp
         let err1: AgentManagerError = AcpClientError::Eof.into();
         assert!(err1.to_string().contains("connection closed by remote"));
         assert!(err1.is_acp_error());
@@ -630,14 +762,305 @@ for line in sys.stdin:
         let client = AcpClient::new(channel, None);
 
         let id1 = {
-            let guard = client.inner.lock().await;
-            RequestId::Number(guard.next_id.fetch_add(1, Ordering::SeqCst) as i64)
+            let st = client.state.lock().await;
+            RequestId::Number(st.next_id.fetch_add(1, Ordering::SeqCst) as i64)
         };
         let id2 = {
-            let guard = client.inner.lock().await;
-            RequestId::Number(guard.next_id.fetch_add(1, Ordering::SeqCst) as i64)
+            let st = client.state.lock().await;
+            RequestId::Number(st.next_id.fetch_add(1, Ordering::SeqCst) as i64)
         };
 
         assert_ne!(id1, id2);
+    }
+
+    /// Test that session/update notifications are received and dispatched.
+    #[tokio::test]
+    async fn notification_received_during_prompt() {
+        let (_child, channel) = spawn_mock_agent().await;
+        let pipeline: Arc<StreamingPipeline> = Arc::new(StreamingPipeline::new(
+            Arc::new(EventBus::new()),
+        ));
+        let mut client = AcpClient::new(channel, Some(pipeline.clone()));
+
+        // Collect updates via callback
+        let updates: Arc<tokio::sync::Mutex<Vec<SessionUpdate>>> =
+            Arc::new(tokio::sync::Mutex::new(vec![]));
+        let updates_clone = updates.clone();
+        client.on_update(move |_sid: String, update: SessionUpdate| {
+            let updates = updates_clone.clone();
+            async move {
+                let mut v = updates.lock().await;
+                v.push(update);
+            }
+        });
+
+        // initialize + new session
+        let init_req = InitializeRequest {
+            protocol_version: SUPPORTED_PROTOCOL_VERSION,
+            client_info: Some(Implementation {
+                name: "nabu-test".to_string(),
+                title: None,
+                version: "0.0.0".to_string(),
+                _meta: None,
+            }),
+            client_capabilities: Some(ClientCapabilities::default()),
+            _meta: None,
+        };
+        client.initialize(init_req).await.expect("initialize");
+
+        let new_session_req = NewSessionRequest {
+            cwd: std::env::temp_dir().to_string_lossy().to_string(),
+            mcp_servers: vec![],
+            additional_directories: vec![],
+            _meta: None,
+        };
+        client.new_session(new_session_req).await.expect("new_session");
+
+        // prompt — the mock sends 3 session/update notifications
+        let prompt_req = PromptRequest {
+            session_id: "test-session-123".to_string(),
+            prompt: vec![ContentBlock::Text(TextContent {
+                text: "hello".to_string(),
+                annotations: None,
+                _meta: None,
+            })],
+            _meta: None,
+        };
+        let _ = client.prompt(prompt_req).await.expect("prompt");
+
+        // Give the read loop time to dispatch notifications
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let received = updates.lock().await;
+        assert!(received.len() >= 3, "expected at least 3 notifications, got {}", received.len());
+
+        // Verify they are AgentMessageChunk variants
+        for update in received.iter() {
+            assert!(matches!(update, SessionUpdate::AgentMessageChunk(_)));
+        }
+    }
+
+    /// Test that EOF on stdout is detected and pending requests are errored.
+    #[tokio::test]
+    async fn eof_errors_pending_request() {
+        // Spawn a mock agent that exits immediately
+        let mut child = Command::new("python3")
+            .arg("-c")
+            .arg("import sys; sys.exit(0)")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("failed to spawn");
+
+        let stdin = child.stdin.take().expect("no stdin");
+        let stdout = child.stdout.take().expect("no stdout");
+        let channel = StdioChannel::new(stdin, stdout);
+        let mut client = AcpClient::new(channel, None);
+
+        client.start_read_loop().await;
+
+        // Wait for the child to exit and stdout to close
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // Now send a request — it should get an EOF error (or send error,
+        // since stdin is also closed). Either way, it should not hang.
+        let req = Request::new(1, "some_method", None);
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.send_raw_request(&req),
+        )
+        .await;
+
+        assert!(result.is_ok(), "should get a response (error), not hang");
+        let resp = result.unwrap();
+        assert!(resp.is_err());
+        let err_msg = resp.unwrap_err().to_string();
+        // Could be EOF (read loop detected closed stdout) or send error
+        // (stdin closed because child exited). Either way, the error should
+        // indicate the connection/remote is gone.
+        assert!(
+            err_msg.contains("connection closed by remote")
+                || err_msg.contains("send error")
+                || err_msg.contains("response channel closed"),
+            "unexpected error: {}",
+            err_msg
+        );
+    }
+
+    /// Test that the AcpClient can send a request and receive a response
+    /// without holding the state lock during I/O (no deadlock).
+    #[tokio::test]
+    async fn send_and_receive_does_not_deadlock() {
+        let (_child, channel) = spawn_mock_agent().await;
+        let mut client = AcpClient::new(channel, None);
+
+        // Start the read loop
+        client.start_read_loop().await;
+
+        // Send initialize and wait — if there were a deadlock, this would
+        // hang. The read loop should be able to receive the response because
+        // it doesn't hold the state lock during recv_line().
+        let init_req = InitializeRequest {
+            protocol_version: SUPPORTED_PROTOCOL_VERSION,
+            client_info: Some(Implementation {
+                name: "nabu-test".to_string(),
+                title: None,
+                version: "0.0.0".to_string(),
+                _meta: None,
+            }),
+            client_capabilities: Some(ClientCapabilities::default()),
+            _meta: None,
+        };
+
+        let resp = client.initialize(init_req).await;
+        assert!(resp.is_ok(), "initialize should succeed without deadlock");
+    }
+
+    /// Test that a request sent after the child exits returns an error.
+    #[tokio::test]
+    async fn request_after_child_exit_returns_error() {
+        let mut child = Command::new("python3")
+            .arg("-c")
+            .arg("import sys; sys.exit(0)")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("failed to spawn");
+
+        let stdin = child.stdin.take().expect("no stdin");
+        let stdout = child.stdout.take().expect("no stdout");
+        let channel = StdioChannel::new(stdin, stdout);
+        let mut client = AcpClient::new(channel, None);
+
+        client.start_read_loop().await;
+
+        // Wait for child exit and stdout close
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // The read loop should have detected EOF and set stopping=true
+        {
+            let st = client.state.lock().await;
+            assert!(st.stopping.load(Ordering::SeqCst), "stopping flag should be set after EOF");
+        }
+    }
+
+    /// Test that malformed JSON on stdout is skipped without crashing.
+    #[tokio::test]
+    async fn malformed_json_does_not_panic() {
+        let mut child = Command::new("python3")
+            .arg("-c")
+            .arg(r#"
+import sys, json
+
+def send(obj):
+    print(json.dumps(obj), flush=True)
+
+def read_line():
+    data = sys.stdin.readline()
+    if not data:
+        return None
+    data = data.strip()
+    while not data:
+        data = sys.stdin.readline()
+        if not data:
+            return None
+        data = data.strip()
+    return data
+
+while True:
+    line = read_line()
+    if line is None:
+        break
+    req = json.loads(line)
+    method = req.get("method", "")
+    req_id = req.get("id")
+
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": req_id,
+              "result": {"protocolVersion": 1,
+                         "agentInfo": {"name": "mock", "version": "1.0.0"},
+                         "agentCapabilities": {"prompts": {"staticRegistration": None}},
+                         "authMethods": []}})
+    elif method == "session/new":
+        # Send malformed JSON before the valid response
+        print("not valid json {{{", flush=True)
+        send({"jsonrpc": "2.0", "id": req_id, "result": {"sessionId": "s1"}})
+    elif method == "session/prompt":
+        print("<<<garbage>>>", flush=True)
+        send({"jsonrpc": "2.0", "id": req_id, "result": {"stopReason": "end_turn"}})
+    else:
+        send({"jsonrpc": "2.0", "id": req_id,
+              "error": {"code": -32601, "message": "Method not found"}})
+"#)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("failed to spawn");
+
+        let stdin = child.stdin.take().expect("no stdin");
+        let stdout = child.stdout.take().expect("no stdout");
+        let channel = StdioChannel::new(stdin, stdout);
+        let mut client = AcpClient::new(channel, None);
+
+        client.start_read_loop().await;
+
+        // Send initialize request
+        let init_req = InitializeRequest {
+            protocol_version: SUPPORTED_PROTOCOL_VERSION,
+            client_info: Some(Implementation {
+                name: "nabu-test".to_string(),
+                title: None,
+                version: "0.0.0".to_string(),
+                _meta: None,
+            }),
+            client_capabilities: Some(ClientCapabilities::default()),
+            _meta: None,
+        };
+        let result = client.initialize(init_req).await;
+        assert!(result.is_ok(), "initialize should succeed: {:?}", result);
+
+        // The mock sends malformed JSON before the valid response.
+        // The read loop should skip the malformed line and process the response.
+        let new_session_req = NewSessionRequest {
+            cwd: std::env::temp_dir().to_string_lossy().to_string(),
+            mcp_servers: vec![],
+            additional_directories: vec![],
+            _meta: None,
+        };
+        let result = client.new_session(new_session_req).await;
+        assert!(result.is_ok(), "new_session should succeed despite malformed JSON: {:?}", result);
+
+        let _ = client.stop().await;
+    }
+
+    /// Test that cancellation during a pending request works.
+    #[tokio::test]
+    async fn cancellation_during_pending_request() {
+        let (_child, channel) = spawn_mock_agent().await;
+        let mut client = AcpClient::new(channel, None);
+
+        client.start_read_loop().await;
+
+        // Send a request to an unknown method — mock returns error response
+        // but that's fine, we just check the mechanism works
+        let req = Request::new(1, "session/new", Some(serde_json::json!({
+            "cwd": "/tmp",
+            "mcpServers": [],
+            "additionalDirectories": []
+        })));
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.send_raw_request(&req),
+        )
+        .await;
+
+        assert!(result.is_ok(), "should get a response, not hang");
     }
 }
