@@ -29,7 +29,7 @@ type UpdateCallback = Arc<
 
 pub struct AcpClient<T: Transport> {
     outbound_tx: Option<mpsc::UnboundedSender<OutboundMessage>>,
-    pending: Arc<tokio::sync::Mutex<std::collections::HashMap<String, PendingEntry>>>,
+    pending: Arc<tokio::sync::Mutex<std::collections::HashMap<RequestId, PendingEntry>>>,
     next_id: Arc<std::sync::atomic::AtomicI64>,
     state: Arc<tokio::sync::Mutex<ClientState>>,
     handler: Arc<dyn AcpClientHandler>,
@@ -305,16 +305,15 @@ impl<T: Transport + 'static> AcpClient<T> {
     }
 
     async fn send_request(&self, method: &str, params: &Value) -> Result<Option<Value>, AcpError> {
-        let id_str = self.next_request_id();
-        let id_val = json!(id_str);
+        let id = self.next_request_id();
         let (tx, rx) = oneshot::channel::<Result<Value, JsonRpcError>>();
         {
             let mut map = self.pending.lock().await;
-            map.insert(id_str.clone(), PendingEntry { tx });
+            map.insert(id.clone(), PendingEntry { tx });
         }
         let msg = json!({
             "jsonrpc": "2.0",
-            "id": id_val,
+            "id": id,
             "method": method,
             "params": params
         });
@@ -328,7 +327,7 @@ impl<T: Transport + 'static> AcpClient<T> {
             // Timed out
             Err(_) => {
                 let mut map = self.pending.lock().await;
-                map.remove(&id_str);
+                map.remove(&id);
                 Err(AcpError::timeout(format!(
                     "request '{}' timed out after {:?}",
                     method, timeout_duration
@@ -376,18 +375,18 @@ impl<T: Transport + 'static> AcpClient<T> {
         Ok(())
     }
 
-    fn next_request_id(&self) -> String {
+    fn next_request_id(&self) -> RequestId {
         let id = self
             .next_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        id.to_string()
+        RequestId::String(id.to_string())
     }
 }
 
 async fn run_message_loop<T: Transport>(
     mut transport: T,
     mut outbound_rx: mpsc::UnboundedReceiver<OutboundMessage>,
-    pending: Arc<tokio::sync::Mutex<std::collections::HashMap<String, PendingEntry>>>,
+    pending: Arc<tokio::sync::Mutex<std::collections::HashMap<RequestId, PendingEntry>>>,
     state: Arc<tokio::sync::Mutex<ClientState>>,
     handler: Arc<dyn AcpClientHandler>,
     update_callback: Option<UpdateCallback>,
@@ -428,7 +427,7 @@ async fn run_message_loop<T: Transport>(
 async fn process_line<T: Transport>(
     transport: &mut T,
     state: &Arc<tokio::sync::Mutex<ClientState>>,
-    pending: &Arc<tokio::sync::Mutex<std::collections::HashMap<String, PendingEntry>>>,
+    pending: &Arc<tokio::sync::Mutex<std::collections::HashMap<RequestId, PendingEntry>>>,
     handler: &Arc<dyn AcpClientHandler>,
     update_callback: &Option<UpdateCallback>,
     line: &str,
@@ -443,15 +442,14 @@ async fn process_line<T: Transport>(
 
     match classified {
         InboundMessage::Response { id, result, error } => {
-            let id_key = id_to_key(&id);
             let mut map = pending.lock().await;
-            if let Some(entry) = map.remove(&id_key) {
+            if let Some(entry) = map.remove(&id) {
                 let _ = entry.tx.send(match error {
                     Some(e) => Err(e),
                     None => Ok(result.unwrap_or(Value::Null)),
                 });
             } else {
-                tracing::warn!("ACP: response for unknown request id: {}", id_key);
+                tracing::warn!("ACP: response for unknown request id: {}", id);
             }
         }
         InboundMessage::Notification { method, params } => {
@@ -527,14 +525,6 @@ async fn process_line<T: Transport>(
                 tracing::warn!("ACP: failed to send response to agent: {}", e);
             }
         }
-    }
-}
-
-fn id_to_key(id: &RequestId) -> String {
-    match id {
-        RequestId::Number(n) => format!("n{}", n),
-        RequestId::String(s) => format!("s{}", s),
-        RequestId::Null => "null".to_string(),
     }
 }
 
