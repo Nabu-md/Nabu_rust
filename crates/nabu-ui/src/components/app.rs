@@ -124,21 +124,16 @@ pub fn AppRouter() -> Element {
             }
         },
         VaultCheckState::VaultSetup => rsx! {
-            div { class: "flex h-screen w-screen items-center justify-center bg-gray-950 text-gray-100",
-                div { class: "flex flex-col items-center gap-4 max-w-md text-center",
-                    div {
-                        class: "flex h-8 w-8 items-center justify-center text-gray-400",
-                        {render_icon(Icon::Folder, Some("w-8 h-8 text-gray-400"))}
-                    },
-                    div { class: "text-xl font-semibold", "No vault configured" },
-                    div { class: "text-sm opacity-70",
-                        "Please create or select a vault to begin using Nabu."
-                    },
-                    button {
-                        class: "mt-4 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-700",
-                        onclick: move |_| {},
-                        "Open Settings"
-                    }
+            crate::components::vault_setup_wizard::VaultSetupWizard {
+                on_vault_selected: move |path: String| {
+                    let name = path
+                        .rsplit('/')
+                        .next()
+                        .filter(|n| !n.is_empty())
+                        .unwrap_or("Vault")
+                        .to_string();
+                    *nav.vault_name.write_unchecked() = name;
+                    *vault_state.write_unchecked() = VaultCheckState::MainDashboard;
                 }
             }
         },

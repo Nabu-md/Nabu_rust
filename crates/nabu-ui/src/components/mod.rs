@@ -53,6 +53,7 @@ pub mod statistics;
     pub mod template_editor;
     pub mod template_picker;
     pub mod trash;
+pub mod vault_setup_wizard;
     pub mod ui;
 
     pub mod collections;
