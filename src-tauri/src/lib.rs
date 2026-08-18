@@ -597,7 +597,14 @@ pub fn run() {
             // ------------------------------------------------------------------
             let settings = app.state::<crate::settings::SettingsStore>().get();
             let path = settings.last_vault_path.trim().to_string();
-            let vault_configured = !path.is_empty() && std::path::Path::new(&path).exists();
+            // Only materialise a context against a real Nabu vault (a directory
+            // that already contains `.nabu/`). This is the same guard as
+            // `check_vault_exists_impl`: an arbitrary existing directory such as
+            // the user's Desktop must never be auto-adopted as the vault and get
+            // a `.nabu/` planted in it, bypassing the setup wizard.
+            let vault_configured = !path.is_empty()
+                && std::path::Path::new(&path).is_dir()
+                && std::path::Path::new(&path).join(".nabu").is_dir();
 
             if vault_configured {
                 let vault_path = PathBuf::from(path);
@@ -647,9 +654,13 @@ pub fn run() {
         // the backend stderr so frontend boot failures (wasm hydration, dioxus
         // launch, IPC) are visible in the app log. This is diagnostic wiring.
         .on_page_load(|window, payload| {
-            if window.label() == "main"
-                && payload.event() == tauri::webview::PageLoadEvent::Finished
-            {
+            // Diagnostic: log every page-load event + URL unconditionally so a
+            // black-screen / non-loading webview is distinguishable from a
+            // loading-but-blank one.
+            let ev = payload.event();
+            let is_finished = ev == tauri::webview::PageLoadEvent::Finished;
+            eprintln!("[WEBVIEW] label={} finished={}", window.label(), is_finished);
+            if window.label() == "main" && is_finished {
                 let _ = window.show();
                 let _ = window.set_focus();
                 // Install a hook that accumulates console output + uncaught JS

@@ -480,7 +480,15 @@ pub fn check_vault_exists(store: State<'_, SettingsStore>) -> Result<Option<Stri
 pub(crate) fn check_vault_exists_impl(store: &SettingsStore) -> Result<Option<String>, String> {
     let settings = store.get();
     let path = settings.last_vault_path.trim();
-    if !path.is_empty() && Path::new(path).exists() {
+    // A path is only a usable vault if it exists AND is a real Nabu vault
+    // (contains a `.nabu` directory). This prevents the app from silently
+    // treating arbitrary directories — e.g. the user's Desktop — as the vault
+    // and materialising `.nabu/` there without the setup wizard. If it isn't a
+    // real vault, we report no vault so the wizard launches first.
+    if !path.is_empty()
+        && std::path::Path::new(path).is_dir()
+        && std::path::Path::new(path).join(".nabu").is_dir()
+    {
         let _ = crate::history::trash_purge_expired_impl(store);
         Ok(Some(path.to_string()))
     } else {
