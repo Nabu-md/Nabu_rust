@@ -99,7 +99,13 @@ pub fn AppRouter() -> Element {
                         }
                     }
                 }
-                Ok(None) | Err(_) => {
+                Ok(None) => {
+                    // check_vault_exists resolved null → no valid vault is
+                    // configured. That is the normal first-run state: launch
+                    // the setup wizard. (A rejection is the Error case below.)
+                    vault_state.set(VaultCheckState::VaultSetup);
+                }
+                Err(_) => {
                     vault_state.set(VaultCheckState::Error);
                     vault_error
                         .set("Failed to contact Tauri backend (check_vault_exists)".into());
