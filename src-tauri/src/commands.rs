@@ -614,11 +614,40 @@ pub async fn stop_dictation(
 
 #[tauri::command]
 pub fn complete_setup(app: AppHandle) -> Result<(), String> {
+    // The canonical application context is normally constructed during
+    // `setup` — but only when a vault was already configured. On first launch
+    // (no vault chosen yet) setup defers to here: this command runs after the
+    // wizard's `select_vault_dialog` / `create_vault_dialog` has persisted
+    // `last_vault_path`, so we can now materialise the full service graph
+    // against the user's chosen vault directory.
+    if app.try_state::<ApplicationContext>().is_some() {
+        if let Some(main_window) = app.get_webview_window("main") {
+            let _ = main_window.show();
+            let _ = main_window.set_focus();
+        }
+        return Ok(());
+    }
+
+    let vault_path = {
+        let settings = app.state::<crate::settings::SettingsStore>().get();
+        let path = settings.last_vault_path.trim().to_string();
+        if path.is_empty() || !std::path::Path::new(&path).exists() {
+            return Err("No vault path has been configured".to_string());
+        }
+        PathBuf::from(path)
+    };
+
+    crate::recovery::mark_running(&vault_path);
+
+    let app_handle = app.clone();
+    let ctx = tauri::async_runtime::block_on(async move {
+        crate::build_application_context(vault_path, app_handle)
+    })?;
+    app.manage(ctx);
+
     if let Some(main_window) = app.get_webview_window("main") {
         let _ = main_window.show();
-    }
-    if let Some(wizard_window) = app.get_webview_window("wizard") {
-        let _ = wizard_window.close();
+        let _ = main_window.set_focus();
     }
     Ok(())
 }

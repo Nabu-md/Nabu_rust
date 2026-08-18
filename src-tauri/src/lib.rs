@@ -56,7 +56,7 @@ use tauri::Manager;
 ///
 /// Every service is registered exactly once in the ServiceRegistry and is
 /// resolved by key through the [`ApplicationContext`].
-fn build_application_context(
+pub(crate) fn build_application_context(
     vault_path: PathBuf,
     app_handle: tauri::AppHandle,
 ) -> Result<ApplicationContext, String> {
@@ -587,39 +587,44 @@ pub fn run() {
         .setup(|app| {
             // ------------------------------------------------------------------
             // Build the canonical application context from the current vault.
-            // ------------------------------------------------------------------
-            let vault_path = {
-                let settings = app.state::<crate::settings::SettingsStore>().get();
-                let path = settings.last_vault_path.trim().to_string();
-                if path.is_empty() {
-                    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-                } else {
-                    PathBuf::from(path)
-                }
-            };
-
-            // Crash recovery marker: a leftover `.running` file means the
-            // previous run died unexpectedly. Write a `.recovery_pending`
-            // marker so the frontend can offer to restore the last session.
-            crate::recovery::mark_running(&vault_path);
-
-            // Build the application context with all lifecycle services
-            // initialized and started. The event bridge is registered inside
-            // build_application_context before services begin publishing.
             //
-            // Service startup (e.g. `WorkerPool::start`) spawns Tokio tasks and
-            // therefore requires a live Tokio runtime context. The Tauri setup
-            // closure runs synchronously on the main thread outside any runtime,
-            // so we enter the Tauri async runtime here via `block_on` — otherwise
-            // `tokio::spawn` aborts with "there is no reactor running" and the
-            // app crashes during `did_finish_launching`.
-            let app_handle = app.handle().clone();
-            let ctx = tauri::async_runtime::block_on(async move {
-                build_application_context(vault_path, app_handle)
-            })?;
+            // On first launch (or when the saved vault path no longer exists),
+            // `last_vault_path` is empty — construction is deferred until the
+            // vault-setup wizard selects a directory (see `complete_setup`).
+            // This prevents `.nabu/` (index, queue, graph, logs) from being
+            // materialised against the user's working directory when no vault
+            // has been chosen yet.
+            // ------------------------------------------------------------------
+            let settings = app.state::<crate::settings::SettingsStore>().get();
+            let path = settings.last_vault_path.trim().to_string();
+            let vault_configured = !path.is_empty() && std::path::Path::new(&path).exists();
 
-            // Make the context available to commands via Tauri managed state.
-            app.manage(ctx);
+            if vault_configured {
+                let vault_path = PathBuf::from(path);
+
+                // Crash recovery marker: a leftover `.running` file means the
+                // previous run died unexpectedly. Write a `.recovery_pending`
+                // marker so the frontend can offer to restore the last session.
+                crate::recovery::mark_running(&vault_path);
+
+                // Build the application context with all lifecycle services
+                // initialized and started. The event bridge is registered
+                // inside build_application_context before services begin
+                // publishing.
+                //
+                // Service startup (e.g. `WorkerPool::start`) spawns Tokio
+                // tasks and therefore requires a live Tokio runtime context.
+                // The Tauri setup closure runs synchronously on the main
+                // thread outside any runtime, so we enter the Tauri async
+                // runtime here via `block_on` — otherwise `tokio::spawn`
+                // aborts with "there is no reactor running" and the app
+                // crashes during `did_finish_launching`.
+                let app_handle = app.handle().clone();
+                let ctx = tauri::async_runtime::block_on(async move {
+                    build_application_context(vault_path, app_handle)
+                })?;
+                app.manage(ctx);
+            }
 
             // Safety net: the main window starts hidden (visible: false) and is
             // shown by on_page_load once the webview finishes painting. If the
