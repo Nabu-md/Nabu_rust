@@ -626,11 +626,29 @@ pub fn run() {
                 // runtime here via `block_on` — otherwise `tokio::spawn`
                 // aborts with "there is no reactor running" and the app
                 // crashes during `did_finish_launching`.
+                // Build the application context on the async runtime, NOT the
+                // main thread. `tauri::async_runtime::block_on` inside `setup`
+                // freezes the main-thread event loop for the entire context
+                // construction: the frontend's `check_vault_exists` IPC never
+                // gets a response (stuck on "Opening Nabu") and the window
+                // can't repaint / resize while it runs. Spawning it keeps setup
+                // fast and manages the context the moment it is ready.
                 let app_handle = app.handle().clone();
-                let ctx = tauri::async_runtime::block_on(async move {
-                    build_application_context(vault_path, app_handle)
-                })?;
-                app.manage(ctx);
+                tauri::async_runtime::spawn(async move {
+                    match build_application_context(vault_path, app_handle.clone()) {
+                        Ok(ctx) => {
+                            if app_handle.try_state::<ApplicationContext>().is_none() {
+                                app_handle.manage(ctx);
+                                eprintln!("[setup] ApplicationContext ready (async build)");
+                            } else {
+                                eprintln!("[setup] ApplicationContext already managed");
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[setup] failed to build ApplicationContext: {e}");
+                        }
+                    }
+                });
             }
 
             // Safety net: the main window starts hidden (visible: false) and is
