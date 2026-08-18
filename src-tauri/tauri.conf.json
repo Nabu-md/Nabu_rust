@@ -13,7 +13,7 @@
       "cwd": ".."
     },
     "devUrl": "http://localhost:8080",
-    "frontendDist": "test-dist"
+    "frontendDist": "../dist"
   },
   "app": {
     "withGlobalTauri": true,
