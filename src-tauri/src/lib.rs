@@ -629,36 +629,58 @@ pub fn run() {
             if let Some(main_window) = app.get_webview_window("main") {
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(8)).await;
-                    let vis = main_window.is_visible().unwrap_or(false);
-                    eprintln!("[DBG] safety-net: main window found, is_visible={vis}");
-                    if !vis {
-                        let r_show = main_window.show();
-                        let r_focus = main_window.set_focus();
-                        eprintln!("[DBG] safety-net show result: show={r_show:?} focus={r_focus:?}");
+                    if !main_window.is_visible().unwrap_or(false) {
+                        let _ = main_window.show();
+                        let _ = main_window.set_focus();
                     }
                 });
-            } else {
-                eprintln!("[DBG] safety-net: get_webview_window(\"main\") returned None");
             }
 
             Ok(())
         })
-        // The main window is created with `visible: false` (see tauri.conf.json)
-        // so the webview is never shown mid-paint. Show it only once the page
-        // has finished loading — otherwise macOS paints an opaque white
-        // webview before any HTML renders, causing a white startup flash.
+        // Forward the webview's console output and uncaught JS errors back to
+        // the backend stderr so frontend boot failures (wasm hydration, dioxus
+        // launch, IPC) are visible in the app log. This is diagnostic wiring.
         .on_page_load(|window, payload| {
-            eprintln!(
-                "[DBG] on_page_load: label={:?} event={:?}",
-                window.label(),
-                payload.event()
-            );
             if window.label() == "main"
                 && payload.event() == tauri::webview::PageLoadEvent::Finished
             {
-                let r_show = window.show();
-                let r_focus = window.set_focus();
-                eprintln!("[DBG] on_page_load show result: show={r_show:?} focus={r_focus:?}");
+                let _ = window.show();
+                let _ = window.set_focus();
+                // Install a hook that accumulates console output + uncaught JS
+                // errors into a global array, then poll it back to stderr.
+                let _ = window.eval(
+                    r#"
+                    if (!window.__nabuConsoleHooked) {
+                        window.__nabuConsoleHooked = true;
+                        window.__nabuLogs = window.__nabuLogs || [];
+                        const push = (k, a) => {
+                            try { window.__nabuLogs.push(k + ': ' + a.map(v => String(v)).join(' ').slice(0, 2000)); } catch(e) {}
+                        };
+                        for (const k of ['log','warn','error','info','debug']) {
+                            const orig = console[k].bind(console);
+                            console[k] = (...a) => { push(k, a); try { orig(...a); } catch(e){} };
+                        }
+                        window.addEventListener('error', e => push('uncaught', [String(e.message), e.filename+':'+e.lineno]));
+                        window.addEventListener('unhandledrejection', e => push('rejection', [String(e.reason)]));
+                        push('boot', ['console hook installed']);
+                    }
+                    "#,
+                );
+                let wv = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                        let _ = wv.eval_with_callback(
+                            "JSON.stringify((window.__nabuLogs||[]).splice(0))",
+                            |r| {
+                                if !r.is_empty() && r != "[]" {
+                                    eprintln!("[WEB] {}", r);
+                                }
+                            },
+                        );
+                    }
+                });
             }
         })
         .build(tauri::generate_context!())
