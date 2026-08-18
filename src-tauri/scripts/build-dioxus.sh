@@ -88,6 +88,8 @@ cat > "$OUT_DIR/index.html" <<HTML
       <div class="spinner"></div>
       <div class="brand">NABU</div>
     </div>
+    <!-- Dioxus-web mounts into #main (the default root selector). -->
+    <div id="main"></div>
     <script type="module">
       import init from "./nabu_ui.js";
       init();
