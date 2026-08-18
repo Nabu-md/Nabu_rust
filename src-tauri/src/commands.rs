@@ -502,10 +502,21 @@ pub fn get_current_vault(store: State<'_, SettingsStore>) -> Result<Option<Strin
 }
 
 #[tauri::command]
-pub fn select_vault_dialog(store: State<'_, SettingsStore>) -> Result<Option<String>, String> {
-    let folder = rfd::FileDialog::new()
-        .set_title("Select Vault Directory")
-        .pick_folder();
+pub async fn select_vault_dialog(
+    store: State<'_, SettingsStore>,
+    app: AppHandle,
+) -> Result<Option<String>, String> {
+    // macOS NSOpenPanel must be presented from the main thread, otherwise it can
+    // fail to appear and leave the wizard stuck on its "Opening system dialog…" spinner.
+    let (tx, rx) = std::sync::mpsc::channel::<Option<std::path::PathBuf>>();
+    app.run_on_main_thread(move || {
+        let folder = rfd::FileDialog::new()
+            .set_title("Select Vault Directory")
+            .pick_folder();
+        let _ = tx.send(folder);
+    })
+    .map_err(|e| e.to_string())?;
+    let folder = rx.recv().map_err(|e| e.to_string())?;
 
     if let Some(path) = folder {
         let path_str = path.display().to_string();
@@ -530,10 +541,19 @@ pub fn select_vault_dialog(store: State<'_, SettingsStore>) -> Result<Option<Str
 }
 
 #[tauri::command]
-pub fn create_vault_dialog(store: State<'_, SettingsStore>) -> Result<Option<String>, String> {
-    let folder = rfd::FileDialog::new()
-        .set_title("Select Directory for New Vault")
-        .pick_folder();
+pub async fn create_vault_dialog(
+    store: State<'_, SettingsStore>,
+    app: AppHandle,
+) -> Result<Option<String>, String> {
+    let (tx, rx) = std::sync::mpsc::channel::<Option<std::path::PathBuf>>();
+    app.run_on_main_thread(move || {
+        let folder = rfd::FileDialog::new()
+            .set_title("Select Directory for New Vault")
+            .pick_folder();
+        let _ = tx.send(folder);
+    })
+    .map_err(|e| e.to_string())?;
+    let folder = rx.recv().map_err(|e| e.to_string())?;
 
     if let Some(path) = folder {
         std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
