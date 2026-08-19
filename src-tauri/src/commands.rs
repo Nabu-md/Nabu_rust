@@ -478,6 +478,7 @@ pub fn check_vault_exists(store: State<'_, SettingsStore>) -> Result<Option<Stri
 }
 
 pub(crate) fn check_vault_exists_impl(store: &SettingsStore) -> Result<Option<String>, String> {
+    eprintln!("[IPC] check_vault_exists invoked");
     let settings = store.get();
     let path = settings.last_vault_path.trim();
     // A path is only a usable vault if it exists AND is a real Nabu vault

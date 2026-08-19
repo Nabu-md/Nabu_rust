@@ -681,9 +681,10 @@ pub fn run() {
             if window.label() == "main" && is_finished {
                 let _ = window.show();
                 let _ = window.set_focus();
-                // Install a hook that accumulates console output + uncaught JS
-                // errors into a global array, then poll it back to stderr.
-                let _ = window.eval(
+                eprintln!("[HOOK] on_page_load Finished, install eval starting");
+                // Install a hook that accumulates console output + uncaught JS errors
+                // into a global array, then poll it back to stderr.
+                let hook_result = window.eval(
                     r#"
                     if (!window.__nabuConsoleHooked) {
                         window.__nabuConsoleHooked = true;
@@ -697,11 +698,35 @@ pub fn run() {
                         }
                         window.addEventListener('error', e => push('uncaught', [String(e.message), e.filename+':'+e.lineno]));
                         window.addEventListener('unhandledrejection', e => push('rejection', [String(e.reason)]));
+                        const reportSize = () => push('size', [String(window.innerWidth)+'x'+String(window.innerHeight)+' client='+String(document.documentElement.clientWidth)+'x'+String(document.documentElement.clientHeight)]);
+                        window.addEventListener('resize', reportSize);
+                        window.addEventListener('orientationchange', reportSize);
+                        reportSize();
                         push('boot', ['console hook installed']);
                     }
                     "#,
                 );
+                eprintln!("[HOOK] hook eval attempted, result={:?}", hook_result);
                 let wv = window.clone();
+                // H5 probe: test eval_with_callback in isolation
+                let probe_wv = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    let _ = probe_wv.eval_with_callback("1+1", |r| {
+                        eprintln!("[PROBE] eval_with_callback returned: {}", r);
+                    });
+                });
+                // Boot-splash probe: if wasm's start() ran, remove_boot_splash() removed #boot-splash
+                let splash_wv = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    let _ = splash_wv.eval_with_callback(
+                        "document.getElementById('boot-splash') ? 'SPLASH_PRESENT' : 'SPLASH_REMOVED'",
+                        |r| {
+                            eprintln!("[SPLASH] {}", r);
+                        },
+                    );
+                });
                 tauri::async_runtime::spawn(async move {
                     loop {
                         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
@@ -715,6 +740,17 @@ pub fn run() {
                         );
                     }
                 });
+            }
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Resized(size) = event {
+                eprintln!(
+                    "[RESIZE] label={} phys={}x{} scale={}",
+                    window.label(),
+                    size.width,
+                    size.height,
+                    window.scale_factor().unwrap_or(1.0)
+                );
             }
         })
         .build(tauri::generate_context!())
