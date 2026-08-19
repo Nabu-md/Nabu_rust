@@ -39,7 +39,7 @@ use nabu_core::storage::StorageManager;
 use nabu_core::streaming::StreamManager;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
-use tauri::Manager;
+use tauri::{Manager, PhysicalSize};
 
 /// Builds the canonical application context with every runtime service wired.
 ///
@@ -657,6 +657,15 @@ pub fn run() {
             // fetch failure), force-show the window after a short delay so the
             // app is never left with no visible window at all.
             if let Some(main_window) = app.get_webview_window("main") {
+                // Re-assert window sizing post-build (mtc pattern).
+                // The webview on Tauri 2.11.5 WKWebView may report a fixed
+                // intrinsic content size (~1280px wide); explicitly setting
+                // resizable + min + initial size after creation lets the user
+                // grow the window beyond that pin.
+                main_window.set_resizable(true)?;
+                main_window.set_min_size(Some(PhysicalSize { width: 640, height: 600 }))?;
+                main_window.set_size(PhysicalSize { width: 1280, height: 800 })?;
+
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(8)).await;
                     if !main_window.is_visible().unwrap_or(false) {
@@ -708,36 +717,37 @@ pub fn run() {
                 );
                 eprintln!("[HOOK] hook eval attempted, result={:?}", hook_result);
                 let wv = window.clone();
-                // H5 probe: test eval_with_callback in isolation
+                // Step 0 diagnostic — use synchronous eval (not eval_with_callback).
+                // eval() dispatches the JS and returns Result<(), Error>. If the
+                // callback path is the broken component, eval still returns Ok(())
+                // (dispatch works) while eval_with_callback's callback never fires.
+                // If eval itself returns Err, the webview message path is stalled.
                 let probe_wv = window.clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                    let _ = probe_wv.eval_with_callback("1+1", |r| {
-                        eprintln!("[PROBE] eval_with_callback returned: {}", r);
-                    });
+                    match probe_wv.eval("1+1") {
+                        Ok(()) => eprintln!("[PROBE] eval(\"1+1\") dispatched OK (callback path is the suspect)"),
+                        Err(e) => eprintln!("[PROBE] eval(\"1+1\") FAILED: {}", e),
+                    }
                 });
                 // Boot-splash probe: if wasm's start() ran, remove_boot_splash() removed #boot-splash
                 let splash_wv = window.clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                    let _ = splash_wv.eval_with_callback(
-                        "document.getElementById('boot-splash') ? 'SPLASH_PRESENT' : 'SPLASH_REMOVED'",
-                        |r| {
-                            eprintln!("[SPLASH] {}", r);
-                        },
-                    );
+                    match splash_wv.eval(
+                        "document.getElementById('boot-splash') ? 'SPLASH_PRESENT' : 'SPLASH_REMOVED'"
+                    ) {
+                        Ok(()) => eprintln!("[SPLASH] eval dispatched OK"),
+                        Err(e) => eprintln!("[SPLASH] eval FAILED: {}", e),
+                    }
                 });
                 tauri::async_runtime::spawn(async move {
                     loop {
                         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-                        let _ = wv.eval_with_callback(
-                            "JSON.stringify((window.__nabuLogs||[]).splice(0))",
-                            |r| {
-                                if !r.is_empty() && r != "[]" {
-                                    eprintln!("[WEB] {}", r);
-                                }
-                            },
-                        );
+                        match wv.eval("JSON.stringify((window.__nabuLogs||[]).splice(0))") {
+                            Ok(()) => {}
+                            Err(e) => eprintln!("[WEB] eval FAILED: {}", e),
+                        }
                     }
                 });
             }

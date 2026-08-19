@@ -26,7 +26,7 @@ pub fn VaultSetupWizard(on_vault_selected: Callback<String>) -> Element {
     let error = use_signal(|| None::<String>);
 
     rsx! {
-        div { class: "flex h-screen w-screen items-center justify-center bg-gray-950 text-gray-100 p-6 select-none",
+        div { class: "flex h-dvh w-dvw items-center justify-center bg-gray-950 text-gray-100 p-6 select-none",
             div { class: "max-w-md w-full bg-gray-900 border border-gray-800 rounded-xl p-8 shadow-2xl space-y-6",
                 div { class: "text-center space-y-2",
                     div { class: "inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-600/20 text-blue-400 text-3xl mb-2",
