@@ -14,6 +14,11 @@ license = "AGPL-3.0"
 # tests without a JS runtime.
 crate-type = ["cdylib", "rlib"]
 
+[[bin]]
+name = "nabu_ui"
+path = "src/bin/dx_bundle.rs"
+required-features = []
+
 [dependencies]
 # Dioxus 0.6 — web renderer with HTML elements, hooks, signals, router.
 dioxus = { version = "0.6", features = ["web", "html", "hooks", "signals", "macro", "router", "launch"] }
@@ -44,3 +49,15 @@ tracing-wasm = "0.2"
 [dev-dependencies]
 # `block_on` for driving async IPC mock tests on the host target.
 futures = { version = "0.3", default-features = false, features = ["executor", "std"] }
+
+[profile]
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"
