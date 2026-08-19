@@ -24,7 +24,7 @@ pub fn WorkspaceLayout() -> Element {
 
     rsx! {
         div {
-            class: "app flex h-screen w-screen bg-gray-950 text-gray-100 overflow-hidden font-sans select-none transition-colors duration-slow ease-standard",
+            class: "app flex h-dvh w-dvw bg-gray-950 text-gray-100 overflow-hidden font-sans select-none transition-colors duration-slow ease-standard",
             // ── Left Ribbon Bar ──
             div { class: "flex-none" }
             RibbonBar {}

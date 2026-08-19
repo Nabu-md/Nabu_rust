@@ -125,7 +125,7 @@ pub fn AppRouter() -> Element {
     let state = *vault_state.read();
     match state {
         VaultCheckState::Loading => rsx! {
-            div { class: "flex h-screen w-screen items-center justify-center bg-gray-950 text-gray-100",
+            div { class: "flex h-dvh w-dvw items-center justify-center bg-gray-950 text-gray-100",
                 div { class: "flex flex-col items-center gap-4",
                     div { class: "w-6 h-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" }
                     div { "Opening Nabu..." }
@@ -133,7 +133,7 @@ pub fn AppRouter() -> Element {
             }
         },
         VaultCheckState::Error => rsx! {
-            div { class: "flex h-screen w-screen items-center justify-center bg-gray-950 text-red-300",
+            div { class: "flex h-dvh w-dvw items-center justify-center bg-gray-950 text-red-300",
                 div { "{vault_error.read()}" }
             }
         },
