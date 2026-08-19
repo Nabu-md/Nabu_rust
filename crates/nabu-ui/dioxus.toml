@@ -1,0 +1,18 @@
+[application]
+
+# dioxus project name
+name = "nabu_ui"
+
+# Web `build` & `serve` dist path
+out_dir = "web"
+
+# resource (static) file folder
+asset_dir = "public"
+
+[web.app]
+
+# HTML title tag content
+title = "Nabu"
+
+[web.watcher]
+index_on_404 = true
