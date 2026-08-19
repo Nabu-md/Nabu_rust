@@ -74,12 +74,16 @@ pub fn AppRouter() -> Element {
     let mut nav = use_nav();
 
     use_effect(move || {
+        web_sys::console::log_1(&wasm_bindgen::JsValue::from_str("[IPC-FE] use_effect spawned, invoking check_vault_exists"));
         spawn_local(async move {
             let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
-            match crate::ipc::tauri_invoke_safe("check_vault_exists", args).await {
+            let result = crate::ipc::tauri_invoke_safe("check_vault_exists", args).await;
+            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!("[IPC-FE] check_vault_exists resolved: {:?}", result.as_ref().map(|_| "Ok").map_err(|e| format!("Err({})", e.message())))));
+            match result {
                 Ok(Some(result)) => {
                     match serde_wasm_bindgen::from_value::<Option<String>>(result) {
                         Ok(Some(path)) if !path.is_empty() => {
+                            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!("[IPC-FE] match Ok(Some(path)): vault={}", path)));
                             vault_state.set(VaultCheckState::MainDashboard);
                             let name = path
                                 .rsplit('/')
@@ -90,9 +94,11 @@ pub fn AppRouter() -> Element {
                             nav.vault_name.set(name);
                         }
                         Ok(_) => {
+                            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str("[IPC-FE] match Ok(_): no vault path → VaultSetup"));
                             vault_state.set(VaultCheckState::VaultSetup);
                         }
-                        Err(_) => {
+                        Err(e) => {
+                            web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!("[IPC-FE] match Err(e): {}", e)));
                             vault_state.set(VaultCheckState::Error);
                             vault_error
                                 .set("Unexpected response from check_vault_exists".into());
@@ -103,9 +109,11 @@ pub fn AppRouter() -> Element {
                     // check_vault_exists resolved null → no valid vault is
                     // configured. That is the normal first-run state: launch
                     // the setup wizard. (A rejection is the Error case below.)
+                    web_sys::console::log_1(&wasm_bindgen::JsValue::from_str("[IPC-FE] Ok(None): no vault → VaultSetup"));
                     vault_state.set(VaultCheckState::VaultSetup);
                 }
-                Err(_) => {
+                Err(e) => {
+                    web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!("[IPC-FE] Err(e): {} → Error state", e.message())));
                     vault_state.set(VaultCheckState::Error);
                     vault_error
                         .set("Failed to contact Tauri backend (check_vault_exists)".into());
