@@ -9,11 +9,11 @@
       "cwd": ".."
     },
     "beforeBuildCommand": {
-      "script": "src-tauri/scripts/build-dioxus.sh",
+      "script": "src-tauri/scripts/dx-bundle.sh",
       "cwd": ".."
     },
     "devUrl": "http://localhost:8080",
-    "frontendDist": "../dist"
+    "frontendDist": "../crates/nabu-ui/web/public"
   },
   "app": {
     "withGlobalTauri": true,
