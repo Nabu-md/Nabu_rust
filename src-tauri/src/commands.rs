@@ -491,10 +491,17 @@ pub(crate) fn check_vault_exists_impl(store: &SettingsStore) -> Result<Option<St
         && std::path::Path::new(path).join(".nabu").is_dir()
     {
         let _ = crate::history::trash_purge_expired_impl(store);
+        eprintln!("[IPC] check_vault_exists returning Ok(Some({}))", path);
         Ok(Some(path.to_string()))
     } else {
+        eprintln!("[IPC] check_vault_exists returning Ok(None)");
         Ok(None)
     }
+}
+
+#[tauri::command]
+pub fn diag_report(state: String) {
+    eprintln!("[DIAG] {}", state);
 }
 
 #[tauri::command]
