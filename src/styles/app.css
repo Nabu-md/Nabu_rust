@@ -163,8 +163,8 @@
   body {
     margin: 0;
     padding: 0;
-    width: 100dvw;
-    height: 100dvh;
+    width: 100vw;
+    height: 100vh;
     overflow: hidden;
     background-color: transparent;
     color: rgb(var(--gray-100));
@@ -236,11 +236,11 @@
 @layer components {
   /* ---- Application shell ---- */
   .app {
-    width: 100dvw;
-    height: 100dvh;
+    width: 100vw;
+    height: 100vh;
     overflow: hidden;
     border-radius: 10px;
-    background-color: rgb(var(--gray-950));
+    background-color: #00ffff;
   }
 
   /* ---- Buttons ----

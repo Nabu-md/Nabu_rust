@@ -447,6 +447,7 @@ pub fn run() {
         .manage(crate::dictation::DictationService::default())
         .invoke_handler(tauri::generate_handler![
             crate::commands::check_vault_exists,
+            crate::commands::diag_report,
             crate::commands::get_current_vault,
             crate::commands::select_vault_dialog,
             crate::commands::create_vault_dialog,
@@ -748,6 +749,42 @@ pub fn run() {
                             Ok(()) => {}
                             Err(e) => eprintln!("[WEB] eval FAILED: {}", e),
                         }
+                    }
+                });
+                // DOM probe: report the ACTUAL render state back through the IPC path
+                // (which provably works), since eval() cannot return values to Rust.
+                let dom_wv = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+                    let probe_js = r#"
+(function(){
+  var out = {};
+  try {
+    var main = document.getElementById('main');
+    out.main_html_len = main ? main.innerHTML.length : -1;
+    var app = document.querySelector('.app');
+    out.app = app ? (getComputedStyle(app).backgroundColor + ' sz=' + getComputedStyle(app).width + 'x' + getComputedStyle(app).height) : 'MISSING';
+    out.root_bg = getComputedStyle(document.documentElement).backgroundColor;
+    out.viewport = window.innerWidth + 'x' + window.innerHeight;
+    out.doc = document.documentElement.clientWidth + 'x' + document.documentElement.clientHeight;
+    out.body_html_len = document.body ? document.body.innerHTML.length : -1;
+    out.tauri = (window.__TAURI__ && window.__TAURI__.core) ? 'yes' : 'no';
+    out.links = Array.prototype.map.call(document.querySelectorAll('link[rel=stylesheet]'), function(l){return l.href;});
+  } catch (e) { out.err = String(e); }
+  var payload = JSON.stringify(out);
+  try {
+    window.__TAURI__.core.invoke('diag_report', { state: payload }).catch(function(e){
+      try { window.__TAURI__.core.invoke('diag_report', { state: 'REJECT ' + String(e) }); } catch(_){}
+    });
+  } catch (e) {
+    try { window.__TAURI__.core.invoke('diag_report', { state: 'THROW ' + String(e) }); } catch(_){}
+  }
+  window.__TAURI__.core.invoke('check_vault_exists', {});
+})();
+"#;
+                    match dom_wv.eval(probe_js) {
+                        Ok(()) => eprintln!("[DIAG] DOM probe eval dispatched OK"),
+                        Err(e) => eprintln!("[DIAG] DOM probe eval FAILED: {}", e),
                     }
                 });
             }

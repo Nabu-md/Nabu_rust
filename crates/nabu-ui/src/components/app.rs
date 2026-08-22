@@ -79,6 +79,27 @@ pub fn AppRouter() -> Element {
             let args = serde_wasm_bindgen::to_value(&serde_json::json!({})).unwrap();
             let result = crate::ipc::tauri_invoke_safe("check_vault_exists", args).await;
             web_sys::console::log_1(&wasm_bindgen::JsValue::from_str(&format!("[IPC-FE] check_vault_exists resolved: {:?}", result.as_ref().map(|_| "Ok").map_err(|e| format!("Err({})", e.message())))));
+            {
+                let win = web_sys::window();
+                let doc = win.as_ref().and_then(|w| w.document());
+                let app_present = doc.as_ref().and_then(|d| d.query_selector(".app").ok().flatten()).is_some();
+                let loading_present = doc.as_ref().and_then(|d| d.query_selector("h-screen, .app").ok().flatten()).is_some();
+                let main_len = doc.as_ref().and_then(|d| d.get_element_by_id("main")).map(|e| e.inner_html().len()).unwrap_or(0);
+                let body_len = doc.as_ref().and_then(|d| d.body()).map(|b| b.inner_html().len()).unwrap_or(0);
+                let child_count = doc.as_ref().and_then(|d| d.body()).map(|b| b.child_element_count()).unwrap_or(0);
+                let (w, h) = win
+                    .as_ref()
+                    .map(|w| {
+                        (
+                            w.inner_width().ok().and_then(|v| v.as_f64()).unwrap_or(0.0),
+                            w.inner_height().ok().and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        )
+                    })
+                    .unwrap_or((0.0, 0.0));
+                let state = format!("FE app={} loading={} main_len={} body_len={} body_children={} vp={:.0}x{:.0}", app_present, loading_present, main_len, body_len, child_count, w, h);
+                let dargs = serde_wasm_bindgen::to_value(&serde_json::json!({ "state": state })).unwrap();
+                let _ = crate::ipc::tauri_invoke_safe("diag_report", dargs).await;
+            }
             match result {
                 Ok(Some(result)) => {
                     match serde_wasm_bindgen::from_value::<Option<String>>(result) {
@@ -125,7 +146,7 @@ pub fn AppRouter() -> Element {
     let state = *vault_state.read();
     match state {
         VaultCheckState::Loading => rsx! {
-            div { class: "flex h-dvh w-dvw items-center justify-center bg-gray-950 text-gray-100",
+            div { class: "flex h-screen w-screen items-center justify-center bg-gray-950 text-gray-100",
                 div { class: "flex flex-col items-center gap-4",
                     div { class: "w-6 h-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" }
                     div { "Opening Nabu..." }
@@ -133,7 +154,7 @@ pub fn AppRouter() -> Element {
             }
         },
         VaultCheckState::Error => rsx! {
-            div { class: "flex h-dvh w-dvw items-center justify-center bg-gray-950 text-red-300",
+            div { class: "flex h-screen w-screen items-center justify-center bg-gray-950 text-red-300",
                 div { "{vault_error.read()}" }
             }
         },
