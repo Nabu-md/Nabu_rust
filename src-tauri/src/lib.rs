@@ -688,10 +688,12 @@ pub fn run() {
             let ev = payload.event();
             let is_finished = ev == tauri::webview::PageLoadEvent::Finished;
             eprintln!("[WEBVIEW] label={} finished={}", window.label(), is_finished);
+            tracing::info!(target: "nabu_boot", "[WEBVIEW] label={} finished={}", window.label(), is_finished);
             if window.label() == "main" && is_finished {
                 let _ = window.show();
                 let _ = window.set_focus();
                 eprintln!("[HOOK] on_page_load Finished, install eval starting");
+                tracing::info!(target: "nabu_boot", "[HOOK] on_page_load Finished, install eval starting");
                 // Install a hook that accumulates console output + uncaught JS errors
                 // into a global array, then poll it back to stderr.
                 let hook_result = window.eval(

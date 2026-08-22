@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NabuNabu</title>
+    <title>Nabu</title>
     <link rel="stylesheet" href="generated/tailwind.css" />
     <style>
       html, body {
@@ -28,7 +28,7 @@
         gap: 12px;
       }
     </style>
-  <link rel="preload" as="script" href="/./assets/nabu_ui-13cd1c12a73e6d5d.js" crossorigin><link rel="preload" as="fetch" type="application/wasm" href="/./assets/nabu_ui_bg-7455eb030dfcb1b5.wasm" crossorigin></head>
+  </head>
   <body>
     <div id="main">
       <div id="boot-placeholder">
@@ -38,18 +38,5 @@
         </div>
       </div>
     </div>
-  <script>
-            // We can't use a module script here because we need to start the script immediately when streaming
-            import("/./assets/nabu_ui-13cd1c12a73e6d5d.js").then(
-                ({ default: init }) => {
-                init("/./assets/nabu_ui_bg-7455eb030dfcb1b5.wasm").then((wasm) => {
-                    if (wasm.__wbindgen_start == undefined) {
-                    wasm.main();
-                    }
-                });
-                }
-            );
-            </script>
-            
-            </body>
+  </body>
 </html>

@@ -502,6 +502,7 @@ pub(crate) fn check_vault_exists_impl(store: &SettingsStore) -> Result<Option<St
 #[tauri::command]
 pub fn diag_report(state: String) {
     eprintln!("[DIAG] {}", state);
+    tracing::info!(target: "nabu_frontend", "[DIAG] {}", state);
 }
 
 #[tauri::command]
