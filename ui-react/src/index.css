@@ -1,1 +1,70 @@
 @import "tailwindcss";
+
+/* ── Global resets & root sizing ────────────────────────────────────────── */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+#root {
+  height: 100%;
+}
+
+/* ── Theme attribute (read by backend for CSS-based theming) ────────────── */
+
+:root {
+  /* Base transition speed for shell animations. */
+  --transition-slow: 200ms;
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Select suppression (matches Dioxus shell) ─────────────────────────── */
+
+.app,
+.app *,
+.app *::before,
+.app *::after {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Toast positioning ───────────────────────────────────────────────────── */
+
+#toast-container {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+
+/* ── Scrollbar styling (dark theme) ─────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+/* ── Custom utility for toast pointer events ─────────────────────────────── */
+
+.toast {
+  pointer-events: auto;
+}

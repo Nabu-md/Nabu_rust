@@ -1,4 +1,18 @@
-import { useState } from "react";
+// ──────────────────────────────────────────────────────────────────────────────
+// App.tsx — app router (vault-check → view switch)
+//
+// Mirrors: crates/nabu-ui/src/components/app.rs (App + AppRouter)
+//
+// On mount, calls checkVaultExists:
+//  - Loading  → spinner (h-screen, NOT dvh)
+//  - Ok(path) → WorkspaceLayout
+//  - null     → VaultSetupWizard
+//  - Error    → error text
+//
+// The theme is applied via the data-theme attribute on <html>.
+// ──────────────────────────────────────────────────────────────────────────────
+
+import { useState, useEffect } from "react";
 import {
   NavProvider,
   ThemeProvider,
@@ -7,109 +21,81 @@ import {
   HistoryProvider,
   SaveStatusProvider,
   useNav,
-  useWorkspace,
-  useToast,
   useTheme,
-  useSaveStatus,
-  useHistory,
 } from "./context";
 import { checkVaultExists } from "./ipc";
+import { WorkspaceLayout, VaultSetupWizard } from "./components/layout";
 
-// ── Demo component that reads all contexts ──────────────────────────────────
+// ── Vault check state ─────────────────────────────────────────────────
 
-function DemoPanel() {
+type VaultCheckState = "loading" | "setup" | "error" | "dashboard";
+
+/**
+ * Router component that checks vault state on mount and renders either
+ * a loading screen, a vault-setup wizard, or the WorkspaceLayout.
+ */
+function AppRouter() {
+  const [vaultState, setVaultState] = useState<VaultCheckState>("loading");
+  const [vaultError, setVaultError] = useState<string | null>(null);
   const nav = useNav();
-  const ws = useWorkspace();
-  const { toast } = useToast();
   const theme = useTheme();
-  const saveStatus = useSaveStatus();
-  const history = useHistory();
 
-  const [vaultPath, setVaultPath] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Apply theme via data-theme attribute on the root <html> element.
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme.resolvedTheme);
+  }, [theme.resolvedTheme]);
 
-  const handleCheckVault = async () => {
-    setError(null);
-    try {
-      const path = await checkVaultExists();
-      setVaultPath(path);
-      if (path) {
-        toast("Vault found!", { variant: "success" });
-      } else {
-        toast("No vault configured", { variant: "warning" });
-      }
-    } catch (err) {
-      setError(String(err));
-      toast(`Error: ${String(err)}`, { variant: "error" });
-    }
-  };
+  // Vault check lifecycle: call check_vault_exists on mount.
+  useEffect(() => {
+    checkVaultExists()
+      .then((path) => {
+        if (path) {
+          const name = path.split("/").pop() || path;
+          nav.setVaultName(name);
+          setVaultState("dashboard");
+        } else {
+          setVaultState("setup");
+        }
+      })
+      .catch((err) => {
+        setVaultError(String(err));
+        setVaultState("error");
+      });
+  }, []);
 
-  return (
-    <div className="min-h-screen bg-[#0b1220] text-gray-100 flex flex-col items-center justify-center gap-6 p-8">
-      <h1 className="text-4xl font-bold tracking-tight">Nabu</h1>
-      <p className="text-sm text-gray-400">Wave 2 — IPC + Types + Context Foundation</p>
-
-      <button
-        onClick={handleCheckVault}
-        className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-colors"
-      >
-        Check vault
-      </button>
-
-      {vaultPath !== null && (
-        <pre className="text-sm text-green-400 bg-black/30 p-4 rounded max-w-lg overflow-auto">
-          {JSON.stringify(vaultPath, null, 2)}
-        </pre>
-      )}
-
-      {error && (
-        <pre className="text-sm text-red-400 bg-black/30 p-4 rounded max-w-lg overflow-auto">
-          {error}
-        </pre>
-      )}
-
-      {/* Context status indicators */}
-      <div className="grid grid-cols-3 gap-4 mt-8 text-xs text-gray-400 max-w-2xl">
-        <div className="bg-black/20 p-3 rounded">
-          <div className="font-medium text-gray-300 mb-1">Nav</div>
-          <div>viewMode: {nav.viewMode}</div>
-          <div>vaultName: {nav.vaultName || "(none)"}</div>
-          <div>sidebar: {nav.showLeftSidebar ? "on" : "off"}</div>
+  // ── Render ──────────────────────────────────────────────────────────
+  switch (vaultState) {
+    case "loading":
+      return (
+        <div className="flex h-screen w-screen items-center justify-center bg-gray-950 text-gray-100">
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-6 h-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+            <div>Opening Nabu…</div>
+          </div>
         </div>
-        <div className="bg-black/20 p-3 rounded">
-          <div className="font-medium text-gray-300 mb-1">Theme</div>
-          <div>theme: {theme.theme}</div>
-          <div>resolved: {theme.resolvedTheme}</div>
+      );
+
+    case "error":
+      return (
+        <div className="flex h-screen w-screen items-center justify-center bg-gray-950 text-red-300">
+          <div>{vaultError ?? "Unknown error"}</div>
         </div>
-        <div className="bg-black/20 p-3 rounded">
-          <div className="font-medium text-gray-300 mb-1">Workspace</div>
-          <div>tabs: {ws.tabs.length}</div>
-          <div>active: {ws.activePath || "(none)"}</div>
-        </div>
-        <div className="bg-black/20 p-3 rounded">
-          <div className="font-medium text-gray-300 mb-1">Save Status</div>
-          <div>status: {saveStatus.status}</div>
-          <div>lastSaved: {saveStatus.lastSaved || "(never)"}</div>
-        </div>
-        <div className="bg-black/20 p-3 rounded">
-          <div className="font-medium text-gray-300 mb-1">History</div>
-          <div>canUndo: {String(history.canUndo)}</div>
-          <div>canRedo: {String(history.canRedo)}</div>
-          <div>undoLen: {history.undoLen}</div>
-        </div>
-        <div className="bg-black/20 p-3 rounded">
-          <div className="font-medium text-gray-300 mb-1">Toast</div>
-          <div>active: {nav.paletteOpen ? "palette" : "closed"}</div>
-          <button
-            onClick={() => toast("Test toast!", { variant: "info" })}
-            className="mt-1 text-indigo-400 hover:text-indigo-300 underline"
-          >
-            Show toast
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+      );
+
+    case "setup":
+      return (
+        <VaultSetupWizard
+          onVaultSelected={(path) => {
+            const name = path.split("/").pop() || path;
+            nav.setVaultName(name);
+            setVaultState("dashboard");
+          }}
+        />
+      );
+
+    case "dashboard":
+      return <WorkspaceLayout />;
+  }
 }
 
 // ── App root ────────────────────────────────────────────────────────────────
@@ -122,7 +108,7 @@ function App() {
           <SaveStatusProvider>
             <NavProvider>
               <WorkspaceProvider>
-                <DemoPanel />
+                <AppRouter />
               </WorkspaceProvider>
             </NavProvider>
           </SaveStatusProvider>
