@@ -4,7 +4,7 @@
 // Mirrors: crates/nabu-ui/src/components/app.rs (ViewMode match in AppRouter)
 //
 // Routes the NavContext.viewMode to the appropriate view component.
-// Wave 3 owns: Editor, Reader, Comparison.
+// Wave 3 owns: Editor, Reader, Comparison, Statistics, Activity, ReadingQueue.
 // Other modes (Dashboard, Graph, Search, etc.) remain placeholder until
 // subsequent waves.
 // ──────────────────────────────────────────────────────────────────────────────
@@ -13,6 +13,9 @@ import { useNav } from "../../context";
 import { NoteEditor } from "../editor";
 import { ReaderView } from "../reader";
 import { ComparisonView } from "../comparison";
+import { StatisticsView } from "../statistics";
+import { ActivityPanel } from "../activity";
+import { ReadingQueue } from "../reading_queue";
 
 /** Main content area — renders the active view based on NavContext.viewMode. */
 export function ViewContent() {
@@ -33,6 +36,21 @@ export function ViewContent() {
 
   if (nav.viewMode === "Comparison") {
     return <ComparisonView />;
+  }
+
+  // Wave 3 — Statistics
+  if (nav.viewMode === "Statistics") {
+    return <StatisticsView />;
+  }
+
+  // Wave 3 — Activity
+  if (nav.viewMode === "Activity") {
+    return <ActivityPanel />;
+  }
+
+  // Wave 3 — Reading Queue
+  if (nav.viewMode === "ReadingQueue") {
+    return <ReadingQueue />;
   }
 
   // Placeholder for all other views (Dashboard, Graph, Search, History, etc.)

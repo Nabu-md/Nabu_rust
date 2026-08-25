@@ -503,6 +503,10 @@ export interface TrashRecord {
   original_path: string;
   deleted_at: string | null;
   is_folder: boolean;
+  /** Number of files this item represents (1 for a plain file; recursive for folders). */
+  file_count: number;
+  /** A short text preview captured when the item was trashed (text files only). */
+  preview: string | null;
 }
 
 // ── Capabilities (commands.rs) ──────────────────────────────────────────────
@@ -714,6 +718,10 @@ export interface MetricTimer {
   min_ms: number;
   max_ms: number;
   avg_ms: number;
+  /** 50th percentile latency in ms (mirrors backend MetricTimer.p50_ms). */
+  p50_ms: number;
+  /** 90th percentile latency in ms (mirrors backend MetricTimer.p90_ms). */
+  p90_ms: number;
 }
 
 export interface MetricCounter {
@@ -734,4 +742,40 @@ export interface PoolHealth {
   is_throttled: boolean;
   is_full: boolean;
   lifecycle_stage: string | null;
+  /** Mirrors PoolHealthSnapshot.shutting_down in statistics.rs. */
+  shutting_down: boolean;
+}
+
+// ── Activity Timeline (activity/mod.rs) ────────────────────────────────────
+
+/** Severity level for an activity item. */
+export type ActivitySeverity = "info" | "warning" | "error";
+
+/** Broad category for an activity item. */
+export type ActivityCategory =
+  | "capture"
+  | "processing"
+  | "index"
+  | "storage"
+  | "capability"
+  | "plugin"
+  | "sync"
+  | "agent"
+  | "process"
+  | "conversation"
+  | "stream"
+  | "lifecycle"
+  | "other";
+
+/** A single entry in the activity timeline. */
+export interface ActivityItem {
+  id: string;
+  title: string;
+  description: string | null;
+  severity: ActivitySeverity;
+  category: ActivityCategory;
+  subsystem: string;
+  event_kind: string;
+  timestamp_ms: number;
+  metadata: Record<string, unknown>;
 }
