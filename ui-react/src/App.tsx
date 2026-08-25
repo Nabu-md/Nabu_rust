@@ -20,6 +20,7 @@ import {
   ToastProvider,
   HistoryProvider,
   SaveStatusProvider,
+  ActivityProvider,
   useNav,
   useTheme,
 } from "./context";
@@ -108,7 +109,9 @@ function App() {
           <SaveStatusProvider>
             <NavProvider>
               <WorkspaceProvider>
-                <AppRouter />
+                <ActivityProvider>
+                  <AppRouter />
+                </ActivityProvider>
               </WorkspaceProvider>
             </NavProvider>
           </SaveStatusProvider>
