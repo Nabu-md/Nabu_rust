@@ -5,18 +5,17 @@
   "identifier": "md.nabu.app",
   "build": {
     "beforeDevCommand": {
-      "script": "src-tauri/scripts/run-dioxus.sh",
+      "script": "pnpm -C ui-react dev",
       "cwd": ".."
     },
     "beforeBuildCommand": {
-      "script": "src-tauri/scripts/dx-bundle.sh",
+      "script": "pnpm -C ui-react build",
       "cwd": ".."
     },
-    "devUrl": "http://localhost:8080",
-    "frontendDist": "../crates/nabu-ui/web/public"
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../ui-react/dist"
   },
   "app": {
-    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Nabu",
