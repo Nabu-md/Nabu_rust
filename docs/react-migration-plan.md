@@ -5,14 +5,28 @@ on branch `freeze/dioxus-rust-frontend` at commit `6b2a087`. This document is th
 migration map for rebuilding the UI in TS/React while keeping `nabu-core` +
 `src-tauri` (the Rust engine + 87 IPC commands) exactly as-is.
 
-## Hard constraints (do NOT change the backend)
+## Target tech stack — copied from buzz-main (proven, popular Rust app)
 
-- **Tauri 2** desktop shell. The new frontend is a regular web bundle (Vite +
-  React) served from `frontendDist`. No WASM. No `#[wasm_bindgen]`. No Dioxus.
-- **All 87 IPC commands stay.** They are the contract. Listed in
-  `src-tauri/src/commands.rs`. The React app talks to them via
-  `@tauri-apps/api`'s `invoke` (or `window.__TAURI__.core.invoke` with
-  `withGlobalTauri: true`).
+buzz-main (the reference) uses exactly this for its desktop UI. Match it:
+
+- **Tauri 2** desktop shell (`src-tauri`) — already in place.
+- **Vite 8** + **React 19** + **TypeScript** frontend. (`@vitejs/plugin-react`)
+- **Tailwind CSS 4** via `@tailwindcss/postcss` (NOT the v3 CLI we used in Dioxus).
+- **TanStack Router** (file-based routing) + **TanStack Query** (async state) +
+  **TanStack Virtual** (virtualized lists).
+- **Radix UI** primitives + shadcn-style `components.json` (accessible blocks).
+- **Tiptap** (rich-text editor), **dnd-kit** (drag/drop), **lucide-react**
+  (icons), **sonner** (toasts), **zod** (validation).
+- **`@tauri-apps/api` v2** for IPC (`invoke` / `listen`).
+- **Biome** for lint/format. **Playwright** for e2e. **pnpm** workspace.
+- Dev config (from buzz `tauri.conf.json`): `devUrl: http://localhost:1420`,
+  `frontendDist: ../dist`, `beforeDevCommand: vite`, `beforeBuildCommand: pnpm build`.
+  `withGlobalTauri` left off — use the `@tauri-apps/api` module, not the global.
+
+Hard constraints (do NOT change the backend):
+
+- **All 87 IPC commands stay.** They are the contract (in `src-tauri/src/commands.rs`).
+  The React app talks to them via `@tauri-apps/api`'s `invoke`.
 - **`nabu-core` stays** — models, processing, storage, indexer, graph, recovery.
 - **`capabilities/default.json`** needs `["core:default"]` (already set) so
   `invoke` + `listen` work. Keep it.
@@ -41,9 +55,9 @@ migration map for rebuilding the UI in TS/React while keeping `nabu-core` +
   (lines ~690–800) — that was investigation scaffolding, not product.
 - `src-tauri/capabilities/default.json` — keep `core:default`.
 - `nabu-core` — unchanged.
-- `tauri.conf.json` — change `frontendDist` to the new Vite build dir
-  (`../ui-react/dist`), keep `devUrl` pointing at Vite dev server (`http://localhost:5173`),
-  keep `beforeDevCommand`/`beforeBuildCommand` wired to the new frontend.
+- `tauri.conf.json` — point `frontendDist` at the Vite build dir (`../ui-react/dist`),
+  `devUrl` at the Vite dev server (`http://localhost:1420`), `beforeDevCommand: vite`,
+  `beforeBuildCommand: pnpm build` (matching buzz-main).
 
 ## What gets REDONE (React/TS)
 
@@ -101,12 +115,16 @@ screen needs, expand per view.
 
 ## Suggested build order
 
-1. Scaffold `ui-react/` (Vite + React + TS + Tailwind), wire `tauri.conf.json`
-   frontendDist + devUrl. Get a blank window with "Nabu" + a button calling
-   `check_vault_exists` working.
-2. IPC layer `ipc.ts` for the ~10 commands the dashboard needs.
-3. App shell (ribbon, sidebars, tab bar, navbar) with `h-screen`.
-4. One real view end-to-end (e.g. Inbox or Dashboard) to prove the pattern.
+1. Scaffold `ui-react/` (Vite 8 + React 19 + TS + Tailwind 4), mirroring
+   buzz-main's `desktop/` layout: `src/`, `vite.config.ts`, `tailwind` via
+   postcss, `package.json` (pnpm). Wire `tauri.conf.json` (devUrl 1420,
+   frontendDist `../ui-react/dist`, beforeDevCommand `vite`). Get a blank window
+   with "Nabu" + a button calling `check_vault_exists` working.
+2. IPC layer `ipc.ts` (`@tauri-apps/api` `invoke`) for the ~10 commands the
+   dashboard needs. Keep the wrapper list faithful to `commands.rs`.
+3. App shell (ribbon, sidebars, tab bar, navbar) with `h-screen` — **avoid
+   `dvh`/`dvw`** (see gotchas).
+4. One real view end-to-end (Inbox or Dashboard) to prove the pattern.
 5. Port remaining views incrementally; delete `crates/nabu-ui` once parity is
    reached and the React app is the default `frontendDist`.
 
