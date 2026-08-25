@@ -141,16 +141,17 @@ frontend state. If React stalls, that branch is the safe harbor.
 > rebuild over the existing Rust core (`nabu-core` + `src-tauri`, 87 IPC commands
 > in `src-tauri/src/commands.rs`). Source-of-truth references:
 > - `docs/react-migration-plan.md` (this file) — stack + constraints + gotchas.
-> - `crates/nabu-ui/` — the FROZEN Dioxus frontend (read-only spec of behavior;
->   do NOT port code, read it to learn layout/behavior/which commands each screen calls).
-> - `freeze/dioxus-rust-frontend` branch — rollback harbor.
+> - `crates/nabu-ui/` — the existing Dioxus frontend in main (read-only spec of
+>   behavior; do NOT port code, read it to learn layout/behavior/which commands
+>   each screen calls). It is deleted in Wave 4.
 >
-> **Headline:** 12 agents across 3 waves. Wave 1 = scaffold (1). Wave 2 = IPC+
-> types+context (1) + app shell (1) — run after Wave 1 lands. Wave 3 = 10 view
-> clusters, each owning a disjoint set of NEW `ui-react/src/...` files, run in
-> parallel (up to ~10 concurrent). Shared git tree → each agent polices ONLY
-> its paths (SCOPE FENCE). A closeout agent (CL) runs `tauri build` + typecheck
-> to confirm a booting app.
+> **Headline:** 12 agents across 3 waves + a Wave 4 cleanup. Wave 1 = scaffold (1).
+> Wave 2 = IPC+types+context (1) + app shell (1) — run after Wave 1 lands.
+> Wave 3 = 10 view clusters, each owning a disjoint set of NEW `ui-react/src/...`
+> files, run in parallel (up to ~10 concurrent). Wave 4 = delete the old Dioxus
+> WASM frontend from main. Shared git tree → each agent polices ONLY its paths
+> (SCOPE FENCE). A closeout agent (CL) runs `tauri build` + typecheck to confirm
+> a booting app.
 
 **Execution model:** one agent per prompt. Within a wave, prompts are
 INDEPENDENT (disjoint file sets — verify zero overlap). Agents read
@@ -173,7 +174,7 @@ INDEPENDENT (disjoint file sets — verify zero overlap). Agents read
 ```
 You are Agent CL, migration closeout for the Nabu React rebuild. Run ONCE after Waves 1-3 land.
 VERIFIED CONTEXT: 12 agents build a Vite+React+Tailwind4 frontend (ui-react/) that talks to the
-87 existing Tauri IPC commands in src-tauri/src/commands.rs. The Dioxus frontend (crates/nabu-ui/) is frozen and to be deleted.
+87 existing Tauri IPC commands in src-tauri/src/commands.rs. The old Dioxus frontend (crates/nabu-ui/) is deleted in Wave 4.
 SCOPE: build + typecheck + boot smoke. Read-only on src-tauri and nabu-core (do NOT edit backend).
 STRATEGY:
 1. cd ui-react && pnpm install && pnpm build          # expect dist/ with index.html + assets
@@ -262,7 +263,8 @@ DoD:
 
 > Each owns NEW ui-react/src/components/<area>/** files. They all consume
 > Agent I's ipc.ts + context. Disjoint areas. Read the matching Dioxus file in
-> crates/nabu-ui/src/components/<area> for behavior, then write React.
+> crates/nabu-ui/src/components/<area> for behavior, then write React. The
+> Dioxus source lives in main — that is your only reference.
 
 ### PROMPT — V1 · Navigation views (dashboard/home/search/calendar/smart_folders/archive)
 ```
@@ -386,6 +388,34 @@ DoD: [ ] file tree + editors + misc render + call IPC; [ ] tsc clean; [ ] git di
 
 ---
 
+## WAVE 4 — CLEANUP (run only after CL passes)
+
+### PROMPT — D · Delete old Dioxus WASM frontend
+```
+You are Agent D, deleting the legacy Dioxus WASM frontend from main (Wave 4).
+DOMAIN OWNERSHIP: you own the removal of crates/nabu-ui/ (the entire Dioxus frontend) and any references to it in the workspace root (Cargo.toml excludes, build scripts, README, AGENTS.md mentions that point at crates/nabu-ui as the live UI).
+VERIFIED CONTEXT: the new React frontend lives in ui-react/ and is the sole frontendDist target (wired in Wave 1). The 87 IPC commands in src-tauri/src/commands.rs and the nabu-core crate are UNAFFECTED and must remain. crates/nabu-ui is no longer referenced by tauri.conf.json.
+SCOPE (STRICT): delete crates/nabu-ui/ only. Do NOT touch src-tauri, nabu-core, ui-react, or any Cargo workspace that does not list crates/nabu-ui. Grep the whole repo for "nabu-ui" / "crates/nabu-ui" and remove or repoint every stale reference (docs, scripts, CI). Leave the rest of main intact.
+FIX STRATEGY / BUILD:
+  1. git rm -r crates/nabu-ui
+  2. Update root Cargo.toml workspace members if crates/nabu-ui is listed; remove it.
+  3. Grep -r "nabu-ui" . --exclude-dir=.git ; fix each hit (docs, AGENTS.md, build scripts, README) or delete the line if it only described the old UI.
+  4. Confirm cargo build (root workspace = nabu-core + src-tauri) still succeeds WITHOUT crates/nabu-ui.
+VERIFY:
+  git status                                 # only crates/nabu-ui + doc/script references removed
+  cargo build                                # root workspace compiles (nabu-core + src-tauri)
+  cd ui-react && pnpm build                  # React app still builds
+  cargo tauri build --bundles app           # Nabu.app still builds, now React-only
+GUARDRAILS: NEVER delete src-tauri, nabu-core, or ui-react; confirm cargo + tauri build GREEN before reporting; SCOPE FENCE; HONEST REPORT. If any command references crates/nabu-ui and is not trivially repointable, STOP and report rather than guess.
+DoD:
+- [ ] crates/nabu-ui/ removed from main
+- [ ] no remaining "nabu-ui" references in build/config/docs (or each repointed)
+- [ ] cargo build + cargo tauri build + pnpm build all pass
+- [ ] Report: list of files touched + build evidence
+```
+
+---
+
 ## Execution summary
 
 | Wave | Agents | Runs | Depends on |
@@ -393,7 +423,10 @@ DoD: [ ] file tree + editors + misc render + call IPC; [ ] tsc clean; [ ] git di
 | 1 | S (scaffold) | 1 | — |
 | 2 | I (ipc/types/context), SH (shell) | 2 | S |
 | 3 | V1–V10 (views) | 10 | I + SH |
-| closeout | CL | 1 | all |
+| 4 | D (delete Dioxus) | 1 | CL |
+| closeout | CL | 1 | all of 1–3 |
 
-Total: **12 agent prompts + 1 closeout = 13**. Up to ~10 concurrent in Wave 3.
-After CL confirms a booting app, delete `crates/nabu-ui/` (frozen branch keeps the backup).
+Total: **12 agent prompts + 1 closeout + 1 cleanup = 14**. Up to ~10 concurrent in
+Wave 3. `D` runs only after `CL` confirms the React app boots. No prompt references
+any branch — the Dioxus source in `crates/nabu-ui/` (main) is the sole reference for
+the view agents, and `D` removes it from main at the end.
