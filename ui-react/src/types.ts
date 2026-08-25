@@ -665,6 +665,28 @@ export type ViewMode =
   | "Streaming"
   | "Chat";
 
+// ── Load State (recovery/mod.rs) ─────────────────────────────────────────────
+
+/**
+ * Canonical load-phase enum mirroring `LoadState` in
+ * `crates/nabu-ui/src/components/recovery/mod.rs`.
+ *
+ * Distinguishes "still loading", "loaded successfully" (which may be empty),
+ * and "failed to load" so a blank panel is never confused with an empty one
+ * or an error.
+ */
+export type LoadState = "idle" | "loading" | "loaded" | "failed";
+
+/**
+ * Returns `true` when a received result nonce does not match the current
+ * nonce (i.e. the async load that produced `received` has been superseded).
+ *
+ * Mirrors `nonce_is_stale` in `crates/nabu-ui/src/components/shipped/mod.rs`.
+ */
+export function nonceIsStale(current: number, received: number): boolean {
+  return current !== received;
+}
+
 export interface SavedSearch {
   name: string;
   query: string;
