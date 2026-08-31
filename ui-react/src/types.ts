@@ -779,3 +779,142 @@ export interface ActivityItem {
   timestamp_ms: number;
   metadata: Record<string, unknown>;
 }
+
+// ── Property Editor (nabu-core::models::properties) ─────────────────────────
+
+export type PropertyType =
+  | "text"
+  | "number"
+  | "date"
+  | "select"
+  | "multi-select"
+  | "url";
+
+export type PropertyValue =
+  | { type: "text"; value: string }
+  | { type: "number"; value: number }
+  | { type: "date"; value: string }
+  | { type: "select"; value: string }
+  | { type: "multi-select"; value: string[] }
+  | { type: "url"; value: string };
+
+export interface PropertyDefinition {
+  id: string;
+  display_name: string;
+  property_type: PropertyType;
+  description?: string | null;
+  default_value?: PropertyValue | null;
+  options?: string[] | null;
+}
+
+export type ValidationState = "valid" | { invalid: string };
+
+// ── Knowledge Object (nabu-core::models::knowledge_object) ──────────────────
+
+export type ObjectType =
+  | "note"
+  | "document"
+  | "image"
+  | "audio"
+  | "video"
+  | "pdf"
+  | "web-page"
+  | "spreadsheet"
+  | "archive"
+  | "unknown";
+
+export interface KnowledgeObject {
+  id: string;
+  object_type: string;
+  content: unknown;
+  metadata: Record<string, unknown>;
+  custom_properties: Record<string, PropertyValue>;
+  tags: string[];
+  relations: unknown[];
+}
+
+// ── Relation Editor (nabu-core::models::graph) ──────────────────────────────
+
+export type RelationType =
+  | "references"
+  | "referenced-by"
+  | "parent"
+  | "child"
+  | "attached"
+  | "related"
+  | { custom: string };
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  relationship: string;
+  weight: number;
+  content_derived: boolean;
+}
+
+export interface Relation {
+  id: string;
+  source: string;
+  target: string;
+  relation_type: string;
+}
+
+// ── Streaming (crates/nabu-ui/src/components/streaming) ─────────────────────
+
+export type StreamId = string;
+
+export type StreamLifeCycle =
+  | "created"
+  | "active"
+  | "completed"
+  | "cancelled"
+  | "failed";
+
+export interface StreamSession {
+  stream_id: StreamId;
+  thread_id: string | null;
+  agent_name: string | null;
+  state: StreamLifeCycle;
+  content: string;
+  token_count: number;
+  total_tokens: number | null;
+  error: string | null;
+  cancel_reason: string | null;
+  last_event: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface StreamingContextValue {
+  sessions: Map<StreamId, StreamSession>;
+  cancelStream: (streamId: StreamId, reason: string) => Promise<void>;
+  pruneTerminal: () => void;
+  clearTerminal: () => void;
+  clear: () => void;
+  len: number;
+  is_empty: boolean;
+  active_count: number;
+  has_active: boolean;
+}
+
+// ── ACP Permission (nabu-core::event_bus::events) ───────────────────────────
+
+export type PermissionOutcome =
+  | { selected: { option_id: string } }
+  | { cancelled: boolean };
+
+export interface PermissionOption {
+  option_id: string;
+  name: string;
+  kind: "allow_once" | "allow_always" | "reject_once" | "reject_always";
+  _meta?: unknown | null;
+}
+
+export interface AcpPermissionRequestEvent {
+  request_id: string;
+  thread_id: string;
+  session_id: string;
+  tool_call_id: string;
+  tool_call_title: string | null;
+  options: PermissionOption[];
+  timestamp: string;
+}

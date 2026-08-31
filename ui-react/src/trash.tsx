@@ -327,16 +327,9 @@ export function TrashScreen() {
             `Restored ${restoredCount} item(s)`,
             { variant: "success" },
           );
-          // Show undo toast
-          const undoToast = toasts.toast(
-            `Restored ${restoredCount} item(s)`,
-            {
-              variant: "success",
-              duration: 8000,
-            },
-          );
-          // Wire undo: we use the history context's undo
-          void undoToast;
+          // Undo toast: the HistoryContext.undo() call fires its own toast
+          // ("Undid: …" or "Nothing to undo") and dispatches the
+          // nabu:history-changed event that triggers a refresh below.
           void history.undo();
           // Clear selection and refresh
           setSelected([]);
