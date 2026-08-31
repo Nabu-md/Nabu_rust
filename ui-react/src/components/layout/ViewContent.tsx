@@ -4,7 +4,8 @@
 // Mirrors: crates/nabu-ui/src/components/app.rs (ViewMode match in AppRouter)
 //
 // Routes the NavContext.viewMode to the appropriate view component.
-// Wave 3 owns: Editor, Reader, Comparison, Statistics, Activity, ReadingQueue.
+// Wave 3 owns: Editor, Reader, Comparison, Statistics, Activity, ReadingQueue,
+// History, Recovery, Trash.
 // Other modes (Dashboard, Graph, Search, etc.) remain placeholder until
 // subsequent waves.
 // ──────────────────────────────────────────────────────────────────────────────
@@ -16,6 +17,9 @@ import { ComparisonView } from "../comparison";
 import { StatisticsView } from "../statistics";
 import { ActivityPanel } from "../activity";
 import { ReadingQueue } from "../reading_queue";
+import { VersionHistoryView } from "../recovery";
+import { RecoveryManagerView } from "../recovery";
+import { TrashScreen } from "../../trash";
 
 /** Main content area — renders the active view based on NavContext.viewMode. */
 export function ViewContent() {
@@ -53,7 +57,22 @@ export function ViewContent() {
     return <ReadingQueue />;
   }
 
-  // Placeholder for all other views (Dashboard, Graph, Search, History, etc.)
+  // History — Version History screen
+  if (nav.viewMode === "History") {
+    return <VersionHistoryView />;
+  }
+
+  // Recovery — Recovery Manager screen
+  if (nav.viewMode === "Recovery") {
+    return <RecoveryManagerView />;
+  }
+
+  // Trash — Trash / Recycle Bin screen
+  if (nav.viewMode === "Trash") {
+    return <TrashScreen />;
+  }
+
+  // Placeholder for all other views (Dashboard, Graph, Search, etc.)
   return (
     <div className="flex-1 overflow-auto p-6 bg-gray-950">
       <div className="text-center py-16 text-gray-500">
