@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // reader.tsx — distraction-free reader view
 //
-// Mirrors: crates/nabu-ui/src/components/shipped/reader.rs (ReaderView)
+// Mirrors: ui-react/src/components/shipped/reader.rs (ReaderView)
 //
 // Loads the active note from the backend via `note_read` and renders it through
 // an inline markdown→HTML renderer. Reader preferences (font size, line width,

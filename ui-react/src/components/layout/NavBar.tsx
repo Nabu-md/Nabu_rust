@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // NavBar — top navigation bar
 //
-// Mirrors: crates/nabu-ui/src/components/navigation/navbar.rs
+// Mirrors: ui-react/src/components/navigation/navbar.rs
 //
 // Shows:
 //  - breadcrumb (vault name)

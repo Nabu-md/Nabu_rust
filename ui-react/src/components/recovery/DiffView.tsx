@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // recovery/DiffView.tsx — side-by-side diff row renderer
 //
-// Mirrors: crates/nabu-ui/src/components/recovery/diff_view.rs (DiffView)
+// Mirrors: ui-react/src/components/recovery/diff_view.rs (DiffView)
 //
 // Renders DiffRow[] returned by the backend versions_diff / notes_diff
 // commands as a two-column comparison. Each row shows old/new line numbers,

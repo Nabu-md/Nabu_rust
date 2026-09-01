@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // RightInspector — property metadata, backlinks, outgoing links, mentions
 //
-// Mirrors: crates/nabu-ui/src/components/layout/right_inspector.rs
+// Mirrors: ui-react/src/components/layout/right_inspector.rs
 //
 // Renders a tab bar (Tags / Backlinks / Outgoing / Mentions) backed by the
 // `note_links` Tauri command. Link data is re-fetched via useEffect whenever

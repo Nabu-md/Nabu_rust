@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // components/relation_editor — Knowledge graph relation management
 //
-// Mirrors: crates/nabu-ui/src/components/relation_editor.rs
+// Mirrors: ui-react/src/components/relation_editor.rs
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useMemo, useState } from "react";

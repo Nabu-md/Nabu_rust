@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // InboxTimelineReview.tsx — "Timeline" tab
 //
-// Mirrors: crates/nabu-ui/src/components/inbox.rs (`InboxTimelineReview`)
+// Mirrors: ui-react/src/components/inbox.rs (`InboxTimelineReview`)
 // ──────────────────────────────────────────────────────────────────────────────
 
 import type { InboxItem } from "../../types";

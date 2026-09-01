@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // navigation/quick_switcher.tsx — overlay quick note switcher
 //
-// Mirrors: crates/nabu-ui/src/components/navigation/quick_switcher.rs
+// Mirrors: ui-react/src/components/navigation/quick_switcher.rs
 //
 // Keyboard-first note navigation:
 //   - fuzzy matching over note titles, folder paths and note names

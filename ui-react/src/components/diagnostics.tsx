@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // components/diagnostics — Diagnostic analysis panel
 //
-// Mirrors: crates/nabu-ui/src/components/diagnostics.rs
+// Mirrors: ui-react/src/components/diagnostics.rs
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState } from "react";

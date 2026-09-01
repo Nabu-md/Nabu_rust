@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // CapabilityManagement.tsx — capability management settings page
 //
-// Mirrors: crates/nabu-ui/src/components/settings/capability_management.rs
+// Mirrors: ui-react/src/components/settings/capability_management.rs
 //
 // Lists all registered capabilities with their current enabled state and
 // provider. Users can toggle enable/disable, which calls the

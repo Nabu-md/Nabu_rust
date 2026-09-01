@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // components/file_tree — Vault file tree with full interactive features
 //
-// Mirrors: crates/nabu-ui/src/components/file_tree.rs
+// Mirrors: ui-react/src/components/file_tree.rs
 //
 // Features:
 //  - Loads vault tree via `tree_list` IPC (folders first, alphabetical)

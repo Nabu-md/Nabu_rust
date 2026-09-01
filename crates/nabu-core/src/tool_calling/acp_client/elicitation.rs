@@ -10,7 +10,7 @@
 //! ## User Interaction
 //!
 //! User interaction (rendering a form dialog, opening a URL, etc.) cannot
-//! be performed by the core library alone — the UI lives in `nabu-ui`.
+//! be performed by the core library alone — the UI lives in `ui-react`.
 //! The [`ElicitationHandler`] trait defines the delegation boundary: the
 //! tool calls `handler.request_elicitation()`, and the integration layer
 //! provides a concrete implementation that bridges to the UI.

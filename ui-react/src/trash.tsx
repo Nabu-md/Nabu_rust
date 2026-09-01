@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // trash.tsx — Trash / Recycle Bin screen
 //
-// Mirrors: crates/nabu-ui/src/components/trash.rs (Trash)
+// Mirrors: ui-react/src/components/trash.rs (Trash)
 //
 // A full-screen view for reviewing and recovering deleted vault items.
 // Deleted notes and folders are never destroyed immediately — they live in

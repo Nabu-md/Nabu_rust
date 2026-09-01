@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // components/pdf_viewer — PDF rendering via iframe
 //
-// Mirrors: crates/nabu-ui/src/components/pdf_viewer.rs
+// Mirrors: ui-react/src/components/pdf_viewer.rs
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { type HTMLAttributes } from "react";

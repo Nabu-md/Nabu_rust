@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // collections/gallery_view.tsx — card-based gallery view
 //
-// Mirrors: crates/nabu-ui/src/components/collections/gallery_view.rs (GalleryView)
+// Mirrors: ui-react/src/components/collections/gallery_view.rs (GalleryView)
 //
 // Card-based gallery view with filtering and sorting.
 // Views are projections of `CollectionItem[]` — views never own data.

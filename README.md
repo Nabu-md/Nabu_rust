@@ -4,7 +4,7 @@
 
 Nabu is a Markdown-native desktop knowledge base for thinkers who demand speed, sovereignty, and polish. Write in clean Markdown. Think with interactive canvases, live backlinks, and a relationship graph. Everything runs **on your machine** — no cloud, no telemetry, no network calls unless you explicitly make them.
 
-Built on a single Rust core (`nabu-core`) with a Dioxus 0.6 frontend compiled to WebAssembly and wrapped in Tauri v2 for native desktop performance. Zero JavaScript. Zero Electron. One codebase, one language, one source of truth.
+Built on a single Rust core (`nabu-core`) with a React + Vite frontend bundled into a Tauri v2 native desktop window. Zero Electron. The UI and backend share a strict Rust↔TypeScript IPC boundary, with all domain logic in Rust.
 
 ---
 
@@ -28,7 +28,7 @@ Download a prebuilt DMG from the [GitHub Releases](https://github.com/Nabu/Nabu/
 | | Nabu |
 |---|---|
 | **Privacy** | All processing is local. Your notes never leave your machine unless you tell them to. |
-| **Speed** | Native performance via Rust + WebAssembly. Startup in ~400ms, search in <10ms. |
+| **Speed** | Native performance via Rust core. Startup in ~400ms, search in <10ms. |
 | **Portability** | Plain Markdown on disk. No proprietary formats. Open your vault in any editor. |
 | **Extensibility** | Capability platform with a plugin foundation. Extend Nabu with Rust plugins. |
 | **Resilience** | Automatic version history, crash recovery, and undo/redo on every note. |
@@ -86,11 +86,11 @@ Download a prebuilt DMG from the [GitHub Releases](https://github.com/Nabu/Nabu/
 │  ── IPC commands ──────── 60+ Tauri invoke handlers     │
 │  ── Event bridge ──────── EventBus → frontend (nabu-event)  │
 └────────┬─────────────────────────────────────────────────┘
-         │ WASM / cdylib
+         │ TypeScript IPC (Tauri invoke)
 ┌────────┴─────────────────────────────────────────────────┐
-│                    crates/nabu-ui/ (Dioxus 0.6)          │
-│  ── CSR frontend ──── Compiled to WASM, no JS runtime    │
-│  ── Reactive state ── Dioxus signals + event subscriptions│
+│                    ui-react/ (React + Vite)                │
+│  ── CSR frontend ──── Bundled by Vite into the Tauri dist │
+│  ── Reactive state ── React context + hooks               │
 └────────┬─────────────────────────────────────────────────┘
          │ Rust calls
 ┌────────┴─────────────────────────────────────────────────┐
@@ -161,9 +161,9 @@ Output: `src-tauri/target/release/bundle/` — signed DMG (macOS), MSI (Windows)
 # Check the Rust core
 cargo check --workspace
 
-# Check the Dioxus frontend (standalone workspace)
-cd crates/nabu-ui
-cargo check
+# Check the React frontend (standalone workspace)
+cd ui-react
+pnpm check
 ```
 
 ---

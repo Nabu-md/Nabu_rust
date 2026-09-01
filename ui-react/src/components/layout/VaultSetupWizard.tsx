@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // VaultSetupWizard — first-launch vault selection screen
 //
-// Mirrors: crates/nabu-ui/src/components/vault_setup_wizard.rs
+// Mirrors: ui-react/src/components/vault_setup_wizard.rs
 //
 // When `checkVaultExists` returns null (no vault configured), this wizard
 // lets the user pick an existing directory or create a new one. On success

@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // components/graph_layout.tsx — pure, deterministic positioning for the knowledge graph
 //
-// Mirrors: crates/nabu-ui/src/components/graph_layout.rs
+// Mirrors: ui-react/src/components/graph_layout.rs
 //
 // The layout engine is intentionally dependency-free and runs on the main
 // thread only when graph data changes (never on every render frame). It turns

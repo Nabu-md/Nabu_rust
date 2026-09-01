@@ -1,7 +1,8 @@
 # Pivot to TypeScript + React frontend (Tauri shell over existing Rust core)
 
-Status: decided 2026-08-25. The Dioxus/WASM frontend (`crates/nabu-ui`) is **frozen**
-on branch `freeze/dioxus-rust-frontend` at commit `6b2a087`. This document is the
+Status: decided 2026-08-25. The Dioxus/WASM frontend (`crates/nabu-ui`) is **deleted**
+from main (Wave 4 complete). Its source is preserved on branch
+`freeze/dioxus-rust-frontend` at commit `6b2a087`. This document is the
 migration map for rebuilding the UI in TS/React while keeping `nabu-core` +
 `src-tauri` (the Rust engine + 87 IPC commands) exactly as-is.
 
@@ -33,18 +34,21 @@ Hard constraints (do NOT change the backend):
 
 ## What gets DELETED (Dioxus / WASM world)
 
-| Path | Why |
-|---|---|
-| `crates/nabu-ui/` | Entire Dioxus frontend (lib.rs, components/, events/, ipc.rs, etc.) |
-| `crates/nabu-ui/dioxus.toml`, `crates/nabu-ui/web/` | dx bundle output + config |
-| `crates/nabu-ui/src/bin/dx_bundle.rs` | dx bundling entry |
-| `src-tauri/scripts/dx-bundle.sh` | dx pipeline |
-| `src-tauri/scripts/run-dioxus.sh` | dev server for dx |
-| `build-dioxus.sh` | manual wasm-bindgen pipeline (no longer needed) |
-| `dist/` (repo root) | old wasm output |
-| `dioxus.toml` (repo root) | root dx config |
-| `Trunk.toml` | dead (never existed; leave out) |
-| `crates/nabu-ui/web/public/index.html` boot-placeholder logic | replaced by Vite `index.html` |
+> ✅ = already deleted by Wave 4 (Agent D).
+
+| Path | Why | Status |
+|---|---|---|
+| `crates/nabu-ui/` | Entire Dioxus frontend (lib.rs, components/, events/, ipc.rs, etc.) | ✅ Deleted |
+| `crates/nabu-ui/dioxus.toml`, `crates/nabu-ui/web/` | dx bundle output + config | ✅ Deleted (with crate) |
+| `crates/nabu-ui/src/bin/dx_bundle.rs` | dx bundling entry | ✅ Deleted (with crate) |
+| `src-tauri/scripts/build-dioxus.sh` | manual wasm-bindgen pipeline (no longer needed) | ✅ Deleted |
+| `src-tauri/scripts/dx-bundle.sh` | dx pipeline | ✅ Deleted |
+| `src-tauri/scripts/run-dioxus.sh` | dev server for dx | ✅ Deleted |
+| `build-dioxus.sh` (repo root) | manual wasm-bindgen pipeline (no longer needed) | ✅ Deleted |
+| `dist/` (repo root) | old wasm output | ✅ Removed |
+| `dioxus.toml` (repo root) | root dx config | ✅ Deleted |
+| `Trunk.toml` | dead (never existed; leave out) | — |
+| `crates/nabu-ui/web/public/index.html` boot-placeholder logic | replaced by Vite `index.html` | ✅ Deleted (with crate) |
 
 ## What gets REUSED (keep)
 

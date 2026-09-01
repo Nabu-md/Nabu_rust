@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // dictation_pill.tsx — floating scratchpad / dictation / file-drop pill
 //
-// Mirrors: crates/nabu-ui/src/components/dictation_pill.rs
+// Mirrors: ui-react/src/components/dictation_pill.rs
 //
 // Preserves all behaviour from the Dioxus migration spec:
 //   - opacity loaded from settings ("floating_pill_opacity") and applied to

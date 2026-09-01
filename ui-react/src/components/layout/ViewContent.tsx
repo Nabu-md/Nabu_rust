@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // ViewContent — main content area view switching
 //
-// Mirrors: crates/nabu-ui/src/components/app.rs (ViewMode match in AppRouter)
+// Mirrors: ui-react/src/components/app.rs (ViewMode match in AppRouter)
 //
 // Routes the NavContext.viewMode to the appropriate view component.
 // Wave 3 owns: Editor, Reader, Comparison, Statistics, Activity, ReadingQueue,

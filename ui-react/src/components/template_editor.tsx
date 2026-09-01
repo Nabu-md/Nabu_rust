@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // template_editor.tsx — backend-wired template manager
 //
-// Mirrors: crates/nabu-ui/src/components/template_editor.rs (TemplateEditor)
+// Mirrors: ui-react/src/components/template_editor.rs (TemplateEditor)
 //
 // Wires the template manager to the real backend (`template_list` /
 // `template_save` / `template_delete` / `template_duplicate` /

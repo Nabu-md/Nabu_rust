@@ -14,7 +14,7 @@ cargo build         # build nabu-core and the Tauri backend
 ```
 
 The desktop application is built with **Tauri v2 + Rust** (backend in `src-tauri/` and
-`crates/nabu-core/`) and a **Dioxus** frontend (in `crates/nabu-ui/`). There is no
+`crates/nabu-core/`) and a **React** frontend (`ui-react/`). There is no
 Electron/Node backend. To run the desktop app during development, launch it through
 the Tauri workflow (e.g. `cargo tauri dev` from `src-tauri/`, or the project's
 `src-tauri/scripts/*` dev/build hooks configured in `src-tauri/tauri.conf.json`).
@@ -47,7 +47,7 @@ npm run css:build         # Tailwind CSS pipeline must produce output
 
 ## Code Standards
 
-- **Rust** is the application and backend language. The UI is Dioxus (Rust).
+- **Rust** is the application and backend language. The UI is React + TypeScript.
 - **Rust formatting** uses the standard toolchain — run `cargo fmt --check` before committing.
 - **Tests are mandatory.** New `nabu-core` / `src-tauri` functionality must include
   Rust unit or integration tests. Bug fixes must include a regression test.
@@ -58,8 +58,8 @@ npm run css:build         # Tailwind CSS pipeline must produce output
 # Run all Rust unit and integration tests
 cargo test --workspace
 
-# Check the standalone Dioxus UI crate compiles
-cargo check --manifest-path crates/nabu-ui/Cargo.toml
+# Check the React frontend type-checks
+cd ui-react && pnpm check
 ```
 
 The test suite uses Rust `cfg(test)` unit tests plus `#[tokio::test]` integration
@@ -71,13 +71,13 @@ invariants.
 ```
 src-tauri/        # Tauri v2 backend: commands, IPC, settings, recovery, history
 crates/nabu-core/ # Rust core: models, storage, processing, index/graph, EventBus
-crates/nabu-ui/   # Dioxus frontend (CSR, cdylib for wasm-bindgen)
+ui-react/         # React + Vite frontend (TypeScript)
 src/styles/       # Tailwind CSS source → generated/tailwind.css
 ```
 
 - **Tauri/Rust** handles file I/O, markdown processing, indexing, IPC, and state.
 - **nabu-core** owns the domain models, storage, search index, and event bus.
-- **nabu-ui** renders the UI and communicates with the backend over Tauri IPC commands.
+- **ui-react** renders the UI and communicates with the backend over Tauri IPC commands.
 
 ## Questions?
 

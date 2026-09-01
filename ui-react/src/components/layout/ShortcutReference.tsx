@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // ShortcutReference — overlay keyboard shortcuts reference (stub)
 //
-// Mirrors: crates/nabu-ui/src/components/navigation/shortcuts.rs
+// Mirrors: ui-react/src/components/navigation/shortcuts.rs
 //
 // Controlled by NavContext.shortcutsOpen. Renders an overlay with a few
 // common shortcuts. Wave 3 will expand the list.

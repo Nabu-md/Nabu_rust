@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // template_picker.tsx — searchable template picker
 //
-// Mirrors: crates/nabu-ui/src/components/template_picker.rs (TemplatePicker)
+// Mirrors: ui-react/src/components/template_picker.rs (TemplatePicker)
 //
 // Searchable list of templates. Views are projections of existing
 // KnowledgeObjects — views never own data. Callers receive the selected

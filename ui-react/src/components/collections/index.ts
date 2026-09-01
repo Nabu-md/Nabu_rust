@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // collections/index — barrel export for the Collections module
 //
-// Mirrors: crates/nabu-ui/src/components/collections/mod.rs
+// Mirrors: ui-react/src/components/collections/mod.rs
 // ──────────────────────────────────────────────────────────────────────────────
 
 export { CollectionContainer } from "./container";

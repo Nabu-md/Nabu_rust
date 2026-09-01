@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // navigation/SearchPage.tsx — full-text search
 //
-// Mirrors: crates/nabu-ui/src/components/navigation/search_page.rs
+// Mirrors: ui-react/src/components/navigation/search_page.rs
 //
 // Full-text search backed by the backend `notes_search` command. Shows
 // explicit loading, empty, and error states so the user always knows whether

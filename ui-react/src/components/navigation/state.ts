@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // navigation/state.ts — view-mode enum + helper functions
 //
-// Mirrors: crates/nabu-ui/src/components/navigation::state
+// Mirrors: ui-react/src/components/navigation::state
 // Exports: ViewMode union, DASHBOARD_SECTIONS, dashboardSectionLabel,
 //          viewModeKey, viewModeLabel, viewModeIcon, fuzzyScore.
 // ──────────────────────────────────────────────────────────────────────────────
@@ -11,7 +11,7 @@
 /**
  * Top-level view modes — drives the ribbon bar and view switcher.
  *
- * Mirrors: crates/nabu-ui/src/components/navigation::state::ViewMode
+ * Mirrors: ui-react/src/components/navigation::state::ViewMode
  */
 export type ViewMode =
   | "Dashboard"
@@ -152,7 +152,7 @@ export function viewModeIcon(mode: ViewMode): string {
  * Returns the score if every character of `query` was matched (in order),
  * or `undefined` when the query is not a subsequence.
  *
- * Mirrors: crates/nabu-ui/src/components/navigation::state::fuzzy_score
+ * Mirrors: ui-react/src/components/navigation::state::fuzzy_score
  */
 export function fuzzyScore(query: string, candidate: string): number | undefined {
   const q = query.toLowerCase();

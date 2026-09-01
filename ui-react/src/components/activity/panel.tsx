@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // activity/panel — Activity Panel (React port)
 //
-// Mirrors: crates/nabu-ui/src/components/activity/panel.rs (ActivityPanel)
+// Mirrors: ui-react/src/components/activity/panel.rs (ActivityPanel)
 //
 // Renders the chronological, real-time activity timeline backed by the
 // ActivityManager from activity/mod.tsx. New events appear at the top of

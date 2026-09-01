@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // navigation/breadcrumb.tsx — breadcrumb navigation bar
 //
-// Mirrors: crates/nabu-ui/src/components/navigation/breadcrumb.rs
+// Mirrors: ui-react/src/components/navigation/breadcrumb.rs
 //
 // Shows the user's current location — vault ▸ folder hierarchy ▸ current
 // note — and lets them click any level to navigate:

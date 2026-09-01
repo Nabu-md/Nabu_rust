@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // QuickSwitcher — overlay quick note switcher (stub)
 //
-// Mirrors: crates/nabu-ui/src/components/navigation/quick_switcher.rs
+// Mirrors: ui-react/src/components/navigation/quick_switcher.rs
 //
 // Controlled by NavContext.switcherOpen. Renders an overlay with a search
 // input. Wave 3 will populate results; for now this is a visible shell.

@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // note_view.tsx — read-only markdown presentation (live preview in editor)
 //
-// Mirrors: crates/nabu-ui/src/components/note_view.rs (NoteView)
+// Mirrors: ui-react/src/components/note_view.rs (NoteView)
 //
 // Renders the raw markdown source text with `whitespace-pre-wrap` so formatting
 // is visible without a markdown-to-HTML renderer. This preserves the existing

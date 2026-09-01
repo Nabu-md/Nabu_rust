@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // recovery/recoveryManager.tsx — Snapshot Browser / Recovery Manager
 //
-// Mirrors: crates/nabu-ui/src/components/recovery/recovery_manager.rs
+// Mirrors: ui-react/src/components/recovery/recovery_manager.rs
 //          (RecoveryManager)
 //
 // A dedicated screen for inspecting every recoverable snapshot across the

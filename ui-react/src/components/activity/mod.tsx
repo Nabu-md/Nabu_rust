@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // activity/mod — Activity Manager & context (React port)
 //
-// Mirrors: crates/nabu-ui/src/components/activity/mod.rs
+// Mirrors: ui-react/src/components/activity/mod.rs
 //
 // The ActivityManager is the central coordinator for the Activity Panel.
 // It receives platform events (from the Tauri backend via the "nabu-event"
@@ -291,7 +291,7 @@ export function ActivityProvider({
  * Returns null for low-level or internal events (streaming tokens,
  * processing progress, etc.).
  *
- * Mirrors: crates/nabu-ui/src/components/activity/mod.rs::extract_activity
+ * Mirrors: ui-react/src/components/activity/mod.rs::extract_activity
  */
 export function extractActivity(payload: unknown): ActivityItem | null {
   if (!payload || typeof payload !== "object") return null;

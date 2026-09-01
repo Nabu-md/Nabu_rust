@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // reading_queue.tsx — Reading Queue view (React port)
 //
-// Mirrors: crates/nabu-ui/src/components/reading_queue.rs (ReadingQueue)
+// Mirrors: ui-react/src/components/reading_queue.rs (ReadingQueue)
 //
 // Real reading queue backed by the `queue_*` Tauri commands. The queue is a
 // projection of persisted KnowledgeObjects — the view never owns data.

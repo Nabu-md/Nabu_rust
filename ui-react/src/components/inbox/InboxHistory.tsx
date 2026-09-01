@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // InboxHistory.tsx — "History" tab: per-processor processing history
 //
-// Mirrors: crates/nabu-ui/src/components/inbox.rs (`InboxHistory`)
+// Mirrors: ui-react/src/components/inbox.rs (`InboxHistory`)
 // ──────────────────────────────────────────────────────────────────────────────
 
 import type { InboxItem } from "../../types";

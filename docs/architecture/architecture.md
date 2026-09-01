@@ -234,7 +234,7 @@ Shutdown
 - 🔲 Plugin sandboxing — Infrastructure prepared
 - 🔲 Distributed processing — JobQueue architecture supports future remote workers
 - 🔲 Export engine — not implemented; no export pipeline exists yet
-- 🔲 Template manager — templates handled in nabu-ui; no Tera backend
+- 🔲 Template manager — templates handled in ui-react; no Tera backend
 
 ### Architectural Boundaries
 
@@ -244,11 +244,11 @@ crate boundaries:
                            event_bus, registry, plugin, graph, indexer, job_queue)
     src-tauri           →  Tauri application shell (commands, settings, vault,
                             ipc_socket)
-    nabu-ui             →  Leptos-based UI components (tree, markdown renderer)
+    ui-react           →  React + Vite frontend (components, contexts, hooks)
 
 ownership:
     No circular crate dependencies
-    nabu-core has no dependency on src-tauri or nabu-ui
+    nabu-core has no dependency on src-tauri or ui-react
     src-tauri depends on nabu-core
-    nabu-ui depends on nabu-core
+    ui-react depends on nabu-core (via IPC only)
 ```

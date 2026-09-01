@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // LeftSidebar — vault file explorer + organisational shortcuts
 //
-// Mirrors: crates/nabu-ui/src/components/layout/left_sidebar.rs
+// Mirrors: ui-react/src/components/layout/left_sidebar.rs
 //
 // Renders the vault file tree backed by the `tree_list` IPC command:
 //  - loads on mount and when workspace.refreshTree changes

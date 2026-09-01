@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // navigation/HomeScreen.tsx — vault front door
 //
-// Mirrors: crates/nabu-ui/src/components/navigation/home_screen.rs
+// Mirrors: ui-react/src/components/navigation/home_screen.rs
 //
 // Shown when no note is open in the editor. It is the vault's front door — a
 // welcome banner, a row of quick actions (today's note, new note, search,

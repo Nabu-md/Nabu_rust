@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // shipped/index.ts — barrel re-exports for shipped views
 //
-// Mirrors: crates/nabu-ui/src/components/shipped/mod.rs
+// Mirrors: ui-react/src/components/shipped/mod.rs
 //
 // Re-exports the Reader and Comparison view components and the shared
 // `nonceIsStale` helper so consumers can import from a single path.

@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // InboxDetails.tsx — "Details" tab: read-only item metadata
 //
-// Mirrors: crates/nabu-ui/src/components/inbox.rs (`InboxDetails`)
+// Mirrors: ui-react/src/components/inbox.rs (`InboxDetails`)
 // ──────────────────────────────────────────────────────────────────────────────
 
 import type { InboxItem } from "../../types";

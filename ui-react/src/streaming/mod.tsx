@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // streaming/mod — Frontend streaming state provider
 //
-// Mirrors: crates/nabu-ui/src/components/streaming/mod.rs
+// Mirrors: ui-react/src/components/streaming/mod.rs
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {

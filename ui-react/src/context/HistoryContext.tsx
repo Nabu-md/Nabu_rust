@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // HistoryContext — undo/redo state
 //
-// Mirrors: crates/nabu-ui/src/components/contexts::HistoryContext + HistoryProvider
+// Mirrors: ui-react/src/components/contexts::HistoryContext + HistoryProvider
 // Contract: read-only spec consumed by Wave 3 view components.
 // ──────────────────────────────────────────────────────────────────────────────
 

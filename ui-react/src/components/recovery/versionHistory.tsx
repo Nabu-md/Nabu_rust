@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // recovery/versionHistory.tsx — Version History screen
 //
-// Mirrors: crates/nabu-ui/src/components/recovery/version_history.rs (VersionHistory)
+// Mirrors: ui-react/src/components/recovery/version_history.rs (VersionHistory)
 //
 // Browse the snapshots of a note: list versions, preview their content, diff
 // two revisions, restore an old version (undoable), duplicate it as a new

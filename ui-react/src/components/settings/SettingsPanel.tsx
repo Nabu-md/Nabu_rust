@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // SettingsPanel.tsx — 18-tab settings panel (React port)
 //
-// Mirrors: crates/nabu-ui/src/components/settings/settings_panel.rs
+// Mirrors: ui-react/src/components/settings/settings_panel.rs
 //
 // Renders every settings tab from the Rust source, binding each control to the
 // `AppSettings` shape in `types.ts`. Per-field edits persist via

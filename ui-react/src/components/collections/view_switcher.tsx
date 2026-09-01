@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // collections/view_switcher.tsx — view toggle buttons
 //
-// Mirrors: crates/nabu-ui/src/components/collections/view_switcher.rs (ViewSwitcher)
+// Mirrors: ui-react/src/components/collections/view_switcher.rs (ViewSwitcher)
 //
 // A row of buttons that lets the user toggle between Table, Board, Gallery,
 // and Calendar views.

@@ -10,11 +10,11 @@
 > `architecture.md` (lines 244–257):
 >
 > - **`nabu-core`** (`crates/nabu-core/`) — no dependency on `src-tauri`
->   or `nabu-ui`.  Contains all domain logic.
+>   or `ui-react`.  Contains all domain logic.
 > - **`src-tauri`** (`src-tauri/`) — depends on `nabu-core`.  Provides the
 >   Tauri v2 shell and Rust backend commands (`#[tauri::command]`).
-> - **`nabu-ui`** (`crates/nabu-ui/`) — depends on `nabu-core`.  Leptos
->   WASM frontend (when present in the workspace).
+> - **`ui-react`** (`ui-react/`) — depends on `nabu-core` (via IPC only).
+>   React + Vite frontend.
 >
 > The principle of unidirectional dependencies is preserved: core has no
 > knowledge of the shell or UI.

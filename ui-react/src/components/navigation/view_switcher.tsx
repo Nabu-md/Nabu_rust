@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // navigation/view_switcher.tsx — view mode router
 //
-// Mirrors: crates/nabu-ui/src/components/app.rs → ViewContent
+// Mirrors: ui-react/src/components/app.rs → ViewContent
 //
 // Switching views based on NavContext.viewMode. This component renders the
 // appropriate navigation view for the active ViewMode. Views not owned by

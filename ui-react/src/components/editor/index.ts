@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // editor/index.ts — barrel export for editor components
 //
-// Mirrors: crates/nabu-ui/src/components/editor/mod.rs
+// Mirrors: ui-react/src/components/editor/mod.rs
 // ──────────────────────────────────────────────────────────────────────────────
 
 export { NoteEditor } from "./NoteEditor";

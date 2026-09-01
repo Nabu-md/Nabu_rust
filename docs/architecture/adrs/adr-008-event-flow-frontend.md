@@ -10,8 +10,8 @@
 
 The backend has an internal `EventBus<PipelineEvent>` that publishes
 8 event types and drives the indexer and vault graph via `ITEM_STORED`.
-The frontend (`nabu-ui`) however has **no path to receive these events**:
-its `ipc.rs` only wraps `invoke()` — it has no `listen` capability for
+The frontend (`ui-react`) however has **no path to receive these events**:
+its `ipc.ts` only wraps `invoke()` — it has no `listen` capability for
 backend-originated events. This leaves the UI dependent on polling and
 stale-cache problems.
 

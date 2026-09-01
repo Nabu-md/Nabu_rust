@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // streaming/container — Scrollable container with auto-scroll
 //
-// Mirrors: crates/nabu-ui/src/components/streaming/container.rs
+// Mirrors: ui-react/src/components/streaming/container.rs
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { type HTMLAttributes, useEffect, useRef, useState } from "react";

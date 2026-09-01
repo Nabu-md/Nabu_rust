@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // streaming/content — Live token rendering for streaming sessions
 //
-// Mirrors: crates/nabu-ui/src/components/streaming/content.rs
+// Mirrors: ui-react/src/components/streaming/content.rs
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { type HTMLAttributes } from "react";

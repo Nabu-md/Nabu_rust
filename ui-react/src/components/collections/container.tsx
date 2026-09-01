@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // collections/container.tsx — collection container (view orchestration)
 //
-// Mirrors: crates/nabu-ui/src/components/collections/container.rs
+// Mirrors: ui-react/src/components/collections/container.rs
 // (CollectionContainer)
 //
 // Manages view state, filtering, and data projection for all four collection

@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // WorkspaceLayout — the app's structural skeleton
 //
-// Mirrors: crates/nabu-ui/src/components/layout/workspace.rs
+// Mirrors: ui-react/src/components/layout/workspace.rs
 //
 // Composes the ribbon bar, left sidebar, main content area (with tab bar and
 // navbar), right inspector, and the overlay surfaces (command palette, quick

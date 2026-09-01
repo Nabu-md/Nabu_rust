@@ -2,7 +2,7 @@
 // inbox/icons.tsx — self-contained, shell-independent icon set for the Inbox
 //
 // Mirrors the thumbnail → icon mapping performed by `thumbnail_to_icon` in
-// crates/nabu-ui/src/components/inbox.rs.  Drawn as primitive SVG shapes so the
+// ui-react/src/components/inbox.rs.  Drawn as primitive SVG shapes so the
 // inbox folder has no dependency on the shell icon registry and stays fully
 // within the inbox/** scope fence.
 // ──────────────────────────────────────────────────────────────────────────────
@@ -94,7 +94,7 @@ const ICON_CONTENT: Record<string, ReactNode> = {
     </>
   ),
 
-  // ── File-type thumbnails (mirrors crates/nabu-ui icon enum) ─────────
+  // ── File-type thumbnails (mirrors ui-react icon enum) ─────────
   file: (
     <path d="M4 4a2 2 0 0 1 2-2h8.586a1 1 0 0 1 .707.293l5.414 5.414A1 1 0 0 1 20 9.414V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4z" />
   ),

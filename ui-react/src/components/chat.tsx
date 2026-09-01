@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // components/chat — ACP agent chat surface
 //
-// Mirrors: crates/nabu-ui/src/components/chat.rs
+// Mirrors: ui-react/src/components/chat.rs
 //
 // Renders a live streaming conversation from an ACP agent session.
 // Uses StreamingProvider for token rendering and bridges user input

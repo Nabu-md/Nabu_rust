@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // navigation/shortcuts.tsx — shortcut registry, global listener, reference dialog
 //
-// Mirrors: crates/nabu-ui/src/components/navigation/shortcuts.rs
+// Mirrors: ui-react/src/components/navigation/shortcuts.rs
 //
 // A single registry of every shortcut the app binds, used both to *install*
 // the global window listener and to render the searchable shortcuts

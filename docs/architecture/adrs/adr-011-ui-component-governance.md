@@ -8,7 +8,7 @@
 
 ## Context
 
-The frontend (`crates/nabu-ui`, Dioxus 0.6.3 / CSR) is organized as
+The frontend (`ui-react/`, React + Vite / TypeScript) is organized as
 feature components. AUDIT-0.6 traced the working flows (open note →
 editor, session persistence, autosave); AUDIT-0.7 inventoried dead and
 orphaned components.

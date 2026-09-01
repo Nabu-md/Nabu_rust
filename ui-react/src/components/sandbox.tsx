@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // sandbox.tsx — sandboxed iframe for app blocks
 //
-// Mirrors: crates/nabu-ui/src/components/sandbox.rs
+// Mirrors: ui-react/src/components/sandbox.rs
 //
 // Renders an <iframe> with srcdoc set to the provided HTML content and the
 // `sandbox` attribute set to "allow-scripts allow-forms". Listens for

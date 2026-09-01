@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // InboxPreview.tsx — right panel: tabbed preview + per-item action buttons
 //
-// Mirrors: crates/nabu-ui/src/components/inbox.rs (`InboxPreview` component)
+// Mirrors: ui-react/src/components/inbox.rs (`InboxPreview` component)
 //
 // Tabs: Details | Duplicate | Timeline | OCR | History.
 // Action buttons: Approve / Reject / Retry / Delete (wired by the parent).

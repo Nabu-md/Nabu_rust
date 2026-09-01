@@ -1,4 +1,4 @@
-# macOS deployment target for all builds (src-tauri, nabu-core, nabu-ui).
+# macOS deployment target for all builds (src-tauri, nabu-core, ui-react).
 #
 # WHY: the vendored whisper.cpp/ggml C++ code in `whisper-rs-sys` uses
 # `<filesystem>` APIs that only exist on macOS 10.15+. Without this pin, the

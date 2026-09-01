@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // SaveStatusContext — current save state of the active document
 //
-// Mirrors: crates/nabu-ui/src/components/contexts::SaveStatusContext
+// Mirrors: ui-react/src/components/contexts::SaveStatusContext
 // Contract: read-only spec consumed by Wave 3 view components.
 // ──────────────────────────────────────────────────────────────────────────────
 

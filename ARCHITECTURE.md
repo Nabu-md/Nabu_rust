@@ -1,7 +1,7 @@
 # Architecture
 
 Nabu is a **Tauri v2** desktop application built on a **Rust core**
-(`crates/nabu-core`) with a **Dioxus/WASM** user interface (`crates/nabu-ui`)
+(`crates/nabu-core`) with a **React** user interface (`ui-react/`)
 rendered inside a Tauri WebView. Content flows through the capture →
 processing → storage → index pipeline.
 
@@ -19,9 +19,9 @@ processing → storage → index pipeline.
 │           │  Tauri webview (wasm-bindgen)                                  │
 │           ▼                                                                  │
 │  ┌──────────────────────────────────────────────────────────────────┐      │
-│  │              crates/nabu-ui (Dioxus 0.6.3, WASM)                   │      │
+│  │              ui-react/ (React + Vite, TypeScript)                       │      │
 │  │  App, NoteView, Blocks, Graph, FileTree, Sidebar, Settings       │      │
-│  │  (built by `cargo dioxus build`, served via index.html)           │      │
+│  │  (built by `pnpm build`, served via index.html)                  │      │
 │  └──────────────────────────────────────────────────────────────────┘      │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -39,7 +39,7 @@ processing → storage → index pipeline.
    The indexer maintains the full-text, tag, and vector indexes. A write lock
    prevents races between file writes and edits.
 
-3. **Core → Tauri → UI:** State changes are surfaced to the Dioxus UI through
+3. **Core → Tauri → UI:** State changes are surfaced to the React UI through
    typed Tauri commands (IPC). The webview layer re-renders from the resulting
    state.
 
@@ -53,7 +53,7 @@ processing → storage → index pipeline.
 
 - `Cargo.toml`, `build.rs` (`tauri_build::build()`), `tauri.conf.json` — shell
   configuration, window definition, bundle/icons, and the beforeDev/beforeBuild
-  hooks that build the Dioxus frontend.
+  hooks that build the React frontend.
 - `src/main.rs` / `src/lib.rs` — Tauri application entry point and plugin setup.
 - `src/commands.rs` — `#[tauri::command]` handlers exposing `nabu-core` to the
   UI (inbox, templates, history, recovery, statistics, settings, dictation, IPC).
@@ -80,15 +80,16 @@ processing → storage → index pipeline.
 - `src/rpc/` — JSON-RPC types shared by ACP/MCP.
 - `src/bin/` — `nabu-mcp-server` and `acp-test-agent` binaries.
 
-### UI (`crates/nabu-ui/`)
+### UI (`ui-react/`)
 
-A standalone Dioxus 0.6.3 workspace (`crate-type = ["cdylib", "rlib"]`),
-compiled to `wasm32-unknown-unknown` and bundled into the Tauri WebView.
+A standalone React + Vite workspace (`ui-react/package.json`),
+built to static assets and bundled into the Tauri WebView via
+`tauri.conf.json` (`frontendDist: ../ui-react/dist`).
 
-- `src/lib.rs` — Dioxus app entry: the `App` root component and view routing.
+- `src/main.tsx` — React app entry: the `App` root component and routing.
 - `src/components/` — view-mode components (settings panel, inbox, templates,
   history, recovery, statistics, dictation pill).
-- `src/ipc.rs` — typed IPC clients that invoke the `#[tauri::command]`
+- `src/ipc.ts` — typed IPC clients that invoke the `#[tauri::command]`
   handlers in `src-tauri/src/commands.rs`.
 - `index.html` + Tailwind (`npm run css:build` → `generated/tailwind.css`) —
   boot splash and stylesheet consumed by the build/dev hooks.
@@ -97,7 +98,7 @@ compiled to `wasm32-unknown-unknown` and bundled into the Tauri WebView.
 
 The UI runs as a **sandboxed WebView** rather than a Node-integrated renderer:
 
-- The Dioxus/WASM bundle has no Node.js access and no direct filesystem access.
+- The React/Vite bundle has no Node.js access and no direct filesystem access.
 - All privileged operations are gated behind explicitly-declared Tauri commands
   (`src-tauri/src/commands.rs`). The webview invokes each command by name; there
   is no dynamic channel routing.
@@ -110,11 +111,11 @@ The UI runs as a **sandboxed WebView** rather than a Node-integrated renderer:
 - **Tauri v2** over Electron — a Rust core running in a single native WebView,
   yielding a far smaller bundle size and attack surface than an Electron/Node
   runtime.
-- **Dioxus 0.6 (WASM)** over React — a native-Rust UI compiled to WebAssembly
-  that shares types and logic directly with `nabu-core`.
+- **React + Vite** over Dioxus — a TypeScript UI bundled by Vite that
+  communicates with the Rust backend over typed Tauri IPC commands.
 - **Tailwind CSS** for styling — the stylesheet is built at compile time
   (`npm run css:build`) rather than shipped as a runtime CSS-in-JS dependency.
 - **ACP + MCP** for agent/tool integration — both protocols are implemented
   natively in Rust within `crates/nabu-core` (`src/acp/`, `src/mcp/`).
-- **Signals + context** over Redux — Dioxus `Signal`/`use_context` for app state;
+- **Context + hooks** over Redux — React `useContext` + `useReducer`/`useState` for app state;
   the shape is not complex enough to warrant a store library.

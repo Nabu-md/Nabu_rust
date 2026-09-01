@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // SlashMenu.tsx — block-type picker invoked with `/` inside the editor
 //
-// Mirrors: crates/nabu-ui/src/components/editor/slash_menu.rs (SlashMenu)
+// Mirrors: ui-react/src/components/editor/slash_menu.rs (SlashMenu)
 //
 // Phase 0.4a: same item set as the Dioxus implementation; no redesign.
 // Selecting an item calls `onSelect` and closes the menu. The editor is

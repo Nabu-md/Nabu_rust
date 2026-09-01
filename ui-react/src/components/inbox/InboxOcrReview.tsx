@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // InboxOcrReview.tsx — "OCR" tab
 //
-// Mirrors: crates/nabu-ui/src/components/inbox.rs (`InboxOcrReview`)
+// Mirrors: ui-react/src/components/inbox.rs (`InboxOcrReview`)
 // ──────────────────────────────────────────────────────────────────────────────
 
 import type { InboxItem } from "../../types";

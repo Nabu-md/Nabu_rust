@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // navigation/command_palette.tsx — overlay command palette
 //
-// Mirrors: crates/nabu-ui/src/components/navigation/command_palette.rs
+// Mirrors: ui-react/src/components/navigation/command_palette.rs
 //
 // A complete command centre overlay:
 //   - fuzzy search across label, aliases, category and description

@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // sandboxed_html.tsx — minimal sandboxed iframe for rendering HTML
 //
-// Mirrors: crates/nabu-ui/src/components/sandboxed_html.rs
+// Mirrors: ui-react/src/components/sandboxed_html.rs
 //
 // Renders an <iframe> with srcdoc set to the provided HTML and the
 // `sandbox` attribute set to "allow-scripts". No message handling — purely

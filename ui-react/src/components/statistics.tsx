@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // statistics.tsx — Vault statistics & insights dashboard
 //
-// Mirrors: crates/nabu-ui/src/components/statistics.rs (StatisticsView)
+// Mirrors: ui-react/src/components/statistics.rs (StatisticsView)
 //
 // Displays comprehensive vault statistics: note count, folder count, tag
 // count, graph connections, orphan notes, writing streaks, recently

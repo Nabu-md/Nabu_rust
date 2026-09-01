@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // collections/shared/index.ts — barrel export for shared types
 //
-// Mirrors: crates/nabu-ui/src/components/collections/shared/mod.rs
+// Mirrors: ui-react/src/components/collections/shared/mod.rs
 // ──────────────────────────────────────────────────────────────────────────────
 
 export * from "./types";

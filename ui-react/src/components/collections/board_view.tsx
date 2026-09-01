@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // collections/board_view.tsx — kanban-style board view
 //
-// Mirrors: crates/nabu-ui/src/components/collections/board_view.rs (BoardView)
+// Mirrors: ui-react/src/components/collections/board_view.rs (BoardView)
 //
 // Kanban-style board view with columns, filtering, and drag-and-drop
 // reordering between columns. Views are projections of `CollectionItem[]`.

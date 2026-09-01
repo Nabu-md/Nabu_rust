@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // CommandPalette — overlay command palette (stub)
 //
-// Mirrors: crates/nabu-ui/src/components/navigation/command_palette.rs
+// Mirrors: ui-react/src/components/navigation/command_palette.rs
 //
 // Controlled by NavContext.paletteOpen. Renders an overlay with a search
 // input. Wave 3 will populate commands; for now this is a visible shell.

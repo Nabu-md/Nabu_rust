@@ -2,7 +2,7 @@
 // theme_toggle.tsx — theme selector (light / dark / system)
 //
 // Mirrors: AppSettings.theme field + the Appearance → Theme select in
-//          crates/nabu-ui/src/components/settings/settings_panel.rs
+//          ui-react/src/components/settings/settings_panel.rs
 //
 // Consumes ThemeContext (resolvedTheme / setTheme) and persists the choice to
 // the backend via the `settings_set` IPC command with key "theme".

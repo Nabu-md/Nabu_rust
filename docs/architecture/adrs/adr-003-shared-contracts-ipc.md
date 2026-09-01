@@ -11,8 +11,8 @@
 >
 > - **Shared contracts**: `crates/nabu-core/src/models/` — the
 >   `KnowledgeObject` and related domain types, shared across all layers.
-> - **Typed IPC**: Tauri v2 `invoke()` from the Leptos WASM frontend
->   (`crates/nabu-ui/`) → Rust `#[tauri::command]` handlers in
+> - **Typed IPC**: Tauri v2 `invoke()` from the React + Vite frontend
+>   (`ui-react/`) → Rust `#[tauri::command]` handlers in
 >   `src-tauri/src/commands.rs`.
 >
 > The principle of "no string-keyed IPC" is preserved — all communication

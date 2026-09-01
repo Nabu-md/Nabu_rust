@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // components/property_editor — Metadata property editing interface
 //
-// Mirrors: crates/nabu-ui/src/components/property_editor.rs
+// Mirrors: ui-react/src/components/property_editor.rs
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useMemo } from "react";

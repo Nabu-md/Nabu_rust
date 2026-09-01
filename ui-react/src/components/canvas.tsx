@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // canvas.tsx — infinite pannable / zoomable workspace
 //
-// Mirrors: crates/nabu-ui/src/components/canvas.rs (CanvasView + CanvasSurface)
+// Mirrors: ui-react/src/components/canvas.rs (CanvasView + CanvasSurface)
 //
 // An infinite canvas that *references* existing notes rather than duplicating
 // their content. Nodes are positioned cards pointing at vault-relative note

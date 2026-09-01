@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // components/graph_view.tsx — interactive knowledge graph canvas (React)
 //
-// Mirrors: crates/nabu-ui/src/components/graph_view.rs
+// Mirrors: ui-react/src/components/graph_view.rs
 //
 // Responsibilities (ported from the Dioxus spec):
 // - fetch real graph data via the `graph_data` IPC command;
@@ -532,7 +532,7 @@ interface GraphDetailPanelProps {
 /**
  * Right-hand detail panel shown when a graph node is selected.
  *
- * Mirrors: `crates/nabu-ui/src/components/graph_view.rs` → `GraphDetailPanel`
+ * Mirrors: `ui-react/src/components/graph_view.rs` → `GraphDetailPanel`
  */
 function GraphDetailPanel({
   nodes,

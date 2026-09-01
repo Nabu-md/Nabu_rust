@@ -3,7 +3,7 @@ node_modules/
 
 # ── Build output ─────────────────────────────────────────────
 # NOTE: these are intentionally unanchored so they match the nested
-# workspaces too (crates/nabu-ui, crates/nabu-core, src-tauri each
+# workspaces too (crates/nabu-core, ui-react, src-tauri each
 # have their own target/ and dist/).
 target/
 dist/

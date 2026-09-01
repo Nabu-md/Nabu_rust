@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // TabBar — the workspace tab bar
 //
-// Mirrors: crates/nabu-ui/src/components/layout/tab_bar.rs
+// Mirrors: ui-react/src/components/layout/tab_bar.rs
 //
 // Renders open tabs from WorkspaceContext: click-to-activate, close (X),
 // pin indicator. The trailing "+" creates a new note via `noteCreateFile`.

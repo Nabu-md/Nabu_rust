@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // inbox/utils.ts — pure helpers (extracted from inbox.rs for testability)
 //
-// Mirrors the pure functions in crates/nabu-ui/src/components/inbox.rs:
+// Mirrors the pure functions in ui-react/src/components/inbox.rs:
 //   filter_and_sort, confidence_color, confidence_bar (color + pct).
 // ──────────────────────────────────────────────────────────────────────────────
 

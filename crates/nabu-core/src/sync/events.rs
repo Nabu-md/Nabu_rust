@@ -22,7 +22,7 @@
 //! Tauri / nabu-event channel
 //!     │  listen("nabu-event")
 //!     ▼
-//! Frontend EventService  (crates/nabu-ui/src/events/)
+//! Frontend EventService  (ui-react/src/events/)
 //!     │  dispatches to typed subscribers
 //!     ▼
 //! Application Components

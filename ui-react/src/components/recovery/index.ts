@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // recovery/index.ts — barrel export for recovery view components
 //
-// Mirrors: crates/nabu-ui/src/components/recovery/mod.rs
+// Mirrors: ui-react/src/components/recovery/mod.rs
 // ──────────────────────────────────────────────────────────────────────────────
 
 export { DiffView } from "./DiffView";

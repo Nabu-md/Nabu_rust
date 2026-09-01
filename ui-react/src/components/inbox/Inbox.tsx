@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // Inbox.tsx — split-pane inbox view (Dioxus → React port)
 //
-// Mirrors: crates/nabu-ui/src/components/inbox.rs (`Inbox` component)
+// Mirrors: ui-react/src/components/inbox.rs (`Inbox` component)
 //
 // Layout: left = queue (search + batch bar + sortable list), right = preview
 //  (tabbed details/duplicate/timeline/ocr/history + per-item actions + metadata).

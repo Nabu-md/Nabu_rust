@@ -2,7 +2,7 @@
 module.exports = {
   content: [
     "./index.html",
-    "./crates/nabu-ui/src/**/*.rs",
+    "./ui-react/src/**/*.{ts,tsx}",
   ],
   theme: {
     extend: {

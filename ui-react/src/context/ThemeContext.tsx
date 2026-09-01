@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // ThemeContext — theme preference (light / dark / system)
 //
-// Mirrors: crates/nabu-ui/src/components/contexts::ThemeProvider
+// Mirrors: ui-react/src/components/contexts::ThemeProvider
 // ──────────────────────────────────────────────────────────────────────────────
 
 import { createContext, useContext, useState, type ReactNode } from "react";

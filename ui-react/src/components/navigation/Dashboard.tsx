@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // navigation/Dashboard.tsx — configurable home view
 //
-// Mirrors: crates/nabu-ui/src/components/navigation/dashboard.rs
+// Mirrors: ui-react/src/components/navigation/dashboard.rs
 //
 // A configurable home view built from the enabled `dashboardSections` widget
 // set. Widgets pull from NavContext discovery data — favourites, recent

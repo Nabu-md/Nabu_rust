@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // comparison.tsx — side-by-side diff view
 //
-// Mirrors: crates/nabu-ui/src/components/shipped/comparison.rs (ComparisonView)
+// Mirrors: ui-react/src/components/shipped/comparison.rs (ComparisonView)
 //
 // Supports two modes:
 //  - **Two Notes** — diff any two notes by vault-relative path (`notes_diff`).

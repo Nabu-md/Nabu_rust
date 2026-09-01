@@ -12,9 +12,13 @@
 > The codebase has been migrated to the **Pure-Rust Architecture** (Migration
 > Option B):
 > Tauri v2 desktop shell, a Rust core library (`crates/nabu-core/`), and the
-> Dioxus WASM frontend (`crates/nabu-ui/`).
+> Dioxus WASM frontend (`crates/nabu-ui/`, now removed from main — preserved
+> on `freeze/dioxus-rust-frontend`). The current frontend is the React + Vite
+> workspace `ui-react/`.
 >
-> The *decisions* captured in these ADRs — folder-layer separation, service
+> The codebase has since been migrated to the **Pure-Rust Architecture**
+> (Migration Option B): Tauri v2 desktop shell, a Rust core library
+> (`crates/nabu-core/`), and the React + Vite frontend (`ui-react/`).
 > extraction, typed IPC contracts, typed event bus, and layer ownership rules
 > — are still architecturally valid.  However, the *implementations* they
 > describe (TypeScript modules, Electron contexts, `contextBridge`) have been

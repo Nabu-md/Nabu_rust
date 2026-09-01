@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // ToastContext — toast notification system
 //
-// Mirrors: crates/nabu-ui/src/components/ui/feedback (ToastContext)
+// Mirrors: ui-react/src/components/ui/feedback (ToastContext)
 // Contract: read-only spec consumed by Wave 3 view components.
 // ──────────────────────────────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // InboxDuplicateReview.tsx — "Duplicate" tab
 //
-// Mirrors: crates/nabu-ui/src/components/inbox.rs (`InboxDuplicateReview`)
+// Mirrors: ui-react/src/components/inbox.rs (`InboxDuplicateReview`)
 // ──────────────────────────────────────────────────────────────────────────────
 
 import type { InboxItem } from "../../types";

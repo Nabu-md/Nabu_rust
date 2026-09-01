@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // navigation/CalendarPage.tsx — date-based note browsing
 //
-// Mirrors: crates/nabu-ui/src/components/navigation/calendar_page.rs
+// Mirrors: ui-react/src/components/navigation/calendar_page.rs
 //
 // Date-based navigation workspace. Loads notes dated within the selected
 // month via the `calendar_notes` command, lays them out on a month grid, and

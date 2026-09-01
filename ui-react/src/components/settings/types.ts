@@ -2,7 +2,7 @@
 // settings/types.ts — local helper types for the settings panel
 //
 // `AppSettings` itself lives in the root `types.ts` (wire format mirror of the
-// Rust struct in `crates/nabu-ui/src/components/settings/settings_panel.rs`).
+// Rust struct in `ui-react/src/components/settings/settings_panel.rs`).
 // These helpers model the snapshot + change-payload shapes the panel needs.
 // ──────────────────────────────────────────────────────────────────────────────
 

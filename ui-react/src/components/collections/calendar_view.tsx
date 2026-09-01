@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // collections/calendar_view.tsx — date-based calendar view
 //
-// Mirrors: crates/nabu-ui/src/components/collections/calendar_view.rs (CalendarView)
+// Mirrors: ui-react/src/components/collections/calendar_view.rs (CalendarView)
 //
 // Date-based calendar view with month/week/day modes and filtering.
 // Views are projections of `CollectionItem[]` — views never own data.

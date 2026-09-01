@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // activity/index — barrel export for the Activity module
 //
-// Mirrors: crates/nabu-ui/src/components/activity/mod.rs
+// Mirrors: ui-react/src/components/activity/mod.rs
 // ──────────────────────────────────────────────────────────────────────────────
 
 export {

@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // App.tsx — app router (vault-check → view switch)
 //
-// Mirrors: crates/nabu-ui/src/components/app.rs (App + AppRouter)
+// Mirrors: ui-react/src/components/app.rs (App + AppRouter)
 //
 // On mount, calls checkVaultExists:
 //  - Loading  → spinner (h-screen, NOT dvh)

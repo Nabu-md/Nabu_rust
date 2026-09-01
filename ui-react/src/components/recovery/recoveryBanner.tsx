@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // recovery/recoveryBanner.tsx — crash-recovery prompt banner
 //
-// Mirrors: crates/nabu-ui/src/components/recovery/recovery_banner.rs
+// Mirrors: ui-react/src/components/recovery/recovery_banner.rs
 //          (RecoveryBanner)
 //
 // Shown at the top of the dashboard when the previous run ended

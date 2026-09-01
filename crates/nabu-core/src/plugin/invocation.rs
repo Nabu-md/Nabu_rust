@@ -160,7 +160,7 @@ pub struct InvocationMetadata {
     /// but is not required to.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
-    /// Optional caller identity (e.g. `"nabu-ui"`, `"nabu-cli"`).
+    /// Optional caller identity (e.g. `"ui-react"`, `"nabu-cli"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caller: Option<String>,
     /// API version requested by the caller for version negotiation.
@@ -193,7 +193,7 @@ pub struct InvocationMetadata {
 ///   "metadata": {
 ///     "request_id": "550e8400-e29b-41d4-a716-446655440000",
 ///     "timeout_ms": 5000,
-///     "caller": "nabu-ui"
+///     "caller": "ui-react"
 ///   }
 /// }
 /// ```
@@ -463,7 +463,7 @@ mod serialization {
             .with_metadata(InvocationMetadata {
                 request_id: Some(Uuid::nil()),
                 timeout_ms: Some(5000),
-                caller: Some("nabu-ui".to_string()),
+                caller: Some("ui-react".to_string()),
                 ..Default::default()
             });
 

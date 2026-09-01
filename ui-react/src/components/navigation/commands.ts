@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // navigation/commands.ts — command catalog (source of truth for palette)
 //
-// Mirrors: crates/nabu-ui/src/components/navigation/commands.rs
+// Mirrors: ui-react/src/components/navigation/commands.rs
 //
 // Each entry carries a stable id, label, aliases, category, description,
 // optional keyboard hint, icon, and a run() callback. The catalog is built

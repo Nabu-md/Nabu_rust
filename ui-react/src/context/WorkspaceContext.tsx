@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // WorkspaceContext — open tabs + active note path
 //
-// Mirrors: crates/nabu-ui/src/components/contexts::WorkspaceContext
+// Mirrors: ui-react/src/components/contexts::WorkspaceContext
 // Contract: read-only spec consumed by Wave 3 view components.
 // ──────────────────────────────────────────────────────────────────────────────
 

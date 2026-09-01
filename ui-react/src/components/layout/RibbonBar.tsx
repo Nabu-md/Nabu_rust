@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // RibbonBar — left vertical icon bar
 //
-// Mirrors: crates/nabu-ui/src/components/layout/ribbon_bar.rs
+// Mirrors: ui-react/src/components/layout/ribbon_bar.rs
 //
 // A narrow vertical bar of icon buttons (vault explorer, search, graph,
 // daily note, dictation, canvas, activity, streaming, settings).

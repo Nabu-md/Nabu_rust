@@ -2,7 +2,7 @@
 //!
 //! The ACP client-side methods `elicitation/create` and `session/request_permission`
 //! require user interaction — they cannot be fulfilled by the core library alone
-//! because Nabu's UI lives in a separate process (`nabu-ui`).
+//! because Nabu's UI lives in a separate process (`ui-react`).
 //!
 //! These traits define the delegation boundary: the [`ElicitationTool`] and
 //! [`PermissionTool`] call into a provided handler implementation, which is

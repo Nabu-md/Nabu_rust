@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // collections/table_view.tsx — column-based table view
 //
-// Mirrors: crates/nabu-ui/src/components/collections/table_view.rs (TableView)
+// Mirrors: ui-react/src/components/collections/table_view.rs (TableView)
 //
 // Column-based table view with filtering, sorting, and configurable columns.
 // Projections operate over `CollectionItem[]` — views never own data.

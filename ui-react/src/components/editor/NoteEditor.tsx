@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // NoteEditor.tsx — editable note surface
 //
-// Mirrors: crates/nabu-ui/src/components/note_editor.rs (NoteEditor)
+// Mirrors: ui-react/src/components/note_editor.rs (NoteEditor)
 //
 // Autosaves the current content to the backend (`note_save`) after a short
 // debounce, drives the shared SaveStatusContext indicator, and renders a live

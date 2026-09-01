@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // navigation/SmartFoldersPage.tsx — query-powered virtual collections
 //
-// Mirrors: crates/nabu-ui/src/components/navigation/smart_folders.rs
+// Mirrors: ui-react/src/components/navigation/smart_folders.rs
 //
 // Virtual collections powered by saved queries. The folder list is read from
 // the NavContext `smartFolders` signal (persisted in settings). Selecting a

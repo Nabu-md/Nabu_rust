@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // collections/shared/types.ts — shared types for the Collections module
 //
-// Mirrors: crates/nabu-ui/src/components/collections/shared/types.rs
+// Mirrors: ui-react/src/components/collections/shared/types.rs
 //
 // `CollectionItem` mirrors the backend `NoteIndexEntry` (defined in
 // `src-tauri/src/commands.rs`) — it is a flat, deserialisable projection

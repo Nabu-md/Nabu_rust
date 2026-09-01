@@ -21,8 +21,8 @@
 >
 > The layer boundaries from this ADR are **still valid** — only the
 > language/runtime changed: there is still a backend layer (`src-tauri`),
-> a core library (`crates/nabu-core`), and a frontend layer (`crates/nabu-ui`
-> when present).  See `architecture.md` for the current Rust crate dependency
+> a core library (`crates/nabu-core`), and a frontend layer (`ui-react/`
+> when present in the workspace).  See `architecture.md` for the current Rust crate dependency
 > graph.
 
 **Status:** Accepted (legacy — describes pre-migration architecture)

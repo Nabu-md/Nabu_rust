@@ -1,9 +1,10 @@
-# Agent Guidelines — Nabu Phase W2 (Dioxus Migration)
+# Agent Guidelines — Nabu Phase W3 (React Frontend Consolidation)
 
 ## Project Overview
 
-Nabu is a Tauri + Dioxus (CSR) desktop knowledge management app with a Rust core (`nabu-core`).
-The UI lives in `crates/nabu-ui` (standalone workspace, Dioxus 0.6.3, cdylib for wasm-bindgen).
+Nabu is a Tauri + React desktop knowledge management app with a Rust core (`nabu-core`).
+The UI lives in `ui-react/` (React + Vite, TypeScript) and is bundled into the Tauri
+WebView via `tauri.conf.json`.
 The Tauri backend lives in `src-tauri/`.
 
 ## Architecture
@@ -11,16 +12,20 @@ The Tauri backend lives in `src-tauri/`.
 ```
 crates/
   nabu-core/          — Rust core: models, processing, storage, indexer
-  nabu-ui/            — Dioxus 0.6.3 CSR frontend (cdylib)
+ui-react/             — React + Vite frontend (TypeScript)
 src-tauri/            — Tauri commands & settings
 ```
 
 ## Compilation Notes
 
-- `nabu-ui` is a **standalone workspace** (`crates/nabu-ui/Cargo.toml` has `[workspace]`).
-  Compile from `crates/nabu-ui/`: `cargo check`
-- Root workspace compiles `nabu-core` + `src-tauri` (not `nabu-ui`).
-- Phase 0 migration: **Complete.** All LePtOS views have been migrated to Dioxus 0.6.3.
+- `ui-react` is a standalone Node workspace (`ui-react/package.json` has its own
+  `pnpm-workspace.yaml`). Compile from `ui-react/`: `pnpm build` or `pnpm dev`.
+- Root workspace compiles `nabu-core` + `src-tauri` (not `ui-react`).
+- The legacy Dioxus/WASM frontend (`crates/nabu-ui/`) has been removed from main;
+  its source is preserved on the `freeze/dioxus-rust-frontend` branch.
+- Phase 0 migration (Dioxus): **Complete** (historical — see `freeze/dioxus-rust-frontend` branch).
+  The frontend has since been rewritten in React + Vite (`ui-react/`). The Dioxus
+  component migration patterns below are preserved for historical reference.
   - `app.rs` — all view modes wired (Settings, Inbox, Templates, History, Recovery, Statistics)
   - `settings_panel.rs` — 15 tabs, `AppSettings` struct, IPC persistence, 6 setting helper functions
   - `recovery/*` (session, save_status, diff_view, recovery_banner, version_history, recovery_manager) — full Dioxus migration
@@ -29,7 +34,10 @@ src-tauri/            — Tauri commands & settings
   - `statistics.rs` — vault metrics, growth histogram, tags, recently modified/created
   - `template_editor.rs` / `template_picker.rs` — backend-wired template management
 
-## Dioxus 0.6.3 Migration Patterns
+## Dioxus 0.6.3 Migration Patterns (historical reference)
+
+> These mapping notes are preserved from the Dioxus migration (Phase W2) for
+> historical context. The current frontend uses React + TypeScript (`ui-react/`).
 
 Key type mappings (LePtOS → Dioxus):
 - `RwSignal<T>` → `Signal<T>` (with `mut` binding for `set`/`with_mut` which take `&mut self`)

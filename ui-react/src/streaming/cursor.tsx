@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // streaming/cursor — Animated cursor indicator for active streams
 //
-// Mirrors: crates/nabu-ui/src/components/streaming/cursor.rs
+// Mirrors: ui-react/src/components/streaming/cursor.rs
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { type HTMLAttributes } from "react";

@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // NavContext — navigation state (view mode, sidebars, overlays, discovery data)
 //
-// Mirrors: crates/nabu-ui/src/components/navigation::state::NavContext
+// Mirrors: ui-react/src/components/navigation::state::NavContext
 // Contract: read-only spec consumed by Wave 3 view components.
 // ──────────────────────────────────────────────────────────────────────────────
 

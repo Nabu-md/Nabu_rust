@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // InboxMetadataSidebar.tsx — editable metadata for the previewed item
 //
-// Mirrors: crates/nabu-ui/src/components/inbox.rs (`InboxMetadataSidebar`)
+// Mirrors: ui-react/src/components/inbox.rs (`InboxMetadataSidebar`)
 //
 // Wires `inbox_edit_metadata` + `inbox_move` IPC commands.  Collapsible so it
 // only consumes vertical space when in use.

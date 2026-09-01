@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // streaming/indicator — Lightweight streaming status indicator
 //
-// Mirrors: crates/nabu-ui/src/components/streaming/indicator.rs
+// Mirrors: ui-react/src/components/streaming/indicator.rs
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { type HTMLAttributes } from "react";

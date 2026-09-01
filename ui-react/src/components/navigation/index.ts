@@ -1,7 +1,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // navigation/index — barrel export for all navigation components
 //
-// Mirrors: crates/nabu-ui/src/components/navigation/mod.rs
+// Mirrors: ui-react/src/components/navigation/mod.rs
 // ──────────────────────────────────────────────────────────────────────────────
 
 export { ViewSwitcher } from "./view_switcher";
